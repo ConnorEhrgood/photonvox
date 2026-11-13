@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Put one domain's rows back exactly as they were in a pg_dump (the takeover's rollback, ARCHITECTURE §17.6). Runs ON the engine, as root.
+#   restore_domain.sh dump <file>                           a fresh dump of the FusionPBX database (the rollback's source)
 #   restore_domain.sh checksum <domain name>                one fingerprint per table of the domain's rows (compare before and after)
 #   restore_domain.sh restore  <dump file> <domain name>   the domain's rows in the tables PhotonVox may write, back to the dump, in ONE transaction
 # Only the tables PhotonVox's write role can change are touched (extensions, voicemail boxes, numbers, menus and their options, ring groups and
@@ -26,6 +27,8 @@ case "${1:-}" in
   checksum)
     D=$(domain_uuid fusionpbx "$2"); [ -n "$D" ] || { echo "no domain $2" >&2; exit 1; }
     checksum fusionpbx "$D" ;;
+  dump)       # a fresh dump of the whole FusionPBX database (root only, mode 600), with its size and sha256
+    umask 077; ( cd / && runuser -u postgres -- pg_dump -Fc fusionpbx ) > "$2"; ls -l "$2"; sha256sum "$2" ;;
   restore)
     DUMP=$2; NAME=$3
     D=$(domain_uuid fusionpbx "$NAME"); [ -n "$D" ] || { echo "no domain $NAME" >&2; exit 1; }
@@ -48,5 +51,5 @@ case "${1:-}" in
     pg -d fusionpbx -f "$WORK/restore.sql"
     rm -f /var/cache/fusionpbx/dialplan.* "/var/cache/fusionpbx/directory."*"@$NAME" /var/cache/fusionpbx/configuration.ivr.conf.*
     echo "the engine's rows of the domain now:"; checksum fusionpbx "$D" ;;
-  *) echo "usage: restore_domain.sh checksum <domain> | restore <dump> <domain>" >&2; exit 2 ;;
+  *) echo "usage: restore_domain.sh dump <file> | checksum <domain> | restore <dump> <domain>" >&2; exit 2 ;;
 esac

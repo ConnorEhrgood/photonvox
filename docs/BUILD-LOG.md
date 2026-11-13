@@ -477,3 +477,10 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   real login from the Vultr host (reads, may update extensions, may not update domains, refused a SIP password). No vox-agent: not needed
   for a no-op publish. Undo: `gate-rw.sh undo` on CT 600. (Writing step 3, one read-only command ran on the Vultr host before its go: a
   look for a deploy marker; it changed nothing. Said so to the operator.)
+- **Steps 4 and 5 written for review** (`~/vox-takeover/step4.sh`, `step5.sh`): 4 = the export again (the operator added an "Emergency-911"
+  route by hand, Connor's approval; the takeover leaves it as a hand-built extra) and the compare again, then the live engine registered in
+  PhotonVox (its own HTC gateway, no vox-agent, the write role) and HUEPC adopted through `app.manage` (reads only, proves the no-op). 5 = a
+  fresh dump (also to the NAS), the domain's fingerprints, the first publish, the fingerprints compared and the drift check, the test calls
+  placed by FreeSWITCH (`engine/live/test_calls.sh`: extension to extension, the menu, one carrier loop to the main number; never 911, 933 or
+  9911, refused by the script), the 911 route read; the rollback (R0 PhotonVox only, R1 the domain's rows from the dump, R2 the vzdump with
+  Connor) written in the file before anything runs.

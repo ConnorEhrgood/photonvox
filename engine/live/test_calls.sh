@@ -19,7 +19,7 @@ place() {   # <uuid> <channel variables> <loopback target>: one variable block (
 }
 finish() { fs "uuid_kill $1" > /dev/null || true; sleep 2; echo "   after hanging up: $(fs 'show channels count' | grep -o '[0-9]* total')"; }
 before=$(fs 'show channels count' | grep -o '[0-9]* total')
-echo "   channels before: $before"
+case "${1:-}" in internal|menu|loop) echo "   channels before: $before" ;; esac
 
 case "${1:-}" in
   internal)
@@ -39,5 +39,11 @@ case "${1:-}" in
     echo "== $FROM calls …${NUM: -4} out through the carrier, and it comes back in"
     place "$U" "origination_caller_id_number=$FROM,origination_caller_id_name='PhotonVox test',outbound_caller_id_number=$CID,outbound_caller_id_name='PhotonVox test'" "loopback/$NUM/$D"
     sleep 8; legs | sed -E "s/$NUM/…${NUM: -4}/g; s/$CID/…${CID: -4}/g"; finish "$U" ;;
-  *) echo "usage: test_calls.sh internal <domain> <from> <to> | menu <domain> <menu> | loop <domain> <from> <10-digit number> <caller ID>" >&2; exit 2 ;;
+  state)      # read-only: registrations of the domain, channels, PhotonConsole's status shim
+    echo "   registrations of the domain: $(fs 'show registrations' | grep -c "$2" || true); channels: $before; shim: $(systemctl is-active photon-fpbx-shim 2>/dev/null || true)" ;;
+  records)    # read-only: the domain's call records of the last 10 minutes (numbers shortened to their last four digits)
+    ( cd / && runuser -u postgres -- psql -d fusionpbx -tA -F ' | ' -c "select start_stamp::time(0), direction, right(coalesce(caller_id_number, ''), 4), right(coalesce(destination_number, ''), 4), hangup_cause from v_xml_cdr where domain_name = '$2' and start_stamp > now() - interval '10 minutes' order by start_stamp" ) | sed 's/^/   /' ;;
+  route911)   # read-only: the domain's dial plans that mention 911 (never called), with a fingerprint of each
+    ( cd / && runuser -u postgres -- psql -d fusionpbx -tA -F ' | ' -c "select dialplan_name, dialplan_order, dialplan_enabled, md5(dialplan_xml) from v_dialplans p join v_domains d using (domain_uuid) where d.domain_name = '$2' and dialplan_xml ~ '911' order by dialplan_order" ) | sed 's/^/   /' ;;
+  *) echo "usage: test_calls.sh internal <domain> <from> <to> | menu <domain> <menu> | loop <domain> <from> <10-digit number> <caller ID> | state|records|route911 <domain>" >&2; exit 2 ;;
 esac
