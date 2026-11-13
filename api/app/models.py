@@ -276,3 +276,14 @@ class SpeechAudio(Base):
     characters: Mapped[int] = mapped_column(Integer)
     audio: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class HeldNumber(Base):
+    """The numbers Photon holds (from its carriers) and which organization each is assigned to; a phone system may use only its own (security
+    review C2: without this a document could claim another organization's number, caller ID or 911 call-back number). Staff assign them."""
+    __tablename__ = "held_number"
+    number: Mapped[str] = mapped_column(String(16), primary_key=True)                # E.164
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), index=True)   # None: Photon's stock
+    carrier: Mapped[str] = mapped_column(String(40), default="htc")
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

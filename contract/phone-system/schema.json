@@ -18,7 +18,7 @@
         },
         "block": {
           "items": {
-            "pattern": "^\\+[1-9][0-9]{0,14}$",
+            "pattern": "^\\+(1[2-9][0-9]{0,9}|[2-9][0-9]{0,14})$",
             "type": "string"
           },
           "maxItems": 500,
@@ -45,6 +45,7 @@
         "name": {
           "maxLength": 100,
           "minLength": 1,
+          "pattern": "^[^<>%\\x00-\\x1f\\x7f]+$",
           "title": "Name",
           "type": "string"
         },
@@ -52,6 +53,7 @@
           "anyOf": [
             {
               "maxLength": 320,
+              "pattern": "^[^@\\s<>\\\"'%,;]+@[^@\\s<>\\\"'%,;]+\\.[^@\\s<>\\\"'%,;]+$",
               "type": "string"
             },
             {
@@ -126,8 +128,10 @@
       "properties": {
         "members": {
           "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
             "type": "string"
           },
+          "maxItems": 200,
           "minItems": 1,
           "title": "Members",
           "type": "array"
@@ -220,6 +224,7 @@
         "greeting": {
           "maxLength": 500,
           "minLength": 1,
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
           "title": "Greeting",
           "type": "string"
         },
@@ -287,6 +292,7 @@
       "description": "A number the organization holds and what it rings. Without `closed`, it rings `open` at all hours.",
       "properties": {
         "site": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Site",
           "type": "string"
         },
@@ -354,6 +360,7 @@
       "description": "Per site: its 911 (the emergency location and the number registered at it, both locked: \u00a711), what its calls show, its hours.",
       "properties": {
         "emergency_location": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
           "title": "Emergency Location",
           "type": "string"
         },
@@ -448,6 +455,7 @@
       "additionalProperties": false,
       "properties": {
         "user": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
           "title": "User",
           "type": "string"
         }
@@ -462,6 +470,7 @@
       "additionalProperties": false,
       "properties": {
         "voicemail": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
           "title": "Voicemail",
           "type": "string"
         }
@@ -478,10 +487,12 @@
         "name": {
           "maxLength": 100,
           "minLength": 1,
+          "pattern": "^[^<>%\\x00-\\x1f\\x7f]+$",
           "title": "Name",
           "type": "string"
         },
         "site": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Site",
           "type": "string"
         },
@@ -516,6 +527,7 @@
           "anyOf": [
             {
               "maxLength": 320,
+              "pattern": "^[^@\\s<>\\\"'%,;]+@[^@\\s<>\\\"'%,;]+\\.[^@\\s<>\\\"'%,;]+$",
               "type": "string"
             },
             {
@@ -549,15 +561,21 @@
       "type": "string"
     },
     "sites": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Site"
+      "maxProperties": 200,
+      "patternProperties": {
+        "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$": {
+          "$ref": "#/$defs/Site"
+        }
       },
       "title": "Sites",
       "type": "object"
     },
     "hours": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Hours"
+      "maxProperties": 50,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_-]{0,39}$": {
+          "$ref": "#/$defs/Hours"
+        }
       },
       "title": "Hours",
       "type": "object"
@@ -566,33 +584,46 @@
       "additionalProperties": {
         "$ref": "#/$defs/Number"
       },
+      "maxProperties": 1000,
       "title": "Numbers",
       "type": "object"
     },
     "menus": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Menu"
+      "maxProperties": 100,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_-]{0,39}$": {
+          "$ref": "#/$defs/Menu"
+        }
       },
       "title": "Menus",
       "type": "object"
     },
     "groups": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Group"
+      "maxProperties": 200,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_-]{0,39}$": {
+          "$ref": "#/$defs/Group"
+        }
       },
       "title": "Groups",
       "type": "object"
     },
     "users": {
-      "additionalProperties": {
-        "$ref": "#/$defs/User"
+      "maxProperties": 2000,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_-]{0,39}$": {
+          "$ref": "#/$defs/User"
+        }
       },
       "title": "Users",
       "type": "object"
     },
     "boxes": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Box"
+      "maxProperties": 100,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_-]{0,39}$": {
+          "$ref": "#/$defs/Box"
+        }
       },
       "title": "Boxes",
       "type": "object"

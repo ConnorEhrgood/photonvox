@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../auth/TenantContext'
+import { useLoad } from '../lib/useLoad'
 import type { Draft, DraftNumber } from '../api/types'
 import { TargetPicker, targetText, targetValue, toTarget, useDraft, useSiteNames } from '../components/draft'
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui'
@@ -63,6 +66,10 @@ function NumberForm({ draft, names, number, saving, error, onClose, onSave, onRe
 }) {
   const was = draft.numbers?.[number]
   const sites = Object.keys(draft.sites ?? {})
+  const { api } = useAuth()
+  const { current } = useTenant()
+  const assigned = useLoad(() => api.get<{ number: string }[]>(`/tenants/${current!.id}/numbers`), [api, current?.id])
+  const free = (assigned.data ?? []).map((n) => n.number).filter((n) => n === number || !draft.numbers?.[n])
   const [num, setNum] = useState(number)
   const [site, setSite] = useState(was?.site ?? sites[0])
   const [open, setOpen] = useState(targetValue(was?.open))
@@ -75,7 +82,11 @@ function NumberForm({ draft, names, number, saving, error, onClose, onSave, onRe
     <Modal title={number ? `Change ${number}` : 'Add a number'} onClose={onClose}>
       <div className="ph-field">
         <label htmlFor="pv-num">Number</label>
-        <input id="pv-num" className="ph-input" inputMode="tel" value={num} onChange={(e) => setNum(e.target.value)} aria-invalid={!!num && !E164.test(e164)} />
+        <select id="pv-num" className="ph-input" value={num} onChange={(e) => setNum(e.target.value)}>
+          <option value="">Choose…</option>
+          {free.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        {assigned.data && free.length === 0 && <small className="ph-hint">Every number Photon has assigned to this customer is in use. Ask Photon for another.</small>}
       </div>
       <div className="ph-field">
         <label htmlFor="pv-num-site">Site (its 911 address and caller ID)</label>

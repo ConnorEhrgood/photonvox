@@ -179,7 +179,7 @@ def test_the_block_route_comes_right_after_911_and_is_locked():
 @pytest.mark.parametrize("digits", ["911", "933", "9911", "9933", "988", "711", "211", "311", "511", "811"])
 def test_no_block_pattern_ever_matches_an_emergency_or_service_code(digits):
     d = copy.deepcopy(SAMPLE)
-    d["calling"]["blocking"] = {"block": ["+1", "+9", "+91", "+1911"], "allow": []}
+    d["calling"]["blocking"] = {"block": ["+12", "+9", "+91", "+1911"], "allow": []}
     b = route(plan(d), "block")
     assert not any(re.match(c["pattern"], digits) for c in b["categories"])
     assert routed(plan(d), digits)[0] in ("emergency", "service")

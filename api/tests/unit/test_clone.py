@@ -16,7 +16,8 @@ TARGET = {"version": 1, "sites": {"t1": {}}, "numbers": {"+17245550199": {}}, "u
 def test_flows_hours_and_policy_are_copied_and_this_customers_sites_numbers_and_people_stay():
     d = clone(SOURCE, TARGET)
     assert d["sites"] == {"t1": {}} and d["numbers"] == {"+17245550199": {}} and d["users"] == TARGET["users"]
-    assert d["hours"] == SOURCE["hours"] and d["calling"] == {"national": True} and d["boxes"] == SOURCE["boxes"] and d["features"] == {"eavesdrop": False}
+    assert d["hours"] == SOURCE["hours"] and d["calling"] == {"national": True} and d["features"] == {"eavesdrop": False}
+    assert d["boxes"] == {"general": {"name": "General", "email": None}}           # without the other organization's addresses
 
 
 def test_people_are_matched_by_extension_and_the_unmatched_are_left_out_or_left_for_the_integrator():
@@ -28,4 +29,4 @@ def test_people_are_matched_by_extension_and_the_unmatched_are_left_out_or_left_
 
 def test_an_empty_source_clears_flows_and_keeps_the_rest():
     d = clone({"version": 1}, TARGET)
-    assert d["groups"] == {} and d["menus"] == {} and "hours" not in d and d["users"] == TARGET["users"]
+    assert d["groups"] == {} and d["menus"] == {} and "hours" not in d and d["users"] == TARGET["users"] and d["boxes"] == {}

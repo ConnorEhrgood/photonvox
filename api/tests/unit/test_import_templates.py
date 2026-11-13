@@ -26,6 +26,8 @@ def test_a_header_names_the_columns_in_any_order_with_common_aliases():
     ("Dee,911", "'911' cannot be an extension"), ("Dee,9001", "'9001' cannot be an extension"), ("Dee,100", "extension 100 is taken"),
     ("Dee,,,555-0100", "'555-0100' is not a North American number"), ("Dee,,,724-555-0199", "+17245550199 is not one of the organization's numbers"),
     ("Dee,,,,Warehouse", "no site called 'Warehouse'"),
+    ("<b>Dee</b>", "the name has characters that cannot be used"), ("Dee 100%", "the name has characters that cannot be used"),
+    ("Dee,,dee@example.com%0a", "'dee@example.com%0a' is not an email address"),
 ])
 def test_each_problem_is_said_in_words(line, problem):
     assert any(p.startswith(problem) for p in importer.preview(line, DOC, "s1", SITES)[0]["problems"])
@@ -46,9 +48,10 @@ def test_apply_adds_only_good_rows_and_joins_the_group_once():
 
 @pytest.mark.parametrize("key", list(templates.TEMPLATES))
 def test_every_template_makes_a_valid_document(key):
-    d = templates.build(key, "s1", "main", "+17245550100", {"u-ann": {"name": "Ann", "site": "s1", "extension": "100"}})
+    site = "11111111-1111-4111-8111-111111111111"
+    d = templates.build(key, site, "main", "+17245550100", {"u-ann": {"name": "Ann", "site": site, "extension": "100"}})
     PhoneSystem.model_validate(d)
-    assert d["sites"]["s1"]["emergency_number"] == "+17245550100" and d["numbers"]["+17245550100"]["closed"] == {"voicemail": "general"}
+    assert d["sites"][site]["emergency_number"] == "+17245550100" and d["numbers"]["+17245550100"]["closed"] == {"voicemail": "general"}
 
 
 def test_a_row_without_a_name_or_with_a_bad_email_is_refused():

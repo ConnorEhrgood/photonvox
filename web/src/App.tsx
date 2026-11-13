@@ -8,12 +8,13 @@ import { NotForYou, PlatformHub, SettingsHub, SettingsIndex } from './pages/Hubs
 import { CallbackPage, LoginPage } from './pages/Login'
 import { CallFlowsPage } from './pages/CallFlows'
 import { Emergency911Page } from './pages/Emergency911'
+import { NumberStockPage } from './pages/NumberStock'
 import { NumbersPage } from './pages/Numbers'
 import { OverviewPage } from './pages/Overview'
 import { PlatformOrganizationsPage } from './pages/Platform'
 import { SitesPage } from './pages/Sites'
 import {
-  AlertsPage, AuditPage, ConsolePage, GdmsPage, InstancesPage, MonitorPage, MyPhonePage, NumberStockPage, PhonesPage,
+  AlertsPage, AuditPage, ConsolePage, GdmsPage, InstancesPage, MonitorPage, MyPhonePage, PhonesPage,
   TemplatesPage, UpstreamsPage,
 } from './pages/Soon'
 import { TeamPage } from './pages/Team'

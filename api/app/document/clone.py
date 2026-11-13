@@ -24,6 +24,8 @@ def clone(source: Mapping[str, Any], target: Mapping[str, Any]) -> Dict[str, Any
 
     out: Dict[str, Any] = {k: v for k, v in target.items() if k not in COPIED + ("groups", "menus")}
     out.update({k: source[k] for k in COPIED if k in source})
+    # Mailboxes come without the other organization's email addresses (review L7): this customer fills in its own.
+    out["boxes"] = {k: {**b, "email": None} for k, b in source.get("boxes", {}).items()} if "boxes" in source else target.get("boxes", {})
     groups = {}
     for key, g in source.get("groups", {}).items():
         members = [m for m in (person(x) for x in g["members"]) if m]

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import re
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -12,7 +13,8 @@ from app import audit, crypto, emergency
 from app.engine import service
 from app.db import SystemSession, get_db
 from app.deps import Who, platform_admin
-from app.models import CarrierRequest, EmergencyLocation, PbxInstance, SyncState, Tenant, utcnow
+from app.document.model import E164
+from app.models import CarrierRequest, EmergencyLocation, HeldNumber, PbxInstance, SyncState, Tenant, utcnow
 
 router = APIRouter(prefix="/platform")
 
@@ -200,3 +202,48 @@ def apply_instance(instance_id: uuid.UUID, who: Who = Depends(platform_admin), d
                  target_id=i.id, **out)
     db.commit()
     return out
+
+
+# ---- held numbers (security review C2): Photon's stock, and which organization each is assigned to ----
+
+class NumberIn(BaseModel):
+    tenant_id: Optional[uuid.UUID] = None      # None: Photon's stock
+    carrier: str = Field("htc", pattern=r"^[a-z0-9-]{1,40}$")
+    note: str = Field("", max_length=200)
+
+
+@router.get("/numbers")
+def held_numbers(who: Who = Depends(platform_admin), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    rows = db.execute(select(HeldNumber, Tenant.name).outerjoin(Tenant, Tenant.id == HeldNumber.tenant_id).order_by(HeldNumber.number)).all()
+    return [{"number": n.number, "tenant_id": str(n.tenant_id) if n.tenant_id else None, "organization": name, "carrier": n.carrier, "note": n.note}
+            for n, name in rows]
+
+
+@router.put("/numbers/{number}")
+def put_number(number: str, body: NumberIn, who: Who = Depends(platform_admin)) -> Dict[str, Any]:
+    """Add a number to Photon's stock, or assign it to an organization (or back to the stock). As the system: only staff assign numbers."""
+    if not re.match(E164, number):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "bad_number", "detail": "A North American number in +1 form."})
+    with SystemSession() as s:
+        n = s.get(HeldNumber, number) or HeldNumber(number=number)
+        before = n.tenant_id
+        n.tenant_id, n.carrier, n.note = body.tenant_id, body.carrier, body.note
+        s.add(n)
+        audit.record(s, actor_id=who.id, actor_label=who.label, actor_source="platform", action="number.assigned", tenant_id=body.tenant_id or before,
+                     target_type="number", target_id=number, before=str(before) if before else None, after=str(body.tenant_id) if body.tenant_id else None)
+        s.commit()
+        return {"number": number, "tenant_id": str(n.tenant_id) if n.tenant_id else None}
+
+
+@router.delete("/numbers/{number}", status_code=204)
+def release_number(number: str, who: Who = Depends(platform_admin)) -> None:
+    """Give a number back to the carrier: only once it is assigned to no organization."""
+    with SystemSession() as s:
+        n = s.get(HeldNumber, number)
+        if n is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        if n.tenant_id is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"code": "assigned", "detail": "Unassign it from its organization first."})
+        s.delete(n)
+        audit.record(s, actor_id=who.id, actor_label=who.label, actor_source="platform", action="number.released", target_type="number", target_id=number)
+        s.commit()

@@ -3,6 +3,7 @@ versions and undo, templates and bulk import, and the sites' emergency addresses
 §8, §11a). One phone system per organization (decision 4)."""
 from __future__ import annotations
 
+import re
 import secrets
 import string
 import uuid
@@ -17,11 +18,11 @@ from app import audit
 from app.compiler.compile import CompileError, compile_plan
 from app.db import SystemSession, get_db
 from app.deps import Ctx, load_ctx, require
-from app.document import clone as cloning, importer, templates
+from app.document import clone as cloning, importer, policy, templates
 from app.document.model import PhoneSystem as Document
 from app.document.validate import problems
 from app.engine import service
-from app.models import (CarrierRequest, EmergencyLocation, EmergencyNumber, PbxInstance, PhoneSystem, PhoneSystemVersion, Tenant, utcnow)
+from app.models import (CarrierRequest, EmergencyLocation, EmergencyNumber, HeldNumber, PbxInstance, PhoneSystem, PhoneSystemVersion, Tenant, utcnow)
 from app.routes.tenants import visible_sites
 
 router = APIRouter(prefix="/tenants/{tenant_id}")
@@ -48,8 +49,17 @@ def _who(ctx: Ctx) -> Dict[str, Any]:
 
 
 def _problems(db: Session, ps: PhoneSystem, doc: Document) -> List[Dict[str, str]]:
-    found = problems(doc, service.context(db, ps, _instance(ps)).validated_locations)
+    ctx = service.context(db, ps, _instance(ps))
+    found = problems(doc, ctx.validated_locations, ctx.assigned_numbers)
     return [{"path": p.path, "code": p.code, "message": p.message} for p in found]
+
+
+UUIDS = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _shown(x: Optional[str]) -> Optional[str]:
+    """A test call's finding without the engine's gateway ids (security review L4)."""
+    return UUIDS.sub("…", x) if x else x
 
 
 def _version(v: PhoneSystemVersion) -> Dict[str, Any]:
@@ -57,7 +67,8 @@ def _version(v: PhoneSystemVersion) -> Dict[str, Any]:
     return {"number": v.number, "state": v.state, "note": v.note, "error": v.error, "created_by": v.created_by_label,
             "created_at": v.created_at.isoformat(), "published_at": v.published_at.isoformat() if v.published_at else None,
             "checks": {"passed": sum(1 for r in results if r["ok"]), "total": len(results),
-                       "failed": [{"kind": r["kind"], "number": r["number"], "expected": r["expect"], "got": r["got"]} for r in results if not r["ok"]]}}
+                       "failed": [{"kind": r["kind"], "number": r["number"], "expected": [_shown(x) for x in r["expect"]], "got": _shown(r["got"])}
+                                  for r in results if not r["ok"]]}}
 
 
 def _summary(db: Session, ps: PhoneSystem) -> Dict[str, Any]:
@@ -99,6 +110,14 @@ class DraftIn(BaseModel):
     document: Dict[str, Any]
 
 
+def _allowed(ctx: Ctx, old_raw: Dict[str, Any], new: Document) -> None:
+    """Refuse a change this person may not make (app/document/policy.py: owners open up calling; site-limited people stay in their sites)."""
+    reason = policy.refusal(Document.model_validate(old_raw or {"version": 1}), new, ctx.can, ctx.grant.reach_all,
+                            {str(s) for s in ctx.grant.reach_sites})
+    if reason:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "not_allowed_change", "detail": reason})
+
+
 def _document(raw: Dict[str, Any]) -> Document:
     try:
         return Document.model_validate(raw)
@@ -112,6 +131,7 @@ def save_draft(body: DraftIn, ctx: Ctx = Depends(require(BUILD)), db: Session = 
     """Save the draft. Problems (an unvalidated address, a dangling reference) do not stop saving; they stop publishing."""
     ps = _ps(db, ctx)
     doc = _document(body.document)
+    _allowed(ctx, ps.draft, doc)
     ps.draft, ps.draft_updated_at = doc.model_dump(mode="json", exclude_defaults=False), utcnow()
     audit.record(db, **_who(ctx), action="phone_system.draft_saved", target_type="phone_system", target_id=ps.id)
     db.commit()
@@ -157,6 +177,7 @@ def restore(number: int, ctx: Ctx = Depends(require(BUILD)), db: Session = Depen
     old = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id, PhoneSystemVersion.number == number)).scalar_one_or_none()
     if old is None or old.state not in ("ready", "superseded"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_version", "detail": f"There is no published version {number}."})
+    _allowed(ctx, ps.draft, _document(old.document))
     out = _queue(db, ctx, ps, old.document, f"restored from version {number}")
     ps.draft, ps.draft_updated_at = old.document, utcnow()
     db.commit()
@@ -193,6 +214,7 @@ def apply_template(body: TemplateIn, ctx: Ctx = Depends(require(BUILD)), db: Ses
     if not users:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "no_users", "detail": "Add at least one user (one per line).", "rows": rows})
     doc = _document(templates.build(body.template, body.site_id, body.location, number, users))
+    _allowed(ctx, ps.draft, doc)
     ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
     audit.record(db, **_who(ctx), action="phone_system.template_applied", target_type="phone_system", target_id=ps.id, template=body.template,
                  users=len(users))
@@ -213,6 +235,7 @@ def clone_draft(body: CloneIn, ctx: Ctx = Depends(require(BUILD)), db: Session =
     if other is None or not other.can(VIEW) or source is None or body.from_tenant_id == ctx.tenant_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_source", "detail": "There is no such phone system to copy from."})
     doc = _document(cloning.clone(source.draft, ps.draft))
+    _allowed(ctx, ps.draft, doc)
     ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
     audit.record(db, **_who(ctx), action="phone_system.cloned", target_type="phone_system", target_id=ps.id, source=str(body.from_tenant_id))
     db.commit()
@@ -238,6 +261,7 @@ def import_users(body: ImportIn, ctx: Ctx = Depends(require(BUILD)), db: Session
     out: Dict[str, Any] = {"rows": rows, "ready": sum(1 for r in rows if not r["problems"])}
     if body.apply:
         doc = _document(importer.apply(ps.draft, rows, body.group))
+        _allowed(ctx, ps.draft, doc)
         ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
         audit.record(db, **_who(ctx), action="phone_system.users_imported", target_type="phone_system", target_id=ps.id, users=out["ready"])
         db.commit()
@@ -247,11 +271,14 @@ def import_users(body: ImportIn, ctx: Ctx = Depends(require(BUILD)), db: Session
 
 # ---- emergency addresses and numbers' state with the carrier ----
 
+TEXT = r"^[^\x00-\x1f\x7f<>]*$"      # no line breaks or control characters: these reach the carrier's 911 email (review M2)
+
+
 class LocationIn(BaseModel):
     key: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,39}$")
-    street: str = Field(min_length=3, max_length=200)
-    unit: str = Field("", max_length=60)
-    city: str = Field(min_length=2, max_length=100)
+    street: str = Field(min_length=3, max_length=200, pattern=TEXT)
+    unit: str = Field("", max_length=60, pattern=TEXT)
+    city: str = Field(min_length=2, max_length=100, pattern=TEXT)
     state: str = Field(pattern=r"^[A-Z]{2}$")
     zip: str = Field(pattern=r"^[0-9]{5}(-[0-9]{4})?$")
 
@@ -285,3 +312,10 @@ def emergency(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) 
                          "confirmed_at": n.confirmed_at.isoformat() if n.confirmed_at else None} for n in nums],
             "requests": [{"id": str(r.id), "status": r.status, "items": r.items, "reference": r.reference, "sent_at": r.sent_at.isoformat() if r.sent_at else None}
                          for r in reqs]}
+
+
+@router.get("/numbers")
+def assigned_numbers(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> List[Dict[str, str]]:
+    """The numbers Photon has assigned to this organization: the only ones its phone system may use (review C2)."""
+    return [{"number": n.number, "carrier": n.carrier} for n in
+            db.execute(select(HeldNumber).where(HeldNumber.tenant_id == ctx.tenant_id).order_by(HeldNumber.number)).scalars()]

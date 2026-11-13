@@ -14,7 +14,8 @@ from app.document.validate import SERVICE_CODES
 COLUMNS = ("name", "extension", "email", "direct_number", "site")
 ALIASES = {"full name": "name", "ext": "extension", "e-mail": "email", "direct": "direct_number", "did": "direct_number",
            "direct number": "direct_number", "number": "direct_number", "location": "site"}
-EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL = re.compile(r"^[^@\s<>\"'%,;]+@[^@\s<>\"'%,;]+\.[^@\s<>\"'%,;]+$")     # as the document's (app/document/model.py)
+NAME_OK = re.compile(r"^[^<>%\x00-\x1f\x7f]{1,100}$")
 
 
 def _number(raw: str) -> str:
@@ -56,6 +57,8 @@ def preview(text: str, document: Mapping[str, Any], default_site: str, sites: Ma
         problems: List[str] = []
         if not r.get("name"):
             problems.append("no name")
+        elif not NAME_OK.match(r["name"]):
+            problems.append("the name has characters that cannot be used (<, >, %) or is over 100 characters")
         site = default_site
         if r.get("site"):
             site = r["site"] if r["site"] in sites else by_name.get(r["site"].lower(), "")

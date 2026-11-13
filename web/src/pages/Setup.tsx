@@ -16,6 +16,7 @@ export function SetupWizard({ onClose, onDone }: { onClose: () => void; onDone: 
   const base = `/tenants/${current!.id}`
   const sites = useLoad(() => api.get<Site[]>(`${base}/sites`), [api, base])
   const templates = useLoad(() => api.get<Template[]>(`${base}/phone-system/templates`), [api, base])
+  const assigned = useLoad(() => api.get<{ number: string }[]>(`${base}/numbers`), [api, base])
   const [step, setStep] = useState(0)
   const [site, setSite] = useState('')
   const [address, setAddress] = useState(EMPTY)
@@ -82,8 +83,12 @@ export function SetupWizard({ onClose, onDone }: { onClose: () => void; onDone: 
         <>
           <div className="ph-field">
             <label htmlFor="pv-number">Main number</label>
-            <input id="pv-number" className="ph-input" inputMode="tel" placeholder="(724) 555-0100" value={number} onChange={(e) => setNumber(e.target.value)} />
+            <select id="pv-number" className="ph-input" value={number} onChange={(e) => setNumber(e.target.value)}>
+              <option value="">Choose…</option>
+              {(assigned.data ?? []).map((n) => <option key={n.number} value={n.number}>{n.number}</option>)}
+            </select>
           </div>
+          {assigned.data?.length === 0 && <p className="ph-error">Photon has not assigned this customer any numbers yet: ask Photon for one (from stock or ported).</p>}
           <p className="ph-hint">One of this customer’s numbers. It is also the number a 911 call from the site shows, so the dispatcher can call back.</p>
           <fieldset className="ph-field">
             <legend>Template</legend>

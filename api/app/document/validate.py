@@ -65,10 +65,15 @@ def _loops(doc: PhoneSystem) -> List[Problem]:
     return out
 
 
-def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str]]) -> List[Problem]:
-    """Every problem in the document, sorted by path. `validated_locations`: site id -> the emergency locations validated for that site."""
+def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str]], assigned: Optional[AbstractSet[str]] = None) -> List[Problem]:
+    """Every problem in the document, sorted by path. `validated_locations`: site id -> the emergency locations validated for that site.
+    `assigned`: the numbers Photon has assigned to this organization (the held-number inventory); a document may only use those (security
+    review C2). Every caller that publishes passes it; None is for checking a document's own consistency alone."""
     out: List[Problem] = []
     held = set(doc.numbers)
+    if assigned is not None:
+        for number in sorted(held - set(assigned)):
+            out.append(Problem(f"numbers.{number}", "number_not_assigned", "This number is not one of the organization's: Photon assigns numbers."))
 
     for sid, site in doc.sites.items():
         p = f"sites.{sid}"

@@ -7,6 +7,7 @@ answer, and the numbers follow it. A number is unconfirmed from the moment its a
 """
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -18,9 +19,14 @@ from app.config import settings
 from app.models import CarrierRequest, EmergencyLocation, EmergencyNumber, PhoneSystem, Tenant, utcnow
 
 
+def _clean(v: Any) -> str:
+    """One line of printable text: an address can never add lines to the carrier's email (review M2; the API refuses them too)."""
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", str(v or ""))
+
+
 def address_line(a: Mapping[str, Any]) -> str:
-    unit = f", {a['unit']}" if a.get("unit") else ""
-    return f"{a.get('street', '')}{unit}, {a.get('city', '')}, {a.get('state', '')} {a.get('zip', '')}".strip()
+    unit = f", {_clean(a['unit'])}" if a.get("unit") else ""
+    return f"{_clean(a.get('street'))}{unit}, {_clean(a.get('city'))}, {_clean(a.get('state'))} {_clean(a.get('zip'))}".strip()
 
 
 def sync_numbers(db: Session, ps: PhoneSystem, document: Mapping[str, Any], carrier: str = "htc") -> Optional[CarrierRequest]:
@@ -32,9 +38,15 @@ def sync_numbers(db: Session, ps: PhoneSystem, document: Mapping[str, Any], carr
         site = document["sites"][n["site"]]
         desired[number] = locs[(n["site"], site["emergency_location"])]       # the compiler refused any site without a validated location
     rows = {r.number: r for r in db.execute(select(EmergencyNumber).where(EmergencyNumber.tenant_id == ps.tenant_id)).scalars()}
+    # A number Photon has since assigned to this organization may still carry its former holder's registration: it starts again here.
+    moved = {r.number: r for r in db.execute(select(EmergencyNumber).where(EmergencyNumber.number.in_(list(desired)),
+                                                                           EmergencyNumber.tenant_id != ps.tenant_id)).scalars()}
     items: List[Dict[str, Any]] = []
     for number, loc in sorted(desired.items()):
         row = rows.get(number)
+        if row is None and number in moved:
+            row = moved[number]
+            row.tenant_id, row.location_id, row.confirmed_location_id, row.request_id, row.status = ps.tenant_id, None, None, None, "unconfirmed"
         if row is None:
             row = EmergencyNumber(number=number, tenant_id=ps.tenant_id, carrier=carrier, status="unconfirmed")
             db.add(row)
@@ -77,6 +89,7 @@ def sync_numbers(db: Session, ps: PhoneSystem, document: Mapping[str, Any], carr
 
 def compose(req: CarrierRequest, organization: str) -> Dict[str, str]:
     """The email to Hickory: one line per number, the address as it should be in the 911 records, the request's id to reply about."""
+    organization = _clean(organization)
     lines = []
     for i in req.items:
         what = {"add": "Add", "change": "Change", "remove": "Remove"}[i["action"]]

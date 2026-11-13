@@ -32,7 +32,7 @@ describe('the overview', () => {
       [`GET ${B}/phone-system`]: () => (filled ? PS() : created ? PS({ draft: { version: 1 } }) : NONE.clone()),
       [`POST ${B}/phone-system`]: () => { created = true; return PS({ draft: { version: 1 } }) },
       [`GET ${B}/phone-system/versions`]: [], [`GET ${B}/emergency`]: { locations: [], numbers: [], requests: [] },
-      [`GET ${B}/sites`]: SITES,
+      [`GET ${B}/sites`]: SITES, [`GET ${B}/numbers`]: [{ number: '+17245550100', carrier: 'htc' }],
       [`GET ${B}/phone-system/templates`]: [{ key: 'ring-everyone', name: 'Small office', description: 'Rings everyone.' }, { key: 'front-desk-menu', name: 'Front desk menu', description: 'A menu.' }],
       [`POST ${B}/sites/s1/emergency-locations`]: { id: 'l1', key: 'main', status: 'pending' },
       [`POST ${B}/phone-system/import`]: { rows: [{ line: 1, id: 'u-ada', user: { name: 'Ada', site: 's1', extension: '100' }, problems: [] },
@@ -46,7 +46,7 @@ describe('the overview', () => {
     await userEvent.type(within(dialog).getByLabelText('State'), 'pa')
     await userEvent.type(within(dialog).getByLabelText('ZIP code'), '15222')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Next' }))
-    await userEvent.type(await within(dialog).findByLabelText('Main number'), '(724) 555-0100')
+    await userEvent.selectOptions(await within(dialog).findByLabelText('Main number'), '+17245550100')
     await userEvent.click(within(dialog).getByRole('radio', { name: /Front desk menu/ }))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Next' }))
     await userEvent.type(within(dialog).getByLabelText(/People, one per line/), 'Ada, 100{enter}Bo, 100')
@@ -58,20 +58,21 @@ describe('the overview', () => {
     expect(await screen.findByRole('button', { name: 'Publish' })).toBeEnabled()
     const address = calls.find((c) => c.path.endsWith('/emergency-locations'))!.body
     expect(address).toMatchObject({ key: 'main', street: '100 Main St', state: 'PA', zip: '15222' })
-    expect(calls.find((c) => c.path.endsWith('/draft/template'))!.body).toMatchObject({ template: 'front-desk-menu', site_id: 's1', location: 'main', main_number: '(724) 555-0100' })
+    expect(calls.find((c) => c.path.endsWith('/draft/template'))!.body).toMatchObject({ template: 'front-desk-menu', site_id: 's1', location: 'main', main_number: '+17245550100' })
   })
 
   it('a site that already has an address keeps it, and the wizard can go back', async () => {
     const { calls } = renderApp(<OverviewPage />, { routes: {
       [`GET ${B}/phone-system`]: PS({ draft: { version: 1 } }), [`GET ${B}/phone-system/versions`]: [],
       [`GET ${B}/emergency`]: { locations: [{ id: 'l1', site_id: 's2', key: 'annex', address: {}, status: 'validated', note: '' }], numbers: [], requests: [] },
-      [`GET ${B}/sites`]: SITES, [`GET ${B}/phone-system/templates`]: [],
+      [`GET ${B}/sites`]: SITES, [`GET ${B}/phone-system/templates`]: [], [`GET ${B}/numbers`]: [],
     } })
     await userEvent.click(await screen.findByRole('button', { name: 'Set up from a template' }))
     const dialog = await screen.findByRole('dialog')
     await userEvent.selectOptions(within(dialog).getByLabelText('Site'), 's2')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Next' }))
-    await userEvent.click(await within(dialog).findByRole('button', { name: 'Back' }))
+    expect(await within(dialog).findByText(/has not assigned this customer any numbers yet/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Back' }))
     expect(within(dialog).getByLabelText('Street')).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })

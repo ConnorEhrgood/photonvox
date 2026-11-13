@@ -81,8 +81,8 @@ def test_the_emergency_number_and_caller_id_must_be_held_numbers():
 def test_every_kind_of_dangling_reference_is_named_by_its_path():
     d = doc(**{
         "numbers__+17245550100__open": {"menu": "nope"}, "numbers__+17245550100__closed": {"voicemail": "nobody"},
-        "numbers__+17245550110__site": "elsewhere", "menus__main__options__1": {"group": "ghost"}, "menus__main__timeout": {"user": "ghost"},
-        "groups__office__members": ["u-ada", "ghost"], "groups__annex__then": {"menu": "nope"}, "users__u-cy__site": "elsewhere",
+        "numbers__+17245550110__site": "99999999-9999-4999-8999-999999999999", "menus__main__options__1": {"group": "ghost"}, "menus__main__timeout": {"user": "ghost"},
+        "groups__office__members": ["u-ada", "ghost"], "groups__annex__then": {"menu": "nope"}, "users__u-cy__site": "99999999-9999-4999-8999-999999999999",
         f"sites__{S1}__hours": "missing",
     })
     got = set(codes(d))
@@ -97,7 +97,7 @@ def test_a_number_with_a_closed_outcome_needs_hours():
     assert ("numbers.+17245550100.closed", "no_hours") in codes(d)
     d = doc(**{"numbers__+17245550100__hours": "weekend"})
     assert ("numbers.+17245550100.hours", "unknown_hours") in codes(d)
-    d = doc(**{"numbers__+17245550110__site": "elsewhere", "numbers__+17245550110__closed": {"user": "u-cy"}})
+    d = doc(**{"numbers__+17245550110__site": "99999999-9999-4999-8999-999999999999", "numbers__+17245550110__closed": {"user": "u-cy"}})
     assert ("numbers.+17245550110.closed", "no_hours") in codes(d)       # an unknown site has no hours to lend
 
 

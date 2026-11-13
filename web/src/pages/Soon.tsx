@@ -63,8 +63,3 @@ export const GdmsPage = () => (
   </NotYet>
 )
 
-export const NumberStockPage = () => (
-  <NotYet as="h2" title="Number stock" arrives="Step 3: the builder">
-    <p>Numbers Photon holds ready for new customers, by area code, and when to order more.</p>
-  </NotYet>
-)

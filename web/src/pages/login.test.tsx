@@ -111,7 +111,7 @@ describe('pages for later steps', () => {
     ['Phones', Soon.PhonesPage, 'Step 4'],
     ['Monitor', Soon.MonitorPage, 'Step 5'], ['My phone', Soon.MyPhonePage, 'Step 3'], ['Templates', Soon.TemplatesPage, 'Step 3'], ['Alerts', Soon.AlertsPage, 'Step 5'],
     ['PhotonConsole connection', Soon.ConsolePage, 'Step 5'], ['Audit log', Soon.AuditPage, 'Step 3'], ['Instances', Soon.InstancesPage, 'Step 1'],
-    ['Upstreams', Soon.UpstreamsPage, 'Step 3'], ['GDMS', Soon.GdmsPage, 'Step 4'], ['Number stock', Soon.NumberStockPage, 'Step 3'],
+    ['Upstreams', Soon.UpstreamsPage, 'Step 3'], ['GDMS', Soon.GdmsPage, 'Step 4'],
   ]
   it.each(pages)('%s says it is not built and when it comes', (name, Page, step) => {
     renderApp(<Page />, { routes: {} })

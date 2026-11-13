@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from xml.sax.saxutils import quoteattr
@@ -153,6 +155,7 @@ class _Builder:
                  cont: bool = False, details: Optional[List[Tuple[Any, ...]]] = None) -> str:
         dp = self.uid("dialplan:" + key)
         xml = f'<extension name={quoteattr(name)} continue="{"true" if cont else "false"}" uuid="{dp}">\n{body}</extension>'
+        check_xml(xml)
         self.row("v_dialplans", dialplan_uuid=dp, app_uuid=app_uuid, dialplan_context=context or self.domain, dialplan_name=name,
                  dialplan_number=number, dialplan_continue=cont, dialplan_xml=xml, dialplan_order=order, dialplan_enabled=True,
                  dialplan_description="PhotonVox")
@@ -274,7 +277,7 @@ class _Builder:
         key = g["key"]
         rg = self.uid("ring_group:" + key)
         number = f"group-{key}"
-        body = (f'\t<condition field="destination_number" expression="^{number}$">\n' + _act("ring_ready", "") + _act("set", f"ring_group_uuid={rg}")
+        body = (f'\t<condition field="destination_number" expression={_exact(number)}>\n' + _act("ring_ready", "") + _act("set", f"ring_group_uuid={rg}")
                 + _act("lua", "app.lua ring_groups") + "\t</condition>\n")
         dp = self.dialplan("ring_group:" + key, f"photonvox.group.{key}", ORDER["group"], RING_GROUP_APP, body, number=number)
         app, data = self.transfer(g["then"])
@@ -291,7 +294,7 @@ class _Builder:
         menu = self.uid("ivr:" + key)
         number = f"menu-{key}"
         app, data = self.transfer(m["timeout"])
-        body = (f'\t<condition field="destination_number" expression="^{number}$">\n' + _act("ring_ready", "") + _act("answer", "")
+        body = (f'\t<condition field="destination_number" expression={_exact(number)}>\n' + _act("ring_ready", "") + _act("answer", "")
                 + _act("sleep", "1000") + _act("set", "hangup_after_bridge=true") + _act("set", f"ivr_menu_uuid={menu}") + _act("ivr", menu)
                 + _act(app, data) + "\t</condition>\n")
         dp = self.dialplan("ivr:" + key, f"photonvox.menu.{key}", ORDER["menu"], IVR_APP, body, number=number)
@@ -316,7 +319,7 @@ class _Builder:
         number = f"hours-{key}"
         oa, od = self.transfer(tc["open"])
         ca, cd = self.transfer(tc["closed"])
-        body = (f'\t<condition field="destination_number" expression="^{number}$">\n' + _act("set", f"timezone={tc['timezone']}", True)
+        body = (f'\t<condition field="destination_number" expression={_exact(number)}>\n' + _act("set", f"timezone={tc['timezone']}", True)
                 + "\t</condition>\n")
         details: List[Tuple[str, str, str, Optional[bool]]] = [("condition", "destination_number", f"^{number}$", None),
                                                                ("action", "set", f"timezone={tc['timezone']}", True)]
@@ -328,7 +331,7 @@ class _Builder:
                 start, end = span.split("-")
                 body += (f'\t<condition wday="{WDAY[day]}" time-of-day="{start}-{_before(end)}" break="on-true">\n' + _act(oa, od)
                          + "\t</condition>\n")
-        body += f'\t<condition field="destination_number" expression="^{number}$">\n' + _act(ca, cd) + "\t</condition>\n"
+        body += f'\t<condition field="destination_number" expression={_exact(number)}>\n' + _act(ca, cd) + "\t</condition>\n"
         self.dialplan("hours:" + key, f"photonvox.hours.{key}", ORDER["hours"], TIME_APP, body, number=number, details=details)
 
     def inbound(self, n: Mapping[str, Any]) -> None:
@@ -349,6 +352,31 @@ class _Builder:
                  destination_record=False, destination_actions=[{"destination_app": app, "destination_data": data}], destination_app=app,
                  destination_data=data, destination_order=100, destination_enabled=True, destination_description="PhotonVox")
         self.b.cache += [f"dialplan.public.{form}" for form in (number, number[1:], ten)]
+
+
+def _exact(number: str) -> str:
+    """A destination matched exactly, as an XML attribute: regex-escaped and quoted (names are constrained by the document too: review C1)."""
+    return quoteattr("^" + re.escape(number) + "$")
+
+
+# What PhotonVox's dial plans may do. Every dial plan is parsed and checked against this before it is written, so nothing a document says can
+# become another application (FreeSWITCH's `system`, `eavesdrop`, a bridge to anywhere): security review C1, 2026-11-13.
+ALLOWED_APPS = {"answer", "bridge", "export", "hangup", "ivr", "log", "lua", "ring_ready", "set", "sleep", "transfer", "unset"}
+ALLOWED_ELEMENTS = {"extension", "condition", "action", "anti-action"}
+
+
+def check_xml(xml: str) -> None:
+    root = ET.fromstring(xml)
+    for el in root.iter():
+        if el.tag not in ALLOWED_ELEMENTS:
+            raise ValueError(f"dial plan element {el.tag!r} is not one PhotonVox writes")
+        app = el.get("application")
+        if el.tag in ("action", "anti-action") and app not in ALLOWED_APPS:
+            raise ValueError(f"dial plan application {app!r} is not one PhotonVox writes")
+        if app == "lua" and el.get("data") != "app.lua ring_groups":
+            raise ValueError("the only Lua a PhotonVox dial plan runs is FusionPBX's ring groups")
+        if app == "bridge" and not re.match(r"^sofia/gateway/[0-9a-f-]{36}/\$\{photonvox_dial\}$", el.get("data", "")):
+            raise ValueError("a PhotonVox dial plan bridges only to an upstream gateway")
 
 
 def _act(app: str, data: str, inline: bool = False, anti: bool = False) -> str:

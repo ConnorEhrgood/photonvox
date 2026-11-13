@@ -13,6 +13,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 E164 = r"^\+1[2-9][0-9]{2}[2-9][0-9]{6}$"          # North American numbers only in R1
 NAME = r"^[a-z0-9][a-z0-9_-]{0,39}$"
+UUID_RE = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+# Every name the document uses as a key, and every free text, is constrained here: keys reach the engine's dial plans (security review C1,
+# 2026-11-13), and names and addresses reach emails and FusionPBX's own screens (L6).
+Key = Annotated[str, Field(pattern=NAME)]
+SiteId = Annotated[str, Field(pattern=UUID_RE)]                # a site is the directory's site id
+Label = Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[^<>%\x00-\x1f\x7f]+$")]
+Email = Annotated[str, Field(max_length=320, pattern=r"^[^@\s<>\"'%,;]+@[^@\s<>\"'%,;]+\.[^@\s<>\"'%,;]+$")]
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SPAN = re.compile(r"^([01][0-9]|2[0-3]):([0-5][0-9])-([01][0-9]|2[0-4]):([0-5][0-9])$")
 
@@ -24,7 +32,7 @@ class Strict(BaseModel):
 # ---- where a call goes (an outcome) ----
 
 class ToUser(Strict):
-    user: str
+    user: Key
 
 
 class ToGroup(Strict):
@@ -36,7 +44,7 @@ class ToMenu(Strict):
 
 
 class ToVoicemail(Strict):
-    voicemail: str          # a user's id (their own box) or a shared box's name
+    voicemail: Key          # a user's id (their own box) or a shared box's name
 
 
 Target = Union[ToUser, ToGroup, ToMenu, ToVoicemail]
@@ -62,7 +70,7 @@ class Hours(Strict):
 
 class Site(Strict):
     """Per site: its 911 (the emergency location and the number registered at it, both locked: §11), what its calls show, its hours."""
-    emergency_location: str
+    emergency_location: Key
     emergency_number: str = Field(pattern=E164)
     caller_id: str = Field(pattern=E164)
     hours: Optional[str] = Field(None, pattern=NAME)
@@ -72,41 +80,42 @@ class Site(Strict):
 
 class Number(Strict):
     """A number the organization holds and what it rings. Without `closed`, it rings `open` at all hours."""
-    site: str
+    site: SiteId
     open: Target
     closed: Optional[Target] = None
     hours: Optional[str] = Field(None, pattern=NAME)   # defaults to the site's hours
 
 
 class Menu(Strict):
-    greeting: str = Field(min_length=1, max_length=500)          # text to speak, or a recording's id once recordings exist
+    greeting: str = Field(min_length=1, max_length=500, pattern=r"^[^\x00-\x1f\x7f]+$")          # text to speak, or a recording's id once recordings exist
     options: Dict[Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], Target] = Field(default_factory=dict)
     timeout: Target
 
 
 class Group(Strict):
-    members: List[str] = Field(min_length=1)
+    members: List[Key] = Field(min_length=1, max_length=200)
     strategy: Literal["simultaneous", "sequence"] = "simultaneous"
     ring_seconds: int = Field(25, ge=10, le=120)
     then: Optional[Target] = None
 
 
 class User(Strict):
-    name: str = Field(min_length=1, max_length=100)
-    site: str
+    name: Label
+    site: SiteId
     extension: str = Field(pattern=r"^[1-8][0-9]{1,4}$")
     direct_number: Optional[str] = Field(None, pattern=E164)
     show: Literal["site", "direct"] = "site"
-    email: Optional[str] = Field(None, max_length=320)
+    email: Optional[Email] = None
 
 
 class Box(Strict):
     """A shared voicemail box ("general"), separate from users' own."""
-    name: str = Field(min_length=1, max_length=100)
-    email: Optional[str] = Field(None, max_length=320)
+    name: Label
+    email: Optional[Email] = None
 
 
-PLUS_PREFIX = Annotated[str, Field(pattern=r"^\+[1-9][0-9]{0,14}$")]        # a number or prefix in + form ("+1212555", "+44")
+# a number or prefix in + form ("+1212555", "+44"); a North American one has at most 10 digits after +1 (more would match nothing)
+PLUS_PREFIX = Annotated[str, Field(pattern=r"^\+(1[2-9][0-9]{0,9}|[2-9][0-9]{0,14})$")]
 NANP_PREFIX = Annotated[str, Field(pattern=r"^\+1[2-9][0-9]{0,9}$")]        # a North American number or prefix in +1 form
 
 
@@ -137,13 +146,13 @@ class Features(Strict):
 class PhoneSystem(Strict):
     version: Literal[1] = 1
     voice: str = "en-US-Chirp3-HD-Kore"         # the voice greetings are spoken in (app/speech VOICES; decision 30)
-    sites: Dict[str, Site] = Field(default_factory=dict)
-    hours: Dict[str, Hours] = Field(default_factory=dict)
-    numbers: Dict[str, Number] = Field(default_factory=dict)
-    menus: Dict[str, Menu] = Field(default_factory=dict)
-    groups: Dict[str, Group] = Field(default_factory=dict)
-    users: Dict[str, User] = Field(default_factory=dict)
-    boxes: Dict[str, Box] = Field(default_factory=dict)
+    sites: Dict[SiteId, Site] = Field(default_factory=dict, max_length=200)
+    hours: Dict[Key, Hours] = Field(default_factory=dict, max_length=50)
+    numbers: Dict[str, Number] = Field(default_factory=dict, max_length=1000)
+    menus: Dict[Key, Menu] = Field(default_factory=dict, max_length=100)
+    groups: Dict[Key, Group] = Field(default_factory=dict, max_length=200)
+    users: Dict[Key, User] = Field(default_factory=dict, max_length=2000)
+    boxes: Dict[Key, Box] = Field(default_factory=dict, max_length=100)
     calling: Calling = Field(default_factory=Calling)
     features: Features = Field(default_factory=Features)
 

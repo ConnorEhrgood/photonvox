@@ -318,3 +318,23 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   the system's own), vox-agent's `sound` operation writing the file into the domain's recordings, menus naming it, the voice chosen on Call
   flows. Proven on staging with a stand-in provider (a tone): the menu played the file (69 checks). Waiting: Connor's Google Cloud project, the
   API key and budget (ARCHITECTURE §8a lists exactly what), then the listening test (`scripts/tts-samples.py`).
+
+## 2026-11-13: Step 3, the security review and its fixes
+
+A review of the document, compiler, adapter, vox-agent and the routes (an adversarial read, findings checked against the code). Fixed:
+- **C1, names reaching dial plans:** every key the document uses (users, groups, menus, mailboxes, hours, locations) is a constrained name and
+  every site a directory UUID; the adapter also checks each generated dial plan against an allowlist of applications and variables before writing.
+- **C2, numbers nobody holds:** Photon assigns numbers to organizations (`held_number`, Platform → Number stock); a draft can only use the
+  organization's own numbers, and the writer refuses a number another domain holds on the engine. The wizard and Numbers pick from the list.
+- **H1, who may widen calling:** `app/document/policy.py`: a technician cannot widen calling policy (international, premium, a class's reach)
+  or change a site's 911 settings; those need the permission for it, checked on the draft's difference, not on the screen.
+- **M1** international by an allowlist of country codes; **M2** emergency addresses cleaned before they are stored or emailed;
+  **L1/L2** vox-agent: a body-size limit, stricter domain names, a negative length refused, a handler timeout; **L4** engine errors shown to
+  integrators in plain words, the details kept for staff; **L6** names and emails refuse `%`, `<`, `>` and control characters (they reach
+  FusionPBX's voicemail email); **L7** clone does not copy mailbox emails.
+- Noted, not fixed: **L3** vox-agent's seen nonces are in memory (a replay inside the time window after a restart) and it speaks plain HTTP
+  (mgmtnet carries it in production); **L5** a failed cache clear after a committed write leaves that version's rows until the next publish or
+  undo; **L8** 4-digit PINs (Connor's choice, kept); **L9** no limits yet on text-to-speech spend; the Info items (the synthetic-check
+  variable's carry-through, `upgrade.php --defaults` across domains, the agent secret readable by www-data).
+- Tests: the API suite and critical modules at 100% (policy, emergency, the adapter), web 140, vox-agent 29; the staging proofs (69) and the
+  build test (31) pass with the fixes.

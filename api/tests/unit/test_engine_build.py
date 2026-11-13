@@ -287,3 +287,28 @@ def test_the_number_to_send_is_captured_in_the_condition_that_matched_it(name, s
     assert ("set", f"photonvox_dial={send}") in [(a.get("application"), a.get("data")) for a in matched.findall("action")]
     gate = conds[-1]
     assert all(a.get("data").endswith("/${photonvox_dial}") and "$1" not in a.get("data") for a in gate.findall("action"))
+
+
+# ---- security review C1: names never become dial-plan code ----
+
+@pytest.mark.parametrize("xml", [
+    '<extension name="x"><condition field="destination_number" expression="^1$"><action application="system" data="id"/></condition></extension>',
+    '<extension name="x"><condition><action application="eavesdrop" data="all"/></condition></extension>',
+    '<extension name="x"><condition><action application="bridge" data="sofia/external/1@evil.example"/></condition></extension>',
+    '<extension name="x"><condition><action application="lua" data="evil.lua"/></condition></extension>',
+    '<extension name="x"><include/></extension>',
+    '<extension name="x"><condition expression="unterminated></extension>',
+])
+def test_a_dial_plan_with_anything_photonvox_does_not_write_is_refused(xml):
+    with pytest.raises(Exception):
+        fusionpbx.check_xml(xml)
+
+
+def test_a_crafted_name_that_slipped_past_the_document_is_escaped_not_obeyed():
+    p = plan()
+    p["ring_groups"][0]["key"] = 'x$"/><action application="system" data="id"/></condition><condition field="destination_number" expression="^y'
+    b = fusionpbx.build(p, TARGET)
+    xml = [r for r in b.rows["v_dialplans"] if r["dialplan_name"].startswith("photonvox.group.x")][0]["dialplan_xml"]
+    root = ET.fromstring(xml)
+    assert [a.get("application") for a in root.iter("action")] == ["ring_ready", "set", "lua"]
+    assert root.find("condition").get("expression").startswith("^group\\-x\\$")

@@ -5,6 +5,7 @@ import type { Draft, PhoneSystemSummary } from '../api/types'
 import { rename, slug, targetText, targetValue, toTarget } from '../components/draft'
 import { meWith, OWNER, renderApp, TECH_A, TECH_B } from '../test/helpers'
 import { CallFlowsPage } from './CallFlows'
+import { NumberStockPage } from './NumberStock'
 import { NumbersPage, toE164 } from './Numbers'
 import { SitesPage } from './Sites'
 
@@ -30,6 +31,7 @@ function withServer(page: React.ReactElement, start: Draft = DRAFT, me = meWith(
   const saved: Draft[] = []
   const r = renderApp(page, { me, routes: {
     [`GET ${B}/phone-system`]: () => PS(current), [`GET ${B}/sites`]: SITES,
+    [`GET ${B}/numbers`]: [{ number: '+17245550100' }, { number: '+17245550111' }, { number: '+17245550123' }],
     [`PUT ${B}/phone-system/draft`]: (body) => { current = (body as { document: Draft }).document; saved.push(current); return PS(current) },
   } })
   return { ...r, saved }
@@ -66,7 +68,9 @@ describe('numbers', () => {
     expect(screen.getByText('the same, at all hours')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Add a number' }))
     let dialog = await screen.findByRole('dialog', { name: 'Add a number' })
-    await userEvent.type(within(dialog).getByLabelText('Number'), '724-555-0111')
+    expect(within(dialog).getAllByRole('option').map((o) => o.textContent)).toContain('+17245550111')
+    expect(within(dialog).queryByRole('option', { name: '+17245550100' })).toBeNull()       // already in use
+    await userEvent.selectOptions(within(dialog).getByLabelText('Number'), '+17245550111')
     expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
     await userEvent.selectOptions(within(dialog).getByLabelText('It rings'), 'group:everyone')
     await userEvent.click(within(dialog).getByLabelText('Something else after hours'))
@@ -84,7 +88,7 @@ describe('numbers', () => {
   })
 
   it('shows what the server refused, and says when there is no phone system', async () => {
-    renderApp(<NumbersPage />, { routes: { [`GET ${B}/phone-system`]: PS(), [`GET ${B}/sites`]: SITES,
+    renderApp(<NumbersPage />, { routes: { [`GET ${B}/phone-system`]: PS(), [`GET ${B}/sites`]: SITES, [`GET ${B}/numbers`]: [{ number: '+17245550123' }],
       [`PUT ${B}/phone-system/draft`]: new Response(JSON.stringify({ detail: { code: 'invalid_document', detail: 'x',
         errors: [{ path: 'numbers.+1', message: 'not a North American number' }] } }), { status: 422 }) } })
     await userEvent.click(await screen.findByRole('button', { name: 'Change +17245550123' }))
@@ -222,6 +226,7 @@ describe('the forms’ small paths', () => {
     const two = { ...DRAFT, sites: { ...DRAFT.sites, s2: { emergency_location: 'annex', emergency_number: '+17245550123', caller_id: '+17245550123' } } }
     const { saved } = withServer(<NumbersPage />, two)
     await userEvent.click(await screen.findByRole('button', { name: 'Change +17245550123' }))
+    expect(await screen.findByRole('option', { name: '+17245550123' })).toBeInTheDocument()
     let dialog = await screen.findByRole('dialog')
     await userEvent.selectOptions(within(dialog).getByLabelText('Site (its 911 address and caller ID)'), 's2')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
@@ -334,5 +339,36 @@ describe('the greetings’ voice', () => {
     expect(await screen.findByLabelText('Greetings are spoken in')).toHaveDisplayValue('Kore (US English, female)')
     await userEvent.selectOptions(screen.getByLabelText('Greetings are spoken in'), 'es-US-Chirp3-HD-Kore')
     expect(saved[0].voice).toBe('es-US-Chirp3-HD-Kore')
+  })
+})
+
+describe('number stock (Photon staff)', () => {
+  it('adds a number to an organization, puts one back in stock, gives one back to the carrier', async () => {
+    let list = [{ number: '+17245550100', tenant_id: 't1', organization: 'Cedar Works', carrier: 'htc', note: '' },
+      { number: '+17245550199', tenant_id: null, organization: null, carrier: 'htc', note: '' }]
+    const { calls } = renderApp(<NumberStockPage />, { routes: {
+      'GET /platform/numbers': () => list, 'GET /platform/organizations': [{ id: 't1', name: 'Cedar Works', status: 'active', plan_key: '', home_region: 'us-east', partner_id: null }],
+      'PUT /platform/numbers/%2B17245550111': () => { list = [...list, { number: '+17245550111', tenant_id: 't1', organization: 'Cedar Works', carrier: 'htc', note: '' }]; return {} },
+      'PUT /platform/numbers/%2B17245550100': {}, 'DELETE /platform/numbers/%2B17245550199': null,
+    } })
+    expect(await screen.findByText('Photon’s stock')).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Number'), '(724) 555-0111')
+    await userEvent.selectOptions(screen.getByLabelText('Assign to'), 't1')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('+17245550111')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Back to stock: +17245550100' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Give +17245550199 back to the carrier' }))
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => [c.method, c.path, c.body])).toEqual([
+      ['PUT', '/platform/numbers/%2B17245550111', { tenant_id: 't1' }], ['PUT', '/platform/numbers/%2B17245550100', { tenant_id: null }],
+      ['DELETE', '/platform/numbers/%2B17245550199', undefined]])
+  })
+
+  it('an empty stock and a refusal are shown', async () => {
+    renderApp(<NumberStockPage />, { routes: { 'GET /platform/numbers': [], 'GET /platform/organizations': [],
+      'PUT /platform/numbers/%2B17245550100': new Response(JSON.stringify({ detail: { detail: 'A North American number in +1 form.' } }), { status: 422 }) } })
+    expect(await screen.findByText('No numbers yet.')).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Number'), '724-555-0100')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('A North American number in +1 form.')
   })
 })

@@ -194,3 +194,12 @@ def test_publish_creates_and_seeds_the_domain_once_then_writes_and_clears_the_ca
     agent.calls.clear()
     publish.publish(eng, agent, plan(), TARGET, first.manifest)
     assert agent.calls == [("cache", len(first.cache))]
+
+
+def test_a_number_already_answered_by_another_domain_is_refused_in_any_stored_form(eng):
+    with eng.begin() as c:
+        c.execute(text("insert into v_destinations (destination_uuid, domain_uuid, destination_number, destination_prefix) "
+                       "values (gen_random_uuid(), :o, '+17245550123', null)"), {"o": OTHER})
+    with eng.begin() as c:
+        with pytest.raises(ValueError, match="already answered by another phone system"):
+            writer.write(c, fusionpbx.build(plan(), TARGET), DOMAIN)

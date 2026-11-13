@@ -252,3 +252,21 @@ def test_a_greeting_over_the_size_limit_is_refused(agent, monkeypatch):
     wav = b"RIFF\x24\x00\x00\x00WAVE" + b"\x00" * 200
     assert call(agent, "POST", "/v1/sound", {"domain_name": "x.sip.test", "name": "photonvox-" + "b" * 32 + ".wav",
                                              "data": base64.b64encode(wav).decode()})[0] == 400
+
+
+def test_a_negative_or_unreadable_length_is_refused_before_anything_is_read(agent):
+    import http.client
+    host, port = agent["url"][7:].split(":")
+    for value in ("-5", "lots"):
+        conn = http.client.HTTPConnection(host, int(port), timeout=5)
+        conn.putrequest("POST", "/v1/reloadacl")
+        conn.putheader("Content-Length", value)
+        conn.endheaders()
+        assert conn.getresponse().status == 400
+
+
+@pytest.mark.parametrize("domain", ["..", "x..y", ".x", "x.", "x", "-x.test", "x_y.test"])
+def test_a_domain_that_is_not_a_dotted_name_is_refused(agent, domain):
+    import base64
+    body = {"domain_name": domain, "name": "photonvox-" + "c" * 32 + ".wav", "data": base64.b64encode(b"RIFF\x00\x00\x00\x00WAVE").decode()}
+    assert call(agent, "POST", "/v1/sound", body)[0] == 400

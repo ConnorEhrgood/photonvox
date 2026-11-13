@@ -62,6 +62,13 @@ def write(conn: Connection, b: Build, domain_uuid: str, previous: Sequence[Mappi
         for r in b.rows[table]:
             if r["domain_uuid"] != domain_uuid:          # the builder guarantees it; checked again before anything is written
                 raise ValueError(f"{table} row {r[KEYS[table]]} is not in domain {domain_uuid}")
+    tens = [r["destination_number"][-10:] for r in b.rows["v_destinations"]]
+    if tens:     # a number another phone system on this engine already answers is never taken over (review C2), in any stored form
+        taken = conn.execute(text("select destination_number from v_destinations where domain_uuid <> :d and "
+                                  "right(regexp_replace(coalesce(destination_prefix, '') || destination_number, '[^0-9]', '', 'g'), 10) = any(:t)"),
+                             {"d": domain_uuid, "t": tens}).scalars().all()
+        if taken:
+            raise ValueError(f"number {taken[0]} is already answered by another phone system on this engine")
     res = Result(manifest=b.manifest())
     current = {(m["table"], m["uuid"]) for m in res.manifest}
     gone = [m for m in previous if (m["table"], m["uuid"]) not in current]

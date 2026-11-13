@@ -56,7 +56,7 @@ def test_a_refusal_an_unexpected_format_or_an_unknown_voice_is_an_error_without_
 
 
 def test_a_menu_names_its_spoken_greeting_only_when_greetings_were_spoken():
-    tgt = fusionpbx.Target("0b5e8c1a-0000-4000-8000-000000000001", "0b5e8c1a-0000-4000-8000-0000000000d0", {"htc": "a", "upstream-b": "b"})
+    tgt = fusionpbx.Target("0b5e8c1a-0000-4000-8000-000000000001", "0b5e8c1a-0000-4000-8000-0000000000d0", {"htc": "0b5e8c1a-0000-4000-8000-0000000000a1", "upstream-b": "0b5e8c1a-0000-4000-8000-0000000000a2"})
     menu = lambda b: next(r for r in b.rows["v_ivr_menus"])
     assert menu(fusionpbx.build(plan(), tgt))["ivr_menu_greet_long"] is None
     spoken = fusionpbx.build(plan(), fusionpbx.Target(tgt.phone_system_id, tgt.domain_uuid, tgt.gateways, True))

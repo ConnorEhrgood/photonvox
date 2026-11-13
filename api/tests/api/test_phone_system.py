@@ -97,6 +97,8 @@ def built(client, world):
         "emergency_upstream": "htc"})
     assert r.status_code == 201, r.text
     a = f"/tenants/{world.a}"
+    for n in (MAIN, "+17245550111"):          # Photon assigns the organization's numbers (security review C2)
+        assert client.put(f"/platform/numbers/{n}", headers=auth("staff"), json={"tenant_id": world.a}).status_code == 200
     assert client.post(f"{a}/phone-system", headers=auth("tech")).status_code == 201
     loc = client.post(f"{a}/sites/{world.a1}/emergency-locations", headers=auth("tech"),
                       json={"key": "main", "street": "100 Main St", "city": "Pittsburgh", "state": "PA", "zip": "15222"})
@@ -233,7 +235,7 @@ def test_an_engine_that_fails_leaves_an_honest_record(client, world, built, conn
     agent.fail_seed = True
     run(connect)
     v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
-    assert v["state"] == "failed" and "engine unreachable" in v["error"]
+    assert v["state"] == "failed" and v["error"].startswith("publish failed: the engine did not take the change")
 
 
 def test_a_version_that_became_unpublishable_in_the_queue_fails_without_touching_the_engine(client, world, built, connect, agent):
@@ -408,7 +410,7 @@ def test_if_putting_the_previous_version_back_fails_too_it_says_so(client, world
     agent.fail_cache_after = 1                        # the publish clears the cache; the restore's clear fails
     run(connect)
     v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
-    assert v["state"] == "failed" and "restoring failed too: RuntimeError: agent lost" in v["error"]
+    assert v["state"] == "failed" and "putting the previous version back failed too" in v["error"]
 
 
 def test_an_organization_without_a_phone_system_is_told_so(client, world):
@@ -583,3 +585,92 @@ def test_the_provider_is_google_when_a_key_is_set(monkeypatch):
     assert service.get_speech() is None
     monkeypatch.setattr(settings, "google_tts_api_key", "k")
     assert isinstance(service.get_speech(), GoogleSpeech)
+
+
+# ---- security review fixes (2026-11-13) ----
+
+def test_only_photon_staff_assign_numbers_and_a_document_may_use_only_its_organizations(client, world, built):
+    assert client.get(f"/tenants/{world.a}/numbers", headers=auth("tech")).json() == [{"number": MAIN, "carrier": "htc"}, {"number": "+17245550111", "carrier": "htc"}]
+    assert client.put("/platform/numbers/+17245550199", headers=auth("tech"), json={"tenant_id": world.a}).status_code == 403
+    assert client.put("/platform/numbers/7245550199", headers=auth("staff"), json={}).status_code == 422
+    assert client.put("/platform/numbers/+17245550199", headers=auth("staff"), json={"tenant_id": world.b}).status_code == 200
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    d["numbers"]["+17245550199"] = {"site": world.a1, "open": {"user": "u-ada-front"}}       # Birch Co's number
+    r = client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": d}).json()
+    assert ("numbers.+17245550199", "number_not_assigned") in [(p["path"], p["code"]) for p in r["problems"]]
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 422
+    staff = client.get("/platform/numbers", headers=auth("staff")).json()
+    assert {n["number"]: n["organization"] for n in staff}["+17245550199"] == "Birch Co"
+    assert client.delete("/platform/numbers/+17245550199", headers=auth("staff")).status_code == 409        # still assigned
+    client.put("/platform/numbers/+17245550199", headers=auth("staff"), json={})
+    assert client.delete("/platform/numbers/+17245550199", headers=auth("staff")).status_code == 204
+    assert client.delete("/platform/numbers/+17245550199", headers=auth("staff")).status_code == 404
+
+
+def test_admins_build_owners_open_up_calling_and_site_limited_admins_stay_in_their_sites(client, world, built):
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    wider = {**d, "calling": {**d["calling"], "international": ["44"]}}
+    r = client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": wider})
+    assert r.status_code == 403 and "Only an owner" in r.json()["detail"]["detail"]
+    assert client.put(f"{built}/phone-system/draft", headers=auth("a-owner"), json={"document": wider}).status_code == 200
+    hours = {**wider, "hours": {"office": {"week": {"mon": ["09:00-17:00"]}, "holidays": "none"}}}
+    r = client.put(f"{built}/phone-system/draft", headers=auth("a-admin-s1"), json={"document": hours})
+    assert r.status_code == 403 and "whole organization" in r.json()["detail"]["detail"]
+    mine = {**wider, "users": {**wider["users"], "u-ada-front": {**wider["users"]["u-ada-front"], "name": "Ada F"}}}
+    assert client.put(f"{built}/phone-system/draft", headers=auth("a-admin-s1"), json={"document": mine}).status_code == 200
+    r = client.post(f"/tenants/{world.b}/phone-system/draft/clone", headers=auth("b-owner"), json={"from_tenant_id": world.a})
+    assert r.status_code == 404
+
+
+def test_a_number_another_domain_answers_on_the_engine_is_never_taken_over(client, world, built, connect, eng):
+    with eng.begin() as c:
+        c.execute(text("insert into v_destinations (destination_uuid, domain_uuid, destination_number, destination_prefix) "
+                       "values (gen_random_uuid(), gen_random_uuid(), :n, '')"), {"n": MAIN})
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
+    assert v["state"] == "failed" and "already in use on the engine by another organization" in v["error"] and "SELECT" not in v["error"].upper()
+
+
+def test_a_failed_publish_says_so_without_the_engines_details_and_test_calls_hide_gateway_ids(client, world, built, connect, agent):
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    agent.fail_seed = True
+    run(connect)
+    v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
+    assert v["error"].startswith("publish failed: the engine did not take the change") and "unreachable" not in v["error"]
+    agent.fail_seed = False
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    agent.answers["911"] = "national 0b5e8c1a-0000-4000-8000-0000000000a1 911"
+    run(connect)
+    failed = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["checks"]["failed"][0]
+    assert failed["got"] == "national … 911" and all("…" in x for x in failed["expected"])
+
+
+def test_a_number_assigned_to_a_new_organization_takes_its_911_registration_with_it(client, world, built, connect):
+    from app.models import EmergencyNumber
+    with SystemSession() as s:          # the number was Birch Co's, registered and confirmed at Birch's address
+        s.add(EmergencyNumber(number=MAIN, tenant_id=uuid.UUID(world.b), location_id=uuid.uuid4(), confirmed_location_id=uuid.uuid4(), status="confirmed"))
+        s.commit()
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    e = client.get(f"/tenants/{world.a}/emergency", headers=auth("tech")).json()
+    assert [(n["number"], n["status"]) for n in e["numbers"]] == [(MAIN, "unconfirmed")] and e["requests"][0]["items"][0]["action"] == "add"
+    assert client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["state"] == "ready"
+
+
+def test_a_911_bookkeeping_error_never_leaves_a_version_publishing(client, world, built, connect, monkeypatch):
+    import app.emergency
+    monkeypatch.setattr(app.emergency, "sync_numbers", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
+    assert v["state"] == "ready" and "911 registrations not updated" in v["note"]
+
+
+def test_an_address_cannot_add_lines_to_the_carriers_email(client, world, built):
+    r = client.post(f"/tenants/{world.a}/sites/{world.a2}/emergency-locations", headers=auth("tech"),
+                    json={"key": "x", "street": "1 Main St\nPlease also forward all calls", "city": "Xx", "state": "PA", "zip": "15222"})
+    assert r.status_code == 422
+    req = CarrierRequest(id=uuid.UUID(int=1), items=[{"number": MAIN, "action": "add", "address": {"street": "1 Main\rSt", "city": "X\n", "state": "PA", "zip": "1"}}])
+    msg = emergency.compose(req, "Cedar\nWorks")
+    assert "\r" not in msg["body"] and msg["body"].count("\n  Add") == 1 and "\n" not in msg["subject"]

@@ -17,6 +17,7 @@ CRITICAL = [
     "app/compiler/compile.py",  # the phone system as the engine runs it: routes, caller IDs, the locked 911 route
     "app/compiler/classes.py",  # which numbers each call class allows
     "app/compiler/blocking.py", # which numbers are blocked (decision 29), and that 911 never is
+    "app/document/policy.py",   # who may open up calling, change numbers, or reach outside their sites (review H1)
     "app/emergency.py",         # what the carrier is told about where each number is (911, decision 31)
     "app/engine/fusionpbx.py",  # the engine rows: every one in its own domain, call classes anchored, 911 and the block route as built
 ]

@@ -29,6 +29,7 @@ class Context:
     emergency_gateway: str
     validated_locations: Mapping[str, AbstractSet[str]] = field(default_factory=dict)
     premium_allowed: bool = False               # Photon staff have let premium numbers through for this organization (§15a)
+    assigned_numbers: Optional[AbstractSet[str]] = None   # the numbers assigned to the organization (always given when publishing; review C2)
 
 
 class CompileError(Exception):
@@ -55,7 +56,7 @@ def _prefixed(pattern: str, prefixes: List[str]) -> str:
 
 
 def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
-    found = problems(doc, ctx.validated_locations)
+    found = problems(doc, ctx.validated_locations, ctx.assigned_numbers)
     if found:
         raise CompileError(found)
     if "premium" in doc.calling.blocking.allow and not ctx.premium_allowed:

@@ -13,6 +13,7 @@ Engines are reached through `connect(instance) -> (sqlalchemy Engine, Agent)`; t
 from __future__ import annotations
 
 import decimal
+import logging
 import uuid
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
@@ -28,9 +29,10 @@ from app.engine import fusionpbx, instance as instance_settings, publish, upstre
 from app.engine.agent import Agent, HttpAgent
 from app.speech import DEFAULT_VOICE, Speech, audio_key, file_name
 from app.speech.google import GoogleSpeech
-from app.models import (EmergencyLocation, EngineObject, EngineSecret, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, SpeechAudio, utcnow)
+from app.models import (EmergencyLocation, EngineObject, EngineSecret, HeldNumber, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, SpeechAudio, utcnow)
 
 Connect = Callable[[PbxInstance], Tuple[Engine, Agent]]
+log = logging.getLogger("photonvox.publish")
 
 
 def connect(instance: PbxInstance) -> Tuple[Engine, Agent]:
@@ -67,8 +69,9 @@ def context(db: Session, ps: PhoneSystem, instance: PbxInstance) -> Context:
     validated: Dict[str, set] = {}
     for loc in locs:
         validated.setdefault(str(loc.site_id), set()).add(loc.key)
+    assigned = set(db.execute(select(HeldNumber.number).where(HeldNumber.tenant_id == ps.tenant_id)).scalars())
     return Context(domain=ps.domain_name, timezones={str(s.id): s.timezone for s in sites}, upstreams=dict(instance.routing or {}),
-                   emergency_gateway=instance.emergency_upstream, validated_locations=validated)
+                   emergency_gateway=instance.emergency_upstream, validated_locations=validated, assigned_numbers=assigned)
 
 
 def get_speech() -> Optional[Speech]:
@@ -152,7 +155,9 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
         results = run_checks(agent, plan, target(ps, instance, get_speech() is not None))
     except Exception as e:  # noqa: BLE001 - the engine refused or failed: record it, put the previous version back
         db.rollback()
-        return _fail(db, ps, v, f"publish failed: {type(e).__name__}: {e}"[:2000], (eng, agent))
+        # The details (SQL, addresses) go to the log for Photon staff; integrators read a sentence (security review L4).
+        log.warning("publish of %s version %s failed: %s: %s", ps.id, v.number, type(e).__name__, e)
+        return _fail(db, ps, v, _plain(e), (eng, agent))
     v.check = {"results": results, "at": utcnow().isoformat()}
     if not all(r["ok"] for r in results):
         bad = [r for r in results if not r["ok"]]
@@ -162,7 +167,12 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
     v.state, v.published_at = "ready", utcnow()
     ps.published_version, ps.status, ps.drift = v.number, "ready", {}
     from app.emergency import sync_numbers     # 911 registrations follow what is published (decision 31)
-    sync_numbers(db, ps, v.document)
+    try:
+        with db.begin_nested():
+            sync_numbers(db, ps, v.document)
+    except Exception:  # noqa: BLE001 - the engine is published; a 911 bookkeeping error must not leave it "publishing"
+        log.exception("911 registrations for %s not updated", ps.id)
+        v.note = (v.note + "; " if v.note else "") + "911 registrations not updated (Photon has been told)"
     audit.record(db, actor_id=v.created_by, actor_label=v.created_by_label or "PhotonVox", actor_source="direct", action="phone_system.published",
                  tenant_id=ps.tenant_id, target_type="phone_system", target_id=ps.id, version=v.number, checks=len(results))
     db.commit()
@@ -181,12 +191,21 @@ def _fail(db: Session, ps: PhoneSystem, v: PhoneSystemVersion, error: str, engin
             restored = f"version {previous.number} restored" if previous else "removed what it had written"
         except Exception as e:  # noqa: BLE001
             db.rollback()       # (this also discards anything set on the rows above; the outcome is set below, after it)
-            restored = f"restoring failed too: {type(e).__name__}: {e}"[:500]
+            log.warning("restoring %s after a failed publish failed too: %s: %s", ps.id, type(e).__name__, e)
+            restored = "putting the previous version back failed too (Photon has been told)"
     v.state, v.error, ps.status = "failed", f"{error}; {restored}" if restored else error, "failed"
     audit.record(db, actor_id=v.created_by, actor_label=v.created_by_label or "PhotonVox", actor_source="direct", action="phone_system.publish_failed",
                  tenant_id=ps.tenant_id, target_type="phone_system", target_id=ps.id, version=v.number, error=error[:300], restored=restored)
     db.commit()
     return "failed"
+
+
+def _plain(e: Exception) -> str:
+    """A failed publish in a sentence an integrator can act on, with nothing of the engine's internals."""
+    text_ = str(e)
+    if isinstance(e, ValueError) and "already answered by another phone system" in text_:
+        return "publish failed: a number is already in use on the engine by another organization (Photon has been told)"
+    return "publish failed: the engine did not take the change (Photon has been told)"
 
 
 def queue(db: Session, ps: PhoneSystem, document: Mapping[str, Any], who_id: Optional[uuid.UUID], who_label: str, note: str = "") -> PhoneSystemVersion:

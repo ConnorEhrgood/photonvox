@@ -57,6 +57,8 @@ def test_build_publish_check_and_hand_edit_on_staging(client, world):
         service.apply_instance(s.get(PbxInstance, INSTANCE))
 
     a = f"/tenants/{world.a}"
+    for n in (MAIN, ANNEX, DIRECT, MAILBOX):     # Photon assigns the organization's numbers (security review C2)
+        call("PUT", f"/platform/numbers/{n}", who="staff", json={"tenant_id": world.a})
     # The wizard.
     call("POST", f"{a}/phone-system")
     with SystemSession() as s:      # one fixed domain on staging, so each run republishes it instead of adding another

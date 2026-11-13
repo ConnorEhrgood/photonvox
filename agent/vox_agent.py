@@ -44,7 +44,7 @@ SAFE = re.compile(r"^[A-Za-z0-9@.+_:-]{1,200}$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PROFILE = re.compile(r"^[a-z0-9_-]{1,40}$")
 NUMBER = re.compile(r"^\+?[0-9*#]{1,20}$")
-DOMAIN = re.compile(r"^[a-z0-9.-]{1,200}$")
+DOMAIN = re.compile(r"^(?=.{1,200}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")   # dotted labels; never ".."
 TOKEN = re.compile(r"^[0-9a-f]{16,64}$")
 SOUND = re.compile(r"^photonvox-[0-9a-f]{32}\.wav$")
 FOUND = re.compile(r"PhotonVox-synthetic token=(\w+) (?:reached=([^\s)]+)|route=([^\s)]+) gateways=([^\s)]+) dial=([^\s)]*))"
@@ -288,6 +288,7 @@ def make_handler(cfg: Config, replay: Replay):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"vox-agent/{VERSION}"
         sys_version = ""
+        timeout = 30          # a client that stops sending is dropped
 
         def log_message(self, fmt: str, *args: Any) -> None:     # one line per request, never bodies
             print(f"{self.address_string()} {self.command} {self.path} {args[1] if len(args) > 1 else ''}", flush=True)
@@ -301,7 +302,12 @@ def make_handler(cfg: Config, replay: Replay):
             self.wfile.write(data)
 
         def _handle(self) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length < 0:
+                return self._send(400, {"error": "bad length"})
             if length > MAX_BODY:
                 return self._send(413, {"error": "too large"})
             body = self.rfile.read(length) if length else b""
