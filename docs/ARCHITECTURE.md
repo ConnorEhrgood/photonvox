@@ -50,7 +50,7 @@ the row below is the decided version.** The BUILD-GUIDE follows them. Changing o
 | 20 | **Build our own branded PhotonVox app** (replaces "white-label softphone first"): one app on iOS, Android, macOS and Windows plus the browser, all on one TypeScript calling engine (React Native on mobile, Electron on desktop). Calls, voicemail, history, contacts, presence, transfer and park now; texting and chat with R3. It rings together with the user's desk phone (same extension) | Connor's direction; one engine means one set of calling bugs, not three | 18a |
 | 21 | **WebRTC with PhotonVox's own signaling**, through a small **calling gateway (`vox-gateway`, Go) beside each FreeSWITCH instance**; FreeSWITCH terminates the media (Opus to the app, G.711 to the PSTN); coturn on each instance for UDP-blocked networks; no separate SBC. Not a native SIP stack (PJSIP or liblinphone) | Same engine as the browser; no GPL or commercial SIP license; no SIP password on any device; encryption and NAT traversal always on | 18a |
 | 22 | **Incoming calls wake the app through the gateway**: APNs VoIP push + CallKit on iOS, FCM high-priority + Telecom (ConnectionService) on Android; the gateway rings the caller back at once and holds the call until the device connects. Not RFC 8599 through Kamailio. Devices keep no standing connection in the background | The app is not a SIP client, and the gateway already stands where Kamailio would; near-zero battery at rest | 18a |
-| 23 | **911 in the app** (decided by Connor): **on any device with cellular service, 911 dialed in the app is always handed to the phone's own dialer and the cellular network**, which locates the handset; no location work there. Devices without cellular (desktops, Wi-Fi-only tablets, phones with no service) place 911 over PhotonVox with an **automatic** location: the matched site's validated address (Wi-Fi access point or network, public IP, geofence), else the OS location sent through a 911 provider that accepts it, the user asked only when that fails (once per new place), a national emergency call relay center (ECRC) last. Location read only at sign-in, on network change and at call time, never tracked. Kari's Law notification also when the app hands off | "We cannot constantly ask the user where they are", and the cellular network locates a phone best (Connor); RAY BAUM'S Act for non-fixed devices; the locked 911 design (§11) | 18a |
+| 23 | **911 in the app** (decided by Connor): **on any device with cellular service, 911 dialed in the app is always handed to the phone's own dialer and the cellular network**, which locates the handset; no location work there. Devices without cellular (desktops, Wi-Fi-only tablets, phones with no service) place 911 over PhotonVox with an **automatic** location: the matched site's validated address (Wi-Fi access point or network, public IP, geofence), else the OS location sent through a 911 provider that accepts it, the user asked only when that fails (once per new place), a national emergency call relay center (ECRC) last. Location read only at sign-in, on network change and at call time, never tracked. Kari's Law notification also when the app hands off. 933 follows 911's path. Tested in six layers, real 911 only in a yearly test arranged with the PSAP (§18a part 4) | "We cannot constantly ask the user where they are", and the cellular network locates a phone best (Connor); RAY BAUM'S Act for non-fixed devices; the locked 911 design (§11) | 18a |
 | 24 | **One app in the stores ("PhotonVox"), the partner's branding inside after sign-in**; per-partner store listings later as a paid option, published from the partner's own developer accounts | Apple's 4.2.6/4.3 make per-partner apps a partner-account job; one listing is one build and one review per release | 18a |
 | 25 | **Sign in with PhotonID, or pair by a one-time QR code** an admin shows, for phone users without a PhotonID account | Keeps "a 30-person office in minutes" true; still revocable per device | 18a |
 | 26 | **A key per device in the Secure Enclave or Keystore, no SIP credentials on devices**; signing out a device or removing the user cuts it off at the gateway at once and wipes the app's data on its next run | A stolen phone carries nothing that works elsewhere | 18a |
@@ -683,9 +683,9 @@ cellular 911 call, located by the carrier, not by PhotonVox.
 
 **Which numbers.** The app treats a dialed number as an emergency number before anything else happens: **911** always, plus the numbers the
 phone itself knows as emergency numbers (Android's `TelephonyManager.isEmergencyNumber`, which reads the SIM's and the network's lists; on iOS,
-which has no such interface, a list kept in the app: 911, 112 and the other common ones). **933** (the address read-back test) is not an
-emergency number and is never handed off: on a handoff device the app explains that 911 on this phone uses the mobile network, and that 933
-tests only desk phones and computers.
+which has no such interface, a list kept in the app: 911, 112 and the other common ones). **933** (the address read-back test) follows
+the same path as 911: on a handoff device it goes to the phone's dialer, so the carrier reads back what it would send (where it supports 933 on
+wireless); elsewhere it goes through PhotonVox to the 911 provider. 933 sends no Kari's Law notification.
 
 **How the handoff is done:**
 
@@ -743,7 +743,8 @@ read; a call started from the system's Recents list may start the app in the bac
 #### 3. Notification (Kari's Law) in every case
 
 - **Over PhotonVox (part 2):** PhotonVox sees the call, so the organization's contacts are notified as for a desk phone (§11).
-- **Handed to the cellular network (part 1):** the app knows the user dialed 911 in it, and sends the notification **as it hands off**
+- **Handed to the cellular network (part 1):** the app knows the user dialed 911 in it, records the handoff (part 4, layer 6) and sends the
+  notification **as it hands off**
   ("911 dialed from the PhotonVox app on Ada's phone at 14:03; the call went to the mobile network, which locates the phone"), queued if the
   device is offline, never delaying the handoff. Whether the call then connected the app cannot know reliably: iOS's call observer
   (`CXCallObserver`) reports that a call started on the device but not its number, and only while the app runs; Android would need phone-state
@@ -751,6 +752,91 @@ read; a call started from the system's Recents list may start the app in the bac
   phone's own dialer, outside the app, is invisible to PhotonVox and is not notified.
 - Kari's Law strictly covers calls placed through the phone system; a cellular call is arguably outside it. The notification is sent anyway
   (Connor's wish), and counsel confirms the wording (§19).
+
+#### 4. Testing 911 in the app
+
+**Real 911 is never dialed, except in the scheduled test of layer 5, arranged beforehand with the PSAP.** Six layers, from cheapest to rarest:
+
+**Layer 1: the decision as a pure function, fully tested.** One function in `@photonvox/calling` decides what a dialed number does:
+`route(dialed, device, config) -> { action, reason }`, where `action` is `handoff` (to the phone's dialer), `voip911` (over PhotonVox with a
+location), `voip` (an ordinary call) or `refuse` (never for an emergency number). Its inputs are plain data, so it has no OS calls in it:
+- `dialed`: the digits as typed, normalized (spaces and punctuation removed; the site's outside-line prefix stripped, so `9-911` and `9911` are
+  911 where 9 is the prefix; the compiler (§8) supplies the prefix per site);
+- `device`: platform (iOS, Android, desktop, browser), whether it has a phone radio, the cellular service state (in service, emergency calls
+  only, out of service, radio off), airplane mode, the SIM state (absent, locked, ready, network-locked) and, on Android, the system's own
+  verdict (`isEmergencyNumber`);
+- `config`: the emergency list (911 always, 112 and the other common ones), 933, and in test builds only the test emergency number (layer 2).
+
+Rules it encodes: an emergency number on a device with cellular service (in service, or emergency-only, or an Android phone in airplane mode)
+is `handoff`; no SIM or a locked SIM does not stop a handoff where the network allows emergency calls; elsewhere it is `voip911`; **933 follows
+the same path as 911** (handed off on a cellular device, so the carrier reads back what it would send; through PhotonVox elsewhere, so the 911
+provider reads back the dispatchable address); feature codes such as `*911` are not emergency numbers; nothing returns `refuse` for an
+emergency number. Tested by a table of cases (every number form x every device state x every platform) at **100% branch coverage** (a CRITICAL
+module), plus a generated test that no input combination ever refuses or delays 911. The mobile app reads the OS state and calls the function;
+the desktop and browser always get `voip911`.
+
+**Layer 2: a test emergency number, in test builds only.** One number Photon owns (a DID that rings a test menu on the staging instance,
+which answers, reads the caller's number aloud and records it in the CDR) is treated by the function **exactly like 911**: same handoff, same
+notification (marked as a test). On real phones, the proof that a handoff really leaves over the cellular network is the **caller ID that
+arrives at the test number: the phone's own mobile number, never a PhotonVox number.**
+- **It cannot ship in a release build.** The number exists only in a build setting read in debug and internal-test builds; release builds
+  compile it out. The release pipeline (Xcode Cloud's release workflow, the Gradle release task, the desktop release) runs a **check that fails
+  the build** if the test number, or the setting's name, appears anywhere in the built bundle (the JavaScript bundle and the native binaries),
+  and a unit test asserts the release configuration has no test number. Even if one slipped through, dialing it reaches only a test menu.
+
+**Layer 3: 933 through the app on real phones, per carrier.** 933 dialed in the app on a cellular phone is handed off; where the carrier
+supports 933 on wireless, it reads back the location and callback number it would send to a PSAP. Run on each carrier Photon's customers use
+(AT&T, Verizon, T-Mobile, and the regional carriers around Photon's sites); **which carriers support 933 for wireless is research to confirm**
+(§22): where a carrier does not, layer 2 stands in for it. On desktops and Wi-Fi-only tablets, 933 goes through PhotonVox to the 911 provider,
+which reads back the dispatchable address (the site's, or the confirmed place's).
+
+**Layer 4: a real-device matrix, every release.**
+
+| Condition | What is checked | Device farm? |
+|---|---|---|
+| Normal: in service, SIM ready | handoff opens the system dialer with the number; layer 2 caller ID | farm for "dialer opens with 911 filled"; own phones for the call |
+| No SIM | handoff still offered where the OS allows emergency calls without a SIM | farm (devices without SIMs) for the decision; own phone for a layer 2 call is impossible without a SIM, so the dialer opening is the check |
+| Airplane mode with Wi-Fi | Android: handoff (the dialer turns the radio on); iOS: as spike A0 found | own phones (farms rarely let a test toggle airplane mode) |
+| Dual SIM (eSIM + physical), one without service | the system picks a line; the app does not | own phones |
+| Locked screen | a handoff started while the phone is locked (Siri, or the app's call screen over the lock screen during a call) | own phones |
+| During an active PhotonVox call | the app's call is held or ended; the handoff goes through | own phones (needs a live call) |
+| Do Not Disturb / Focus | the handoff is unaffected; the notification still goes out | own phones |
+| Roaming (another network, abroad) | handoff to the dialer; the local network maps 911 or 112 | own phones (rarely: a travel test) |
+| Android work profile | the app in a work profile still opens the system dialer | farm if it offers managed profiles, else own phone |
+| iOS and Android, the oldest supported version and the current one | all of the above where the OS differs | farm for versions and models; own phones for the calls |
+
+**Device farms** (AWS Device Farm, Firebase Test Lab, BrowserStack and the like) cover breadth: many models and OS versions running layer 1
+on real OS state readings, the dial intent opening the system dialer with the number filled in (stopped there), the CallKit and Telecom
+handling of calls started from the system. **They cannot place calls** (and must never be asked to dial 911), so anything that makes a call,
+needs a specific SIM, carrier, network condition or a second live call runs on **Photon's own phones**: one iPhone and one Android phone per
+major carrier at least.
+
+**Layer 5: a scheduled live 911 test call, about once a year and before any release that changes 911 routing** (runbook below). It is the only
+time anyone dials 911.
+
+**Layer 6: in production, every emergency dial is recorded as an event.** The app sends an event for each emergency-number dial: the device,
+its organization, the platform and app version, the time, the route taken (`handoff` or `voip911`) and whether the system dialer opened (for a
+handoff) or the call was placed (over PhotonVox). **No location and no call content.** It is queued if the device is offline. The events show
+that handoffs happen and work (Photon staff are alerted when a dialer did not open), they drive the Kari's Law notification (§18a part 3), and
+they are kept with the organization's audit log (retention as for 911 records, §19).
+
+#### The live 911 test runbook (layer 5)
+
+1. **When:** once a year, and before a release that changes how 911 is routed or located. Never during a known busy period for the PSAP.
+2. **Arrange it:** call the PSAP that serves the test location on its **non-emergency (administrative) line**, two weeks ahead; agree the date,
+   a short time window, how many calls, from which numbers, and who answers on their side; ask whether they want written notice. If the PSAP
+   says no, or asks to postpone, the test does not happen.
+3. **Before:** the organization's Kari's Law contacts (Photon's own test organization) are told; the devices are ready: a desk phone at the
+   site (HTC's native 911), the desktop app at the site and at a confirmed off-site place (through the 911 provider), and a phone with the app
+   (the handoff; a cellular 911 call, located by the carrier).
+4. **Each call:** the caller says at once: *"This is a scheduled test call from Photon, arranged with your center. There is no emergency."*
+   Then confirms with the call-taker: the callback number they see, the location they see (the site's dispatchable address, the off-site place,
+   or the carrier's location), and that it reached the right PSAP. A call-taker who is busy ends the test: call back on the administrative line.
+5. **Check on our side:** the Kari's Law notification arrived for each call, the layer 6 events are there, the CDR shows the route.
+6. **Abort:** any real emergency at the PSAP, any confusion about whether a call is a test, or a call reaching the wrong PSAP stops the test
+   (the last is a finding to fix before anything else).
+7. **Record:** date, PSAP, call-taker's first name if given, each call's callback number and location as seen, the notifications, problems found,
+   in `docs/911-TESTS.md`; problems become fixes before the next release.
 
 ### Branding (decision 24)
 
@@ -901,6 +987,10 @@ and application ids under Photon's reverse domain (`com.photonind.vox`). Repo `p
     with uncertainty, or a civic address), numbers registered at users' home addresses, or routing to a national emergency call relay center
     (ECRC)? If not, may Photon contract a 911 provider for these calls (Bandwidth, Intrado, RedSky or another, after research), and is there one
     Photon already deals with?
+14a. **Which carriers support 933 on wireless** (research to confirm; layer 3 of §18a's 911 tests), and which carriers Photon's customers use
+    most (the phones Photon keeps for testing follow them).
+14b. **A test emergency number** for the app's test builds: a number Photon owns, ringing a test menu on the staging instance (layer 2).
+14c. **The PSAP for the yearly live test** (layer 5): which center, and who at Photon makes the arrangement.
 15. **Test devices:** an iPhone and an Android phone for development, and Connor's Mac with Xcode for tethered debugging when needed.
 16. **Windows** in the first app release, or iOS, Android and macOS first? (Windows needs a code-signing service, a small monthly fee.)
 17. A **GitHub remote for photonvox** (Xcode Cloud builds from it).

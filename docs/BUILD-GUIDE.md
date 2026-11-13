@@ -17,7 +17,7 @@ location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps sti
 | PhotonConsole | Polls the engine today (`photon_pbx`: read-only Postgres `photon_ro` + `photon-fpbx-shim`, over mgmtnet). Its code is the reference for every read query |
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
 | GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
-| Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1, 0.3, 0.4 and 0.5 done 2026-11-13** (skeleton, API on the directory fake, web shell, compose and smoke: BUILD-LOG). 0.2 (inventory script) not written yet |
+| Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1–0.5 done 2026-11-13** (skeleton; inventory scripts written, not run; API on the directory fake; web shell; compose and smoke: BUILD-LOG) |
 | Staging instance, PhotonVox VPS | Do not exist (GATES 0a, 1a) |
 
 **Dev ports** (they collide with no other agent): web **5183**, API **8113**.
@@ -347,38 +347,56 @@ key and the FCM project, the GitHub remote for Xcode Cloud (question 17)).
   directory and phone contacts, favorites, presence, do not disturb; the partner's branding after sign-in; sign-out and data wipe.
 - The gateway's push path: APNs VoIP and FCM high priority, ringing held until the device connects, cancel when another device answers.
 - Android builds on the runner; iOS on Xcode Cloud; internal TestFlight and Play internal testing.
+- **The release-build check** (ARCHITECTURE §18a part 4, layer 2): the test emergency number exists only in debug and internal-test builds;
+  every release pipeline (Xcode Cloud's release workflow, the Gradle release task, the desktop release) fails if the number or its setting's
+  name appears anywhere in the built bundle; a unit test asserts the release configuration has none. Proven by building a release with the
+  number deliberately left in and watching the check fail.
 
 **Done when:** on real devices, with the app killed and the phone locked, an incoming call rings within 3 seconds of the INVITE in 19 of 20
 tries on each platform, together with the user's desk phone; answering from the lock screen gives two-way audio; a call survives switching
 between Wi-Fi and cellular (the app reconnects and ICE restarts) or fails clearly; battery use with the app idle for 24 hours is measured and
 negligible; removing the user wipes the app. **GATE A3.**
 
-**A4: 911 in the app** (the handoff needs nothing from Connor; part 2 needs **GATE A4a**: HTC's answer, or a contracted 911 provider, on per-call
-location and an ECRC, question 14).
-- **The handoff (primary, ARCHITECTURE §18a part 1):** emergency-number detection before anything else (Android's emergency-number list, the
-  app's own list on iOS; 911 always; 933 never handed off); the dial intent on each OS; the same check for calls started from the system's
-  Recents list, contacts or Siri; a PhotonVox call in progress held or ended; "has cellular service" per OS; the Kari's Law notification sent as
-  the app hands off, queued when offline, never delaying it. No location permission needed on phones for this.
+**A4: 911 in the app** (the handoff needs nothing from Connor beyond **GATE A4b**: the test emergency number, question 14b; part 2 needs **GATE
+A4a**: HTC's answer, or a contracted 911 provider, on per-call location and an ECRC, question 14).
+- **The handoff (primary, ARCHITECTURE §18a part 1):** the decision function `route()` (layer 1) in `@photonvox/calling`; the dial intent on each
+  OS; the same check for calls started from the system's Recents list, contacts or Siri; a PhotonVox call in progress held or ended; "has
+  cellular service" per OS read into `route()`'s inputs; the Kari's Law notification and the layer 6 event sent as the app hands off, queued
+  when offline, never delaying it. No location permission needed on phones for this.
 - **Devices without cellular (part 2):** site matching by Wi-Fi access point, network name, public IP and geofence, with the integrator's tool
   for mapping a site's access points to its emergency locations; the best OS location elsewhere, sent in the form the 911 provider accepts;
   asking the user only when automatic location fails or is too coarse, once per new place; the ECRC as the last fallback; location read only at
   sign-in, on network change and at call time; only the current emergency location kept on the server.
-- Tests: the choice between handoff and VoIP 911, and the location choice, as CRITICAL modules with a table of cases (cellular / no service /
-  airplane mode / no SIM / desktop / tablet; site match / coordinates / confirmed place / nothing); a 24-hour battery run showing no location use
-  on phones and none outside the three moments elsewhere; 933 from a desktop at a site and at a confirmed place; **never a real 911 call**
-  (handoff tests stop at the system's dialer).
+- **The test layers (§18a part 4):** layer 1's table of cases and generated test; layer 2's test number on real phones; layer 3's 933 on each
+  carrier that supports it; layer 4's device matrix, split between a device farm and Photon's own phones; layer 6's events in production with
+  an alert to Photon staff when a dialer did not open. `docs/911-TESTS.md` holds the matrix, each run's results and the live tests.
 
-**Done when:** on real phones, 911 dialed in the app (from its dialer and from the system's Recents) always opens the system dialer with 911, a
-PhotonVox call in progress is held, and the notification arrives; on a desktop and a Wi-Fi-only tablet, a user moving between two mapped areas
-of a site gets the right emergency location without being asked, a user at a new place is asked once and not again there, and 933 reads back
-the right address (or the provider's limit is documented); every path of §18a's 911 rules is tested. **GATE A4.**
+**Done when:**
+- `route()` is at 100% branch coverage with the table of cases (911, 112, 933, `9-911` and the other prefixed forms, `*911`; cellular in
+  service, emergency-only, out of service, radio off, airplane mode; SIM absent, locked, ready; iOS, Android, desktop, browser), and the
+  generated test shows no input ever refuses or delays an emergency number;
+- on real phones (an iPhone and an Android phone on each major carrier), dialing the **test emergency number** in the app opens the system
+  dialer and the call arrives at the test menu **with the phone's own mobile number as caller ID**, from the app's dialer and from the system's
+  Recents, with a PhotonVox call in progress, with the phone locked, and under Do Not Disturb; the test notification and the layer 6 event
+  arrive each time;
+- 933 through the app reads back on every carrier that supports it on wireless (the list and the result per carrier in `docs/911-TESTS.md`),
+  and on a desktop and a Wi-Fi-only tablet at a site and at a confirmed place (or the provider's limit is documented);
+- the layer 4 matrix has been run once in full, farm and own phones, on the oldest supported and the current iOS and Android;
+- on a desktop and a Wi-Fi-only tablet, a user moving between two mapped areas of a site gets the right emergency location without being
+  asked, and a user at a new place is asked once and not again there;
+- the release-build check has failed a release built with the test number in it, and passes a clean one. **GATE A4.**
 
 **A5: release** (needs **GATE A5a**: Connor's approval of the store listings, privacy labels and the demo organization for Apple's review;
 the trademark answer, question 18).
 - Partner beta (TestFlight external, Play closed testing) with Photon's own staff and one partner; store submission; desktop release channel.
+- **The first live 911 test** (ARCHITECTURE §18a, the runbook; needs **GATE A5b**: the PSAP's agreement, question 14c), before the store
+  release: a desk phone, the desktop app at a site and off site, and a phone's handoff; results in `docs/911-TESTS.md`. Then about once a year,
+  and before any release that changes 911 routing.
+- The layer 4 device matrix run again on the release candidate; the release-build check passing.
 - `docs/APP-RELEASE.md`: how a release is built, signed, tested and shipped; who holds which key.
 
-**Done when:** the app is live in both stores and the desktop app is downloadable, the pilot customer's users run it beside their desk phones
+**Done when:** the live 911 test has been done and recorded with no open finding, the app is live in both stores and the desktop app is
+downloadable, the pilot customer's users run it beside their desk phones
 for two weeks, and the release runbook has been followed once by someone other than its author (or by Connor). **GATE A5: phase A done.**
 
 R3 adds texting and chat to the app (one conversation model with the web app).
@@ -390,7 +408,8 @@ R3 adds texting and chat to the app (one conversation model with the web app).
 - Every change ships with tests; a coverage ratchet. **CRITICAL modules at 100% branch coverage:** auth, roles and scopes; RLS; the document's
   validation; the compiler (every outcome, every call class, 911); the adapter's tenant scoping (`domain_uuid` on every query and write); the
   fraud breaker; GDMS signing and the push receiver; enrollment's steps and their retry; caller-ID choice; vox-agent request signing;
-  in phase A, device enrollment and sign-out, the gateway's device authentication, and the app's 911 location rules.
+  in phase A, device enrollment and sign-out, the gateway's device authentication, the app's emergency `route()` function and its 911
+  location rules.
 - Every API route has a tenant-isolation test and a site-scope test where scopes apply.
 - **Calls are tested with calls:** each outcome and each routing rule has a SIPp scenario on the staging instance; "911 still passes while
   blocked" and the fraud scenarios are permanent tests.
@@ -436,7 +455,9 @@ R3 adds texting and chat to the app (one conversation model with the web app).
 | A2a | macOS Developer ID; a Windows signing service if Windows is in scope | desktop releases |
 | A3a | Apple and Google organization accounts (D-U-N-S), APNs key, FCM project, the GitHub remote | mobile builds and push |
 | A4a | Whether HTC handles 911 with a per-call location and an ECRC, or which 911 provider to contract (question 14) | app 911 on devices without cellular |
+| A4b | A test emergency number (a DID Photon owns) for test builds; phones on the carriers to test (questions 14a, 14b) | the handoff tests |
 | A5a | Store listings, privacy labels, the review demo organization, the trademark answer | store release |
+| A5b | The PSAP's agreement to a scheduled live 911 test (question 14c), and Connor's go-ahead for that day | the first live test, before the store release |
 | any | Changes to other repos or any production host; spending money; pushing to GitHub | — |
 
 ## 10. Out of scope for R1

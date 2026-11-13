@@ -98,3 +98,20 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
 - Designed but not verified (spike A0, real devices): iOS's confirmation for `tel:911` from an app, an iPhone's behavior in airplane mode, the
   call-time location read from the background, what the call observer reports. Android's `ACTION_DIAL` for emergency numbers is from Android's
   documentation. 911 provider candidates (Bandwidth, Intrado, RedSky, Comtech) are named for research, not checked.
+
+## 2026-11-13: Step 0.2 (inventory scripts) and the app's 911 test plan
+
+- **Step 0.2:** `scripts/inventory/engine.sh` (inside the FusionPBX container) and `host.sh` (on the Proxmox host), read-only, counts and
+  categories only; written and tested here, **not run** (Connor runs them or approves each run). Every table, column and app uuid in the SQL was
+  checked against FusionPBX's own schema definitions (`app_config.php`, master, 5.7), which also confirmed the three dial-plan app uuids the
+  design had marked "to confirm" and showed that `software::version()` moved to `core/software/` in newer releases. The FreeSWITCH output
+  parsers are tested against sample output under `mawk`, which is Debian's default awk and refused one variable name gawk would accept. The SQL
+  itself has not run against a real FusionPBX.
+- **The app's 911 test plan** (Connor): ARCHITECTURE §18a part 4 (six layers: the `route()` decision function at 100% branch coverage; a test
+  emergency number in test builds only, proven by the caller ID that arrives and kept out of release builds by a build check; 933 per carrier;
+  a real-device matrix split between a device farm and Photon's own phones; a yearly live 911 test arranged with the PSAP, with its runbook;
+  production events for every emergency dial, with no location or content). BUILD-GUIDE A3, A4 and A5 and gates A4b and A5b follow.
+- One change of design it brought: **933 now follows 911's path** (handed to the cellular dialer on phones), so a carrier's 933 read-back can be
+  tested through the app. Earlier the same day 933 was never handed off.
+- Stopped here: the next BUILD-GUIDE item, Step 0.6 (the staging instance), needs GATE 0a (a staging container in the colo), and the spikes after
+  it need the GDMS key and phones (GATES 0c, 0d). Running the inventory needs Connor (GATE 0b).
