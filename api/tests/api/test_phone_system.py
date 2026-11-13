@@ -447,3 +447,16 @@ def test_drift_on_a_failed_phone_system_is_recorded_without_changing_its_state(c
         s.commit()
         got = service.check_drift(s, s.get(PhoneSystem, ps.id), connect)
     assert got["changed"] == [] and ps_row(world).status == "failed"
+
+
+def test_a_customers_call_flows_can_be_cloned_by_someone_who_sees_both(client, world, built):
+    b = f"/tenants/{world.b}"
+    assert client.post(f"{built}/phone-system/draft/clone", headers=auth("tech"), json={"from_tenant_id": world.b}).status_code == 404  # B has none yet
+    assert client.post(f"{b}/phone-system", headers=auth("tech")).status_code == 201
+    r = client.post(f"{b}/phone-system/draft/clone", headers=auth("tech"), json={"from_tenant_id": world.a})
+    assert r.status_code == 200, r.text
+    d = r.json()["draft"]
+    assert d["hours"]["office"]["holidays"] == "us-federal" and "everyone" not in d["groups"]        # B has nobody with A's extensions yet
+    assert client.post(f"{b}/phone-system/draft/clone", headers=auth("b-owner"), json={"from_tenant_id": world.a}).status_code == 404   # cannot see A
+    assert client.post(f"{built}/phone-system/draft/clone", headers=auth("tech"), json={"from_tenant_id": world.a}).status_code == 404  # itself
+    assert client.post(f"{b}/phone-system/draft/clone", headers=auth("tech"), json={"from_tenant_id": str(uuid.uuid4())}).status_code == 404

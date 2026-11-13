@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 from app import audit
 from app.compiler.compile import CompileError, compile_plan
 from app.db import SystemSession, get_db
-from app.deps import Ctx, require
-from app.document import importer, templates
+from app.deps import Ctx, load_ctx, require
+from app.document import clone as cloning, importer, templates
 from app.document.model import PhoneSystem as Document
 from app.document.validate import problems
 from app.engine import service
@@ -198,6 +198,25 @@ def apply_template(body: TemplateIn, ctx: Ctx = Depends(require(BUILD)), db: Ses
                  users=len(users))
     db.commit()
     return {**_summary(db, ps), "rows": rows}
+
+
+class CloneIn(BaseModel):
+    from_tenant_id: uuid.UUID
+
+
+@router.post("/phone-system/draft/clone")
+def clone_draft(body: CloneIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Copy another customer's call flows, hours, calling policy and features into this draft (the integrator must see both)."""
+    ps = _ps(db, ctx)
+    other = load_ctx(db, ctx.who, body.from_tenant_id)
+    source = db.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == body.from_tenant_id)).scalar_one_or_none() if other else None
+    if other is None or not other.can(VIEW) or source is None or body.from_tenant_id == ctx.tenant_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_source", "detail": "There is no such phone system to copy from."})
+    doc = _document(cloning.clone(source.draft, ps.draft))
+    ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
+    audit.record(db, **_who(ctx), action="phone_system.cloned", target_type="phone_system", target_id=ps.id, source=str(body.from_tenant_id))
+    db.commit()
+    return _summary(db, ps)
 
 
 class ImportIn(BaseModel):

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../auth/TenantContext'
 import type { Draft, DraftGroup, DraftHours, DraftMenu } from '../api/types'
 import { rename, slug, TargetPicker, targetText, targetValue, toTarget, useDraft, useSiteNames } from '../components/draft'
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui'
@@ -25,7 +27,7 @@ export function CallFlowsPage() {
   const hours = Object.entries(draft.hours ?? {})
   return (
     <>
-      <PageHeader title="Call flows" />
+      <PageHeader title="Call flows">{canBuild && <CloneFrom onDone={() => ps.reload()} />}</PageHeader>
       <ErrorText>{error}</ErrorText>
       <section aria-label="Ring groups">
         <div className="ph-page-header"><h2>Ring groups</h2><div className="ph-actions">{add('group')}</div></div>
@@ -220,5 +222,41 @@ function HoursForm({ draft, k, saving, error, onClose, save }: FormProps) {
           numbers: Object.fromEntries(Object.entries(d.numbers ?? {}).map(([n, x]) => [n, k && x.hours === k ? { ...x, hours: key } : x])) }))}
         onRemove={() => void save((d) => ({ ...d, hours: put(d.hours, k, k, null) }))} />
     </Modal>
+  )
+}
+
+/** Clone: another customer's call flows, hours, calling policy and features as a starting point (people matched by extension). */
+function CloneFrom({ onDone }: { onDone: () => Promise<void> }) {
+  const { api } = useAuth()
+  const { current, tenants } = useTenant()
+  const others = tenants.filter((t) => t.id !== current!.id && t.capabilities.includes('vox.phone_system.view'))
+  const [open, setOpen] = useState(false)
+  const [from, setFrom] = useState(others[0]?.id ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  if (others.length === 0) return null
+  const go = async () => {
+    setBusy(true); setError(null)
+    try { await api.post(`/tenants/${current!.id}/phone-system/draft/clone`, { from_tenant_id: from }); setOpen(false); await onDone() }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+  return (
+    <>
+      <button className="ph-btn ph-btn-secondary" onClick={() => setOpen(true)}>Copy from another customer</button>
+      {open && (
+        <Modal title="Copy call flows from another customer" onClose={() => setOpen(false)}>
+          <div className="ph-field">
+            <label htmlFor="pv-clone-from">Customer</label>
+            <select id="pv-clone-from" className="ph-input" value={from} onChange={(e) => setFrom(e.target.value)}>
+              {others.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <p className="ph-hint">Their ring groups, menus, shared mailboxes, office hours, calling policy and features replace this customer’s.
+            Sites, numbers and people stay; people are matched by extension, and anything that does not match is listed on the Overview to fix.</p>
+          <ErrorText>{error}</ErrorText>
+          <div className="ph-modal-footer"><button className="ph-btn" disabled={busy} onClick={() => void go()}>Copy</button></div>
+        </Modal>
+      )}
+    </>
   )
 }

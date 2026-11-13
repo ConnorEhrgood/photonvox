@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { Draft, PhoneSystemSummary } from '../api/types'
 import { rename, slug, targetText, targetValue, toTarget } from '../components/draft'
-import { meWith, OWNER, renderApp } from '../test/helpers'
+import { meWith, OWNER, renderApp, TECH_A, TECH_B } from '../test/helpers'
 import { CallFlowsPage } from './CallFlows'
 import { NumbersPage, toE164 } from './Numbers'
 
@@ -234,5 +234,36 @@ describe('the forms’ small paths', () => {
   it('a failed load is shown', async () => {
     renderApp(<CallFlowsPage />, { routes: { [`GET ${B}/phone-system`]: new Response(JSON.stringify({ detail: 'down' }), { status: 500 }), [`GET ${B}/sites`]: SITES } })
     expect(await screen.findByRole('alert')).toHaveTextContent('down')
+  })
+})
+
+describe('clone', () => {
+  it('an integrator copies another customer’s call flows; errors are shown', async () => {
+    let fail = true
+    const { calls } = renderApp(<CallFlowsPage />, { me: meWith(TECH_A, TECH_B), routes: {
+      [`GET ${B}/phone-system`]: PS(), [`GET ${B}/sites`]: SITES,
+      [`POST ${B}/phone-system/draft/clone`]: () => (fail ? (fail = false, new Response(JSON.stringify({ detail: { detail: 'There is no such phone system to copy from.' } }), { status: 404 })) : PS()),
+    } })
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy from another customer' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Copy call flows from another customer' })
+    expect(within(dialog).getByLabelText('Customer')).toHaveDisplayValue('Birch Co')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Copy' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('There is no such phone system to copy from.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Copy' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([{ from_tenant_id: 't2' }, { from_tenant_id: 't2' }])
+  })
+
+  it('someone with one customer is not offered it', async () => {
+    withServer(<CallFlowsPage />)
+    expect(await screen.findByText('Ring groups')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy from another customer' })).toBeNull()
+  })
+
+  it('the dialog can be closed', async () => {
+    renderApp(<CallFlowsPage />, { me: meWith(TECH_A, TECH_B), routes: { [`GET ${B}/phone-system`]: PS(), [`GET ${B}/sites`]: SITES } })
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy from another customer' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
