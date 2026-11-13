@@ -21,7 +21,7 @@ done
 db="$(on "sudo -u postgres psql -d fusionpbx -qtAX -F'|' -c \"select gateway, proxy, enabled from v_gateways\"")"
 others="$(awk -F'|' 'NF && !($1 == "sipp-upstream" && $2 ~ /^10\.10\.0\.80(:[0-9]+)?$/)' <<<"$db")"
 [ -z "$others" ] && ok "FusionPBX gateways: $(grep -c . <<<"$db" || true) (only the SIPp upstream allowed)" || bad "FusionPBX has a gateway other than the SIPp upstream: $(cut -d'|' -f1 <<<"$others" | paste -sd, -)"
-fsgw="$(on "fs_cli -x 'sofia status gateway'" | awk 'NF >= 2 && $1 ~ /::/ { print $1 }' | grep -v '::sipp-upstream$' || true)"
+fsgw="$(on "fs_cli -x 'sofia status gateway'" | awk 'NF >= 2 && $1 ~ /::/ && $1 != "Profile::Gateway-Name" { print $1 }' | grep -v '::sipp-upstream$' || true)"
 [ -z "$fsgw" ] && ok "FreeSWITCH gateways: none but the SIPp upstream" || bad "FreeSWITCH has gateways: $(paste -sd, - <<<"$fsgw")"
 
 # The blocked INVITE. 198.51.100.10 is a documentation address (RFC 5737): public as far as the guard is concerned, routed nowhere.

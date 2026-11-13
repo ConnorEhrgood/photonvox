@@ -58,7 +58,20 @@ iptables rules), the single domain named after the container's address.
 
 ### Built
 
-**First build, 2026-11-13: not usable; the container needs resetting to fresh Debian 12 and building again.** The versions came out as planned:
+**Reset point:** Connor saved the fresh container (Debian 12, guard in place, nothing installed) as
+`vzdump-lxc-610-2026_11_13-12_24_37.tar.zst` on `py`'s local storage (stop mode, 192 MB; the directory storage has no snapshots). He restores it
+on request; a rebuild is then `build.sh` again.
+
+**Second build, 2026-11-13: up.** On the reset container, the fixed `build.sh` ran in 8 minutes with no errors:
+- FreeSWITCH `1.11.1-release+git~20260526T204126Z~c2c59645f6~64bit` (production's exact build), FusionPBX 5.5.12, PHP 8.2.35, PostgreSQL 18.7.
+- Running: freeswitch, postgresql, nginx, php8.2-fpm, fail2ban, event_guard. SIP profiles `internal` (5060) and `external` (5080) and their IPv6
+  twins, on 10.10.0.60. No `htc` profile, no gateway. The web login answers on 443. iptables policy DROP with 28 rules. 3.2 GB of the disk used.
+- The guard was identical before and after. `scripts/staging-check.sh` passes: the guard's 3 rules are present, 0 gateways in FusionPBX and
+  FreeSWITCH, an INVITE from FreeSWITCH to a public address was dropped by the guard, and a packet to the HTC trunk's network was dropped
+  before leaving the container.
+- The admin login is in `/root/vox-staging-admin.txt` on staging (root only), not in the log or in git.
+
+**First build, 2026-11-13 (replaced):** The versions came out as planned:
 FreeSWITCH reports production's exact build string (`1.11.1-release+git~20260526T204126Z~c2c59645f6~64bit`), FusionPBX 5.5.12, PHP 8.2,
 PostgreSQL 18; the guard was unchanged (checked before and after); no gateway exists; 3.2 GB of the disk used. But the first `build.sh` set a
 private umask around the whole install (meant only for the password file), so everything the install created outside the Debian packages is

@@ -18,7 +18,7 @@ location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps sti
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
 | GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
 | Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1–0.5 done 2026-11-13** (skeleton; inventory scripts, run once by the operator; API on the directory fake; web shell; compose and smoke). **Ahead of order, because it needs no resources: Step 3's document, its validation and the compiler to an engine plan** (no FusionPBX writes: those wait for the write-path spike) |
-| Staging instance, PhotonVox VPS | Staging: CT 610 given 2026-11-13 (GATE 0a); first build not usable, needs a fresh container (docs/ENGINE.md). VPS: does not exist (GATE 1a) |
+| Staging instance, PhotonVox VPS | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); the SIPp upstream is next. VPS: does not exist (GATE 1a) |
 
 **Dev ports** (they collide with no other agent): web **5183**, API **8113**.
 

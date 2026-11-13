@@ -178,3 +178,15 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   route counts as international only for `011` or a literal `+` not followed by `1`. Connor keeps voicemail PINs at 4 digits: §15 and the
   inventory's PIN check now use 4. ARCHITECTURE §17a updated; whether the North American patterns exclude 900 and the high-cost Caribbean area
   codes is still open (§22).
+
+## 2026-11-13: staging is up (second build)
+
+- Connor reset CT 610 to fresh Debian 12 (same address, key and guard) and saved the fresh state as a vzdump on `py`'s local storage, restorable
+  on request (the directory storage has no snapshots).
+- The fixed `build.sh` ran in 8 minutes, no errors: FreeSWITCH reports production's exact build, FusionPBX 5.5.12, PHP 8.2, PostgreSQL 18.7;
+  every service running, fail2ban included; the internal and external SIP profiles up; no gateway; the guard unchanged. Details in
+  `docs/ENGINE.md`.
+- `scripts/staging-check.sh` passes all 7 checks (after one fix: FreeSWITCH's gateway table header had been read as a gateway). The INVITE to a
+  public address and the packet to the HTC trunk's network were both counted by the guard's drop rules.
+- Live engine: the CT 600 backups are now copied nightly to the NAS (01:30 Pacific, 30 days, zstd-checked), so they leave the node; ARCHITECTURE
+  §17a updated. What remains of §16's Stage 1 is the restore drill onto staging (Step 2).
