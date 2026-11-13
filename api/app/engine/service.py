@@ -325,7 +325,10 @@ def watch_extras(conn: Any, extras: Mapping[str, str], domain_uuid: str) -> List
                                                 "and has_column_privilege(current_user, quote_ident(table_schema) || '.' || table_name, column_name, 'select') "
                                                 "order by ordinal_position"), {"t": table})]
         cols = [c for c in cols if c not in fusionpbx.AUDIT and c not in SECRET_COLUMNS]
-        rows = conn.execute(text(f"select {', '.join(cols)} from {table} where {key} = any(cast(:ids as uuid[])) and domain_uuid = :d"),
+        # A dial plan's details often carry no domain (FusionPBX's screens leave it empty): they are found by their own ids, which the adoption
+        # took from the domain's dial plans.
+        scope = "" if table == "v_dialplan_details" else " and domain_uuid = :d"
+        rows = conn.execute(text(f"select {', '.join(cols)} from {table} where {key} = any(cast(:ids as uuid[])){scope}"),
                             {"ids": list(want), "d": domain_uuid}).mappings().all()
         have = {str(r[key]): extra_hash(dict(r)) for r in rows}
         for uid, h in want.items():

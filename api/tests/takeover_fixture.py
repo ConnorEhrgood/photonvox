@@ -106,7 +106,7 @@ def hand_built() -> Dict[str, Any]:
         ],
         "v_dialplan_details": [
             _detail(51, 31, "condition", "destination_number", f"^({MAIN})$", 10), _detail(52, 31, "action", "transfer", f"900 XML {DOMAIN}", 20),
-            _detail(53, 36, "condition", "destination_number", "^1?(\\d{10})$", 10),
+            {**_detail(53, 36, "condition", "destination_number", "^1?(\\d{10})$", 10), "domain_uuid": None},   # as FusionPBX's screens leave it
         ],
         "v_gateways": [{"gateway_uuid": GATEWAY, "domain_uuid": OTHER, "gateway": "Hickory Telephone", "proxy": "198.51.100.9", "register": False,
                         "context": "public", "profile": "htc", "enabled": True, "description": None}],

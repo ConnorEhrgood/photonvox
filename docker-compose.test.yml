@@ -47,6 +47,9 @@ services:
       VOX_STAGING_DB_URL: ${VOX_STAGING_DB_URL:-}
       VOX_STAGING_AGENT_URL: ${VOX_STAGING_AGENT_URL:-}
       VOX_STAGING_AGENT_SECRET: ${VOX_STAGING_AGENT_SECRET:-}
+      VOX_STAGING_TAKEOVER: ${VOX_STAGING_TAKEOVER:-}
+      VOX_STAGING_DOMAIN: ${VOX_STAGING_DOMAIN:-}
+      VOX_STAGING_GATEWAY: ${VOX_STAGING_GATEWAY:-}
     volumes:
       - ./api:/app
       - ./contract:/contract:ro      # the phone-system schema and samples the unit tests read

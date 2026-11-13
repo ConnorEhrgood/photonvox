@@ -211,3 +211,32 @@ def test_a_put_back_with_an_agent_rewrites_the_row_and_clears_its_cache(client, 
     with eng.connect() as c:
         row = c.execute(text("select effective_caller_id_name, password from v_extensions where extension = '101'")).first()
     assert row.effective_caller_id_name == "Pastor" and row.password == "sip-secret-101"          # the live value back, the secret untouched
+
+
+def test_the_operator_commands_do_the_takeover_without_a_browser(client, world, eng):
+    import io
+    from app import manage
+    conn = lambda i: (eng, service.NoAgent())         # noqa: E731
+    run_ = lambda *a, stdin="": (lambda o: (manage.main(list(a), io.StringIO(stdin), o, conn), json.loads(o.getvalue() or "null") if o.getvalue().strip().startswith(("{", "[")) else o.getvalue()))(io.StringIO())   # noqa: E731
+    with pytest.raises(SystemExit, match="standard input"):
+        run_("add-instance", "live-a", "fusionpbx", f"htc={F.GATEWAY}", stdin="nonsense\n")
+    rc, added = run_("add-instance", "live-a", "fusionpbx", f"htc={F.GATEWAY}", stdin="postgresql+psycopg://photonvox_rw:x@10.10.0.21/fusionpbx\n")
+    assert rc == 0 and added["own_gateways"] == {"htc": F.GATEWAY}
+    with pytest.raises(SystemExit, match="no phone system"):
+        run_("show", world.a)
+    before = snapshot(eng)
+    rc, adopted = run_("adopt", "live-a", world.a, world.a1, F.DOMAIN)
+    assert rc == 0 and adopted["objects"] == 8
+    rc, published = run_("publish", world.a, "the takeover, behavior unchanged")
+    assert rc == 0 and published["state"] == "ready" and published["checks"] == [] and not published["error"]
+    assert snapshot(eng) == before
+    rc, drift = run_("drift", world.a)
+    assert drift["changed"] == [] and drift["hand_built_changed"] == []
+    rc, shown = run_("show", world.a)
+    assert shown["status"] == "ready" and shown["adopted"] and [(v["number"], v["state"]) for v in shown["versions"]] == [(1, "ready")]
+    assert run_("nonsense")[0] == 2 and run_()[0] == 2
+    with SystemSession() as s:
+        from app.models import AuditLog
+        actions = [a.action for a in s.execute(select(AuditLog).where(AuditLog.actor_label == manage.OPERATOR)).scalars()]
+    assert actions == ["instance.added", "phone_system.adopted", "phone_system.publish_requested", "phone_system.published"] or \
+        set(actions) >= {"instance.added", "phone_system.adopted", "phone_system.publish_requested"}
