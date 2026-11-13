@@ -154,3 +154,27 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   from every extension** on the live system. Recorded in ARCHITECTURE §17a. The operator is raising the fix with Connor; nothing is written here.
 - Limit of the classification, recorded with it: it only notices patterns that name 900 or 976. A broad North American pattern would also let
   premium 900 numbers and the high-cost Caribbean area codes through, so whether those are open is unknown until someone reads the two patterns.
+
+## 2026-11-13: the staging container, first build (not usable yet)
+
+- Connor created `vox-staging` (Proxmox CT 610, 10.10.0.60, Debian 12, 2 cores, 2 GB, 10 GB) with his nftables guard (`inet vox_guard`: nothing
+  to the HTC trunk's network, no new SIP to public addresses). Rules: no carrier gateways, no public port forward, no production gateway or trunk
+  credentials, `--no-install-recommends`.
+- `engine/staging/build.sh`: the FusionPBX install script at the revision in use when production was installed (`1d4100b`), with production's
+  versions pinned (FusionPBX at its last 5.5.12 commit, FreeSWITCH tag v1.11.1, sofia-sip 1.13.17, libks, spandsp and FusionPBX's optional apps as
+  of 2026-07-31), no recommended packages, the install script's own later fix for unprivileged containers, and the admin password kept out of
+  the log. Recorded in `docs/ENGINE.md`.
+- First build (12 minutes): versions as planned (FreeSWITCH's build string is production's exactly); guard unchanged; no gateways. **Not usable:**
+  my script set a private umask around the whole install instead of only the password file, so 18,540 files the install created are readable by
+  their owner only, and FreeSWITCH cannot read FusionPBX's config (no SIP profiles load). Fixed in the script; it now also refuses to run on a
+  container that already has an install, and restarts fail2ban at the end (it failed on a missing `auth.log`). **Needs Connor: reset CT 610 to
+  fresh Debian 12** (a snapshot of the fresh container first would make the "rebuilt once" check in Step 0's done-when a rollback away).
+- `scripts/staging-check.sh` (Step 0.6's check, run from the runner): the guard's rules are present, no gateway exists in FusionPBX or
+  FreeSWITCH but the SIPp upstream, an INVITE from FreeSWITCH to a public documentation address is dropped by the guard (its counter moves), and
+  a packet to the HTC trunk's network is dropped before leaving the container. Not run yet: it needs FreeSWITCH's profiles.
+- Live engine, from the operator (done on production today, not by me): the number whose calls dropped was removed; the VoIP.ms gateway and its
+  disabled route were removed; a nightly Proxmox backup of CT 600 now runs (02:15, local storage, keep 3). **Every production outbound route is
+  North American only**: the second run's "international" was the inventory script counting the `\+1` of a North American pattern. Fixed: a
+  route counts as international only for `011` or a literal `+` not followed by `1`. Connor keeps voicemail PINs at 4 digits: §15 and the
+  inventory's PIN check now use 4. ARCHITECTURE §17a updated; whether the North American patterns exclude 900 and the high-cost Caribbean area
+  codes is still open (§22).

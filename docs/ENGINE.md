@@ -18,7 +18,55 @@ From the read-only inventory of 2026-11-13 (`scripts/inventory/`, ARCHITECTURE Â
 | NAT | FreeSWITCH autonat for SIP and RTP |
 | Protection | fail2ban, FusionPBX's event guard, iptables policy DROP |
 
-## Staging (not built: GATE 0a)
+## Staging: `vox-staging` (Proxmox CT 610, 10.10.0.60)
 
-The same versions as production. **No carrier gateways, never the HTC trunk, outbound SIP to the internet blocked** (Connor, 2026-11-13); a SIPp
-upstream on LXC 800 plays every carrier. The install steps go here as they are done, so the instance can be rebuilt from this file.
+Created by Connor on 2026-11-13: Debian 12, 2 cores, 2 GB memory, 10 GB disk (small on purpose: it shares the Proxmox root disk). SSH from the
+runner: `ssh -i ~/.ssh/vox_staging root@10.10.0.60`.
+
+**Staging never reaches a carrier** (Connor, 2026-11-13): no carrier gateways, never the HTC trunk, no public port forward, no gateway or trunk
+credentials copied from production (production configuration may be copied for reference with its secrets left out). Connor's nftables guard
+(`/etc/nftables.conf`, table `inet vox_guard`) drops everything to 172.30.254.0/24 (the HTC trunk) and new SIP (ports 5060â€“5099) to any public
+address, IPv4 or IPv6. **Never change or disable it.** `scripts/staging-check.sh` proves it from the runner: the guard's rules are present, no
+gateway exists but the SIPp upstream, and an INVITE from FreeSWITCH to a public address (a documentation address) is dropped. A SIPp upstream on
+LXC 800 plays every carrier (Step 0.6).
+
+### How it is built
+
+`engine/staging/build.sh`, run once as root on a fresh container (the command is at its top; about 12 minutes, 9 of them compiling
+FreeSWITCH; it refuses a container that already has an install). It is **the FusionPBX install script as it stood when production was installed**, with production's versions pinned:
+
+| | Pinned to | Why |
+|---|---|---|
+| fusionpbx-install.sh | `1d4100b` (2026-05-18) | the script from 2026-05-18 to 2026-07-30; production's FusionPBX (5.5.12: 2026-06-25 to 2026-07-30) was installed in that window |
+| FusionPBX | `0d7a986` on branch 5.5 (2026-07-30) | the last commit at version 5.5.12. Production's exact commit is not known (its install has no git metadata the inventory could read) |
+| FreeSWITCH | tag `v1.11.1` (`c2c5964`) | the commit production's build reports |
+| sofia-sip | 1.13.17 | the script's setting at `1d4100b` |
+| libks, spandsp, FusionPBX's optional apps | the last commit before 2026-07-31 | the script clones them at their head; pinned to the same window |
+| PHP | 8.2 (packages.sury.org) | the script's setting at `1d4100b` |
+| PostgreSQL | 18 (apt.postgresql.org) | as production |
+
+Changes to the script, all made by `build.sh` with `sed` so the diff is short and visible (`git diff` in `/usr/src/fusionpbx-install.sh`):
+- **No recommended packages** (Connor's rule): `APT::Install-Recommends "0"` for every install, and `--no-install-recommends` on the script's own.
+- **Unprivileged container:** the realtime scheduling lines of the FreeSWITCH service are commented out, as the install script itself does since
+  `6794bc1` (2026-10-14); an unprivileged LXC refuses them.
+- The sound tarballs are deleted once unpacked; the FreeSWITCH build objects are cleaned at the end (the sources stay in `/usr/src`).
+- The admin's password, which the install prints, goes to `/root/vox-staging-admin.txt` (mode 600) and never into `/root/vox-build.log`.
+
+Left as the script does it, like production: the iptables rules (legacy iptables, policy DROP; they sit beside Connor's nftables guard and do not
+touch it, and `build.sh` checks the guard is unchanged at the end), fail2ban, FusionPBX's event guard, the SNMP daemon (its port is closed by the
+iptables rules), the single domain named after the container's address.
+
+### Built
+
+**First build, 2026-11-13: not usable; the container needs resetting to fresh Debian 12 and building again.** The versions came out as planned:
+FreeSWITCH reports production's exact build string (`1.11.1-release+git~20260526T204126Z~c2c59645f6~64bit`), FusionPBX 5.5.12, PHP 8.2,
+PostgreSQL 18; the guard was unchanged (checked before and after); no gateway exists; 3.2 GB of the disk used. But the first `build.sh` set a
+private umask around the whole install (meant only for the password file), so everything the install created outside the Debian packages is
+readable by its owner only (18,540 files: FusionPBX's code and config, FreeSWITCH's configuration and sounds, systemd units, apt sources).
+FreeSWITCH (running as `www-data`) cannot read `/etc/fusionpbx`, so it loads no SIP profiles. Repairing modes file by file would be guesswork
+and not reproducible; the script is fixed (only the password file is made private) and needs a fresh container. fail2ban also failed to start
+(its sshd jail started before rsyslog had written `auth.log`; the install says to reboot); the script now restarts it at the end.
+
+Known differences from production, both minor releases the package repositories no longer serve at production's level: Debian 12.15 (production
+12.14) and PostgreSQL 18.7 (production 18.4). Production gets the same on its next `apt upgrade`; matching them exactly would need old packages
+from the archives, which is not worth it for staging.
