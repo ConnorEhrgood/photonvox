@@ -471,3 +471,9 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   Staging's roles undone and its pg_hba restored byte for byte afterwards; a clean copy reloaded.
 - **Operator commands** (`python -m app.manage`: add-instance, adopt, publish, drift, show) so the production steps run from reviewed files,
   each audited with the operator's name.
+- **Step 3 (about 23:47–23:55 UTC):** 3A: PhotonVox's database backed up (`backups-manual/pre-vox-takeover-code-…`, read back), the takeover
+  code deployed (6524735, migration 0007), every container healthy, every Photon site 200. 3B: the write role on CT 600 (`gate-rw.sh`):
+  check clean, apply with its 8 checks ok, the password moved to the runner (`~/.config/photonvox/live-rw.pass`) and deleted on CT 600, a
+  real login from the Vultr host (reads, may update extensions, may not update domains, refused a SIP password). No vox-agent: not needed
+  for a no-op publish. Undo: `gate-rw.sh undo` on CT 600. (Writing step 3, one read-only command ran on the Vultr host before its go: a
+  look for a deploy marker; it changed nothing. Said so to the operator.)
