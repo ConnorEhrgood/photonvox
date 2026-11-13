@@ -1,7 +1,9 @@
 -- GATE 1c: PhotonVox's read-only role on the live engine (CT 600, FusionPBX 5.5.12, PostgreSQL 18). Run by gate-1c.sh apply, which sets :'pw'.
--- What Step 1 shows of each live domain (monitored only): domains, extensions, voicemail boxes, numbers, menus, ring groups, upstreams by name,
--- and call history. Columns are granted one by one: no SIP or voicemail passwords, menu PINs, gateway logins, CDR raw XML/JSON, recordings or
--- callers' network addresses. Nothing of FusionPBX's own users. The dial plans (needed for R2's comparison) are not granted until R2.
+-- Revised 2026-11-13 for Step 7, the in-place takeover of HUEPC (decision 32; Connor approved reading the dial plans): the import must see every
+-- non-secret column of the rows PhotonVox will manage, so that its first publish can be proven a no-op. Grants are therefore "every column of
+-- these tables except the secrets named below", generated from the catalog; gate-1c.sh verify lists what was granted.
+-- Never readable: SIP passwords, voicemail PINs, menu PINs, gateway logins, FusionPBX users' passwords, salts, API keys and TOTP secrets,
+-- recordings' audio, and the call records' raw XML/JSON, PINs, recordings and callers' network addresses.
 \set ON_ERROR_STOP on
 begin;
 create role photonvox_ro login password :'pw' noinherit nocreatedb nocreaterole noreplication connection limit 4;
@@ -11,29 +13,36 @@ alter role photonvox_ro set idle_in_transaction_session_timeout = '60s';
 grant connect on database fusionpbx to photonvox_ro;
 grant usage on schema public to photonvox_ro;
 
-grant select (domain_uuid, domain_parent_uuid, domain_name, domain_enabled, domain_description) on v_domains to photonvox_ro;
-grant select (extension_uuid, domain_uuid, extension, number_alias, accountcode, effective_caller_id_name, effective_caller_id_number,
-              outbound_caller_id_name, outbound_caller_id_number, emergency_caller_id_name, emergency_caller_id_number, directory_first_name,
-              directory_last_name, max_registrations, limit_max, user_context, toll_allow, call_timeout, call_group, user_record, do_not_disturb,
-              forward_all_enabled, forward_all_destination, forward_busy_enabled, forward_busy_destination, forward_no_answer_enabled,
-              forward_no_answer_destination, forward_user_not_registered_enabled, forward_user_not_registered_destination, follow_me_enabled,
-              enabled, description, insert_date, update_date) on v_extensions to photonvox_ro;
-grant select (voicemail_uuid, domain_uuid, voicemail_id, voicemail_mail_to, voicemail_attach_file, voicemail_local_after_email,
-              voicemail_enabled, voicemail_description) on v_voicemails to photonvox_ro;
-grant select (destination_uuid, domain_uuid, dialplan_uuid, destination_type, destination_number, destination_prefix, destination_context,
-              destination_caller_id_name, destination_caller_id_number, destination_actions, destination_app, destination_data,
-              destination_type_emergency, destination_enabled, destination_description, insert_date, update_date) on v_destinations to photonvox_ro;
-grant select (ivr_menu_uuid, domain_uuid, dialplan_uuid, ivr_menu_name, ivr_menu_extension, ivr_menu_greet_long, ivr_menu_greet_short,
-              ivr_menu_timeout, ivr_menu_exit_app, ivr_menu_exit_data, ivr_menu_direct_dial, ivr_menu_enabled, ivr_menu_description) on v_ivr_menus to photonvox_ro;
-grant select (ivr_menu_option_uuid, ivr_menu_uuid, domain_uuid, ivr_menu_option_digits, ivr_menu_option_action, ivr_menu_option_param,
-              ivr_menu_option_order, ivr_menu_option_description, ivr_menu_option_enabled) on v_ivr_menu_options to photonvox_ro;
-grant select (ring_group_uuid, domain_uuid, dialplan_uuid, ring_group_name, ring_group_extension, ring_group_strategy, ring_group_call_timeout,
-              ring_group_timeout_app, ring_group_timeout_data, ring_group_forward_enabled, ring_group_forward_destination, ring_group_enabled,
-              ring_group_description) on v_ring_groups to photonvox_ro;
-grant select (ring_group_destination_uuid, ring_group_uuid, domain_uuid, destination_number, destination_delay, destination_timeout,
-              destination_enabled) on v_ring_group_destinations to photonvox_ro;
-grant select (gateway_uuid, domain_uuid, gateway, proxy, register, context, profile, enabled, description) on v_gateways to photonvox_ro;
-grant select (xml_cdr_uuid, domain_uuid, domain_name, extension_uuid, direction, caller_id_name, caller_id_number, caller_destination,
-              destination_number, start_stamp, answer_stamp, end_stamp, duration, billsec, missed_call, voicemail_message, hangup_cause, status,
-              call_disposition, ring_group_uuid, ivr_menu_uuid, leg, originating_leg_uuid) on v_xml_cdr to photonvox_ro;
+do $$
+declare
+  -- table => the columns it must never read
+  secret constant jsonb := '{
+    "v_domains": [],
+    "v_extensions": ["password"],
+    "v_extension_users": [],
+    "v_voicemails": ["voicemail_password"],
+    "v_destinations": [],
+    "v_ivr_menus": ["ivr_menu_pin_number"],
+    "v_ivr_menu_options": [],
+    "v_ring_groups": [],
+    "v_ring_group_destinations": [],
+    "v_dialplans": [],
+    "v_dialplan_details": [],
+    "v_gateways": ["username", "password", "auth_username"],
+    "v_recordings": ["recording_base64"],
+    "v_users": ["password", "salt", "api_key", "user_totp_secret"],
+    "v_xml_cdr": ["xml", "json", "pin_number", "network_addr", "record_path", "record_name", "record_length", "record_transcription", "sip_call_id"]
+  }';
+  t text;
+  cols text;
+begin
+  for t in select jsonb_object_keys(secret) loop
+    select string_agg(quote_ident(column_name), ', ' order by ordinal_position) into cols
+      from information_schema.columns
+     where table_schema = 'public' and table_name = t
+       and not (column_name = any (select jsonb_array_elements_text(secret -> t)));
+    if cols is null then raise exception 'table % not found', t; end if;
+    execute format('grant select (%s) on public.%I to photonvox_ro', cols, t);
+  end loop;
+end $$;
 commit;

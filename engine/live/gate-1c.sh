@@ -6,7 +6,8 @@
 #   gate-1c.sh verify    read-only: the line loaded without error, the grants are exactly what gate-1c.sql says
 #   gate-1c.sh undo      removes the role and the line, reloads
 # PhotonVox runs on the Vultr host, which reaches this container over mgmtnet as 10.2.1.5 (no NAT), the address PhotonConsole's photon_ro
-# already uses: the iptables rule for 5432 and the mgmtnet grant exist, so neither changes.
+# already uses: the iptables rule for 5432 and the mgmtnet grant exist, so neither changes (`check` shows the rule).
+# Revised for Step 7 (gate-1c.sql): every non-secret column of the 15 tables the takeover reads, the dial plans included.
 set -euo pipefail
 cd /root/photon-changes
 SRC=10.2.1.5/32
@@ -26,12 +27,16 @@ verify() {
   ok "cannot read SIP passwords" "$(pg -c "select has_column_privilege('photonvox_ro', 'v_extensions', 'password', 'select')")" f
   ok "cannot read voicemail PINs" "$(pg -c "select has_column_privilege('photonvox_ro', 'v_voicemails', 'voicemail_password', 'select')")" f
   ok "cannot read gateway logins" "$(pg -c "select has_column_privilege('photonvox_ro', 'v_gateways', 'password', 'select')")" f
-  ok "cannot read FusionPBX's users" "$(pg -c "select has_table_privilege('photonvox_ro', 'v_users', 'select')")" f
-  ok "cannot read dial plans (R2)" "$(pg -c "select has_table_privilege('photonvox_ro', 'v_dialplans', 'select')")" f
+  ok "can read dial plans (Step 7)" "$(pg -c "select has_column_privilege('photonvox_ro', 'v_dialplans', 'dialplan_xml', 'select')")" t
+  ok "cannot read FusionPBX users' passwords, salts, API keys or TOTP secrets" "$(pg -c "select bool_or(has_column_privilege('photonvox_ro', 'v_users', c, 'select')) from unnest(array['password','salt','api_key','user_totp_secret']) c")" f
+  ok "cannot read menu PINs or recordings' audio" "$(pg -c "select has_column_privilege('photonvox_ro', 'v_ivr_menus', 'ivr_menu_pin_number', 'select') or has_column_privilege('photonvox_ro', 'v_recordings', 'recording_base64', 'select')")" f
+  ok "cannot read call records' raw XML/JSON or callers' addresses" "$(pg -c "select has_column_privilege('photonvox_ro', 'v_xml_cdr', 'json', 'select') or has_column_privilege('photonvox_ro', 'v_xml_cdr', 'network_addr', 'select')")" f
   ok "cannot write anything" "$(pg -c "select count(*) from information_schema.role_table_grants where grantee = 'photonvox_ro' and privilege_type <> 'SELECT'")$(pg -c "select count(*) from information_schema.column_privileges where grantee = 'photonvox_ro' and privilege_type <> 'SELECT'")" 00
   ok "reads as the role: extensions, numbers, call history" "$(pg -c "begin read only; set local role photonvox_ro; select (select count(extension) from v_extensions) >= 0 and (select count(destination_number) from v_destinations) >= 0 and (select count(start_stamp) from v_xml_cdr) >= 0; rollback")" t
   ok "  and is refused a SIP password" "$(pg -c "begin read only; set local role photonvox_ro; select password from v_extensions limit 1; rollback" 2>&1 | grep -c 'permission denied')" 1
-  ok "tables it can read" "$(pg -c "select count(distinct table_name) from information_schema.column_privileges where grantee = 'photonvox_ro'")" 10
+  ok "tables it can read" "$(pg -c "select count(distinct table_name) from information_schema.column_privileges where grantee = 'photonvox_ro'")" 15
+  echo "      columns NOT readable (the secrets):"
+  pg -c "select '        ' || c.table_name || '.' || c.column_name from information_schema.columns c where c.table_schema = 'public' and c.table_name in (select distinct table_name from information_schema.column_privileges where grantee = 'photonvox_ro') and not exists (select 1 from information_schema.column_privileges p where p.grantee = 'photonvox_ro' and p.table_name = c.table_name and p.column_name = c.column_name) order by 1"
   [ $bad = 0 ]
 }
 
@@ -43,7 +48,7 @@ case "${1:-}" in
     echo "photonvox_ro role:    $(exists)"
     echo "listen_addresses:     $(pg -c 'show listen_addresses')"
     echo "iptables, 5432 from 10.2.1.5: $(iptables -S INPUT | grep -cE -- '-s 10\.2\.1\.5(/32)? .*--dport 5432 .*-j ACCEPT' || true)"
-    echo "FusionPBX tables:     $(pg -c "select count(*) from pg_tables where schemaname = 'public' and tablename in ('v_domains','v_extensions','v_voicemails','v_destinations','v_ivr_menus','v_ivr_menu_options','v_ring_groups','v_ring_group_destinations','v_gateways','v_xml_cdr')") of 10"
+    echo "FusionPBX tables:     $(pg -c "select count(*) from pg_tables where schemaname = 'public' and tablename in ('v_domains','v_extensions','v_extension_users','v_voicemails','v_destinations','v_ivr_menus','v_ivr_menu_options','v_ring_groups','v_ring_group_destinations','v_dialplans','v_dialplan_details','v_gateways','v_recordings','v_users','v_xml_cdr')") of 15"
     ;;
   apply)
     grep -qE "$NEXT_TO" "$HBA" || { echo "photon_ro's pg_hba line for $SRC is not there: nothing changed" >&2; exit 1; }
