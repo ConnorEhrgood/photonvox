@@ -43,7 +43,7 @@ the row below is the decided version. Decisions 29 (call blocking), 30 (text-to-
 | 13 | **One SIP login per extension** (FusionPBX's model), with a random password PhotonVox rotates automatically when a phone is removed (GDMS re-provisions the others) | Replaces revision 1's "a login per phone", which FusionPBX does not model; rotation through GDMS makes it cheap | 13 |
 | 14 | **Monitoring: collect once, in PhotonVox.** PhotonVox's pane is the integrators' tool (engines, trunks, registrations, GDMS phone status, per organization and site) with a small fixed set of phone alerts. PhotonConsole receives PhotonVox's feed for custom rules and dashboards beside the rest of the building, and stops polling FusionPBX itself | Nothing collected twice, no second rule engine; integrators get phone alerts without needing PhotonConsole | 14 |
 | 15 | **Phone users are PhotonVox's own records** (name, extension, site, email), linked to a PhotonID person only if they will sign in. Roles for people who sign in: owner, admin, user (supervisor arrives with call queues) | Building a phone system for 30 people must not mean 30 PhotonID invitations | 6, 7 |
-| 16 | **Today's live customers stay as they are in R1** (monitored, not managed by PhotonVox) and are taken over in R2 with no downtime | R1 builds new phone systems; nothing risks the live ones until the builder is proven | 17 |
+| 16 | **Today's live customers stay as they are in R1** (monitored, not managed by PhotonVox) and are taken over in R2 with no downtime. *Proposed decision 32 would bring HUEPC's in-place takeover into R1, as its last step* | R1 builds new phone systems; nothing risks the live ones until the builder is proven | 17 |
 | 17 | **Toll-fraud defaults on every organization, applied to the live engine first**: international and premium off, a daily spend limit that stops outbound calls (never 911), no outside dialing from voicemail | The largest financial risk in a phone system | 15 |
 | 18 | **PhotonVox's cloud (API, web app, worker, its own Postgres) on the shared Photon host** (Vultr, `photon-infra-a`) beside PhotonID, the directory, PhotonConsole and PhotonBoard (decided by Connor 2026-11-13, replacing "its own small VPS"): its own compose project, database and memory ceilings, behind the shared Caddy as the directory and PhotonConsole are; `vox.` and `api.vox.photonind.com` point at that host. **It moves to its own VPS when there are paying customers or the host gets tight.** The PBX engines stay in the colo | Calls never depend on the app, so sharing a host risks the screens, not calls; no new server to run or pay for before there are customers; the compose files and Caddy site move unchanged | 16 |
 | 19 | **Redundancy: a warm standby instance at Equinix DC10 in R2**, promoted by a drilled runbook (target 15 minutes). Phones point at names from day one (GDMS holds the server names, so a move is one edit and a push) | Matches the suite's Stage 3; names keep every later move invisible | 16 |
@@ -59,6 +59,7 @@ the row below is the decided version. Decisions 29 (call blocking), 30 (text-to-
 | 29 | **Call blocking per organization** (decided 2026-11-13, as Connor asked; §15a): Photon's default list (international until switched on, premium, high-cost Caribbean and other non-US North American codes, satellite and other high-cost ranges) blocked by default; the partner or an admin allows a category or adds and removes numbers and prefixes; compiled as one locked block route right after the emergency routes; 911 and 933 never blocked; Photon keeps the list current suite-wide. The block route, the default list and the page in R1; per-extension overrides and blocked-call alerts with it if small, else R2; inbound blocking (callers, anonymous) in R2, spam scoring later | The riskiest destinations closed for everyone without depending on each extension's call class; the live engine already needed a hand-built version (§17a) | 15a |
 | 30 | **Text-to-speech greetings, Google Cloud Text-to-Speech, Chirp 3 HD** (decided by Connor, 2026-11-13: a key feature): menus and messages are spoken from their text, **generated when the phone system is published and stored as files** on the engine (no dependency on the provider when a call comes in); a recorded greeting always overrides. Integrators pick from a few voices (four proposed for the listening test, §8a). **Google Cloud TTS, Chirp 3 HD** (8 kHz mu-law and 16 kHz output directly, an IVR audio profile, US English and Spanish voices, SSML and custom pronunciations, first 1M characters a month free then $30 per million, no logging of the text); runner-up **Azure Neural** ($15 per million, the most phone-ready formats; its code of conduct asks that a synthetic voice be disclosed); **Telnyx** if one vendor matters more (a REST TTS API exists; its Polly and Azure voices cost more than direct). ElevenLabs: most natural, 2–5 times the price, weak SSML on its newest models, OEM terms for resale to check | §8a |
 | 31 | **911 addresses are held per number in PhotonVox and confirmed with the carrier** (Connor, 2026-11-13: Hickory tracks by hand which address each DID is at): every number the organization holds is registered at its site's validated address; a change makes a **carrier request** (for Hickory a clear email, or a ticket number staff record) tracked until Hickory confirms; until then the number shows **unconfirmed** (to the integrator, the customer's admins and Photon staff). A carrier with an API later submits and polls through the same request. *Recommended:* publishing is not held back while a number is unconfirmed (911 still routes, with the address the carrier last confirmed), but staff are alerted daily until it is | §11a |
+| 32 | *Proposed, for Connor:* **the first takeover is in place** (§17): PhotonVox adopts the HUEPC domain (Hickory Church) on instance A, keeps every row's id, publishes a version that changes no behavior, and starts managing it; the protections come in a later version; a week of instant rollback. **In R1, as Step 7** after the pilot; moving between instances stays R2 | Seamless by construction (same engine, rows, passwords, numbers and phones); removes the R2-hard parts; R1 ends with no hand-built customer | 17 |
 
 Dropped from revision 1 (no longer decisions now): Telnyx as the second carrier (replaced by 7), a login per phone (replaced by 13), and the
 R3 items (texting, chat, B2 bucket for recordings), which keep their design in §18 and come back as decisions before their release. Revision 1's
@@ -650,17 +651,139 @@ procedure for lawful requests; RLS, tenant-isolation tests on every route, criti
 
 ---
 
-## 17. Today's live customers
+## 17. Today's live customers: the seamless takeover (plan of record, 2026-11-13)
 
-- **R1: monitored, not managed** (decision 16). PhotonVox adopts each live domain read-only (users, phones, numbers, call history, status),
-  so it appears on the pane, and changes nothing in it. Toll-fraud defaults and backups are applied to the live engine (production changes,
-  each with Connor's go-ahead).
-- **R2: take over without downtime.** For each live domain: import its FusionPBX configuration into a phone-system document (what maps to
-  outcomes; what does not is listed for a decision); compile it and **compare** with what is live, until the compiled version is equivalent; build
-  it on the new instance; join an inter-instance trunk so calls for the domain reach whichever instance has its phones; add its phones to GDMS
-  (if they are not already) and point them at the new instance; move its numbers at HTC; test; remove the old copy a week later. Connor's own
-  domain first, HUEPC after a clean week. Each step has its way back; none takes a phone offline for longer than its re-registration.
-- **LXC 600 retires** when no domain is left on it (backup kept 60 days).
+**Connor (2026-11-13):** the directory organization **Hickory Church** is the customer on the live engine, the **HUEPC** domain on instance A
+(CT 600, §17a). "They will eventually be migrated to PhotonVox proper. We'll need a seamless path for that."
+
+**The path, in stages.** Each stage has its own gate, and stopping at any of them leaves the customer exactly as before.
+
+| Stage | What happens | Writes to the live engine? |
+|---|---|---|
+| 1. Monitored (Step 1) | PhotonVox adopts the domain **read-only** and links it to its organization (HUEPC → Hickory Church): users, phones, numbers, registrations, call history on the pane | No |
+| 2. Imported and compared | The domain is read into a phone-system document; compiled; compared with what is live, row by row, until they match; a report lists everything that could not be expressed | No |
+| 3. Rehearsed | A copy of the domain on staging takes the same takeover, with the same calls before and after | No (staging only) |
+| 4. Taken over, in place | In a test window, PhotonVox publishes the matched version **over the same rows on the same instance**; from then on it manages the domain | Yes: one publish, behavior unchanged |
+| 5. Improved | The protections and cleanups (call classes, the generated block route, §15) come as a **separate, later version**, announced | Yes: an ordinary publish |
+| (6. Moved, only if ever needed) | To another instance (DC10, a rebuilt engine): the general path below, R2 | Yes |
+
+### 17.1 In place is the seamless path (proposed decision 32)
+
+**Yes, the first takeover can happen in place:** PhotonVox adopts the HUEPC domain on instance A and starts publishing to it. Nothing moves,
+so nothing outside the domain's rows changes:
+- **Phones:** same server, same SIP domain name, same ports, same extension numbers and **the same SIP passwords** (the rows keep their ids and
+  the writer keeps an existing secret: §5). No re-provisioning, no GDMS push, no re-registration beyond the phones' own schedule. The phones
+  are not FusionPBX- or GDMS-provisioned today (§17a), and in place they need not be.
+- **Numbers and HTC:** unchanged. HTC keeps sending the numbers to the same engine and trunk; the HTC gateway itself is **adopted, not
+  rewritten** (it belongs to the test domain today, §17a; moving it to the instance's global scope is a separate, later change of its own).
+- **Voicemail, greetings, recordings:** the files stay where FusionPBX keeps them (by domain name and box number), and the boxes keep their ids
+  and PINs. The menu's greeting is **their recording, referenced as it is** (not text-to-speech).
+- **Call history:** the call records stay in the same database, linked by the same domain and extension ids; PhotonVox's pane already reads
+  them from stage 1.
+
+Moving instances (the plan before this one) needs an inter-instance trunk, the numbers moved at HTC one by one, every phone repointed through
+GDMS (after adding them to it), and voicemail files copied. In place needs none of that. **Recommended: in place for HUEPC, in R1** (see 17.8).
+
+### 17.2 Import: the hand-built domain into a phone-system document
+
+Read with a read-only role (GATE 1c's, plus read access to the dial plans: an extension of GATE 1c for Connor's go-ahead). Each FusionPBX
+object becomes an outcome, and **keeps its id** (17.4):
+
+| FusionPBX | Document |
+|---|---|
+| Extensions (number, names, caller IDs, emergency caller ID) | Users: name, extension, what their calls show, direct numbers (from the inbound numbers that ring them) |
+| Voicemail boxes (box, email, attach) | Each user's box, or a shared box; the PIN stays (never read into PhotonVox: the row keeps it) |
+| Inbound numbers (destinations) and time conditions | Numbers, each with what it rings when open and when closed; hours and holidays |
+| The IVR menu (greeting recording, keys, timeout, exit) | A menu: the recording referenced, each key's outcome, the no-key outcome |
+| Ring groups (none today), call forwarding, follow-me | Groups; forwarding by call class (§15) |
+| Outbound routes (North American) and the hand-built block route | Calling policy (North American, the default) and the block list (§15a), on the adopted HTC upstream |
+| Call classes (`toll_allow`, unset today) | The default class (unchanged behavior at takeover: see 17.6) |
+
+**The report of what could not be expressed** lists every row the document does not cover, each with what it does and one of four outcomes:
+*expressed differently* (with the difference shown), *unused* (no calls in 90 days, no reference: dropped at the improvement version, not at
+takeover), **kept as a hand-built extra** (left in place, untouched by PhotonVox, ignored by the drift check by explicit list), or *needs a
+decision*. Known candidates from §17a: the 9 dial plans left in the old context named after the server's address, per-extension settings
+PhotonVox has no outcome for (limits, hold music, dial strings), and anything the inventory did not look into. Nothing is dropped silently.
+
+### 17.3 Compile and compare until they match
+
+- **Row level:** the compiled plan against the live rows of the domain, column by column, after normalization (order, whitespace, FusionPBX's
+  defaults). The goal is **zero differences** apart from the report's accepted list. The drift check (Step 3) already compares PhotonVox's own
+  rows with the engine; this extends it to rows PhotonVox has not written yet.
+- **Behavior level:** a **call matrix** run on a staging copy of the domain (17.5) before and after the takeover publish: each number when open
+  and closed, each menu key and the no-key path, every extension from another, voicemail left and its email (none today), outbound national and
+  toll-free, premium and the blocked Caribbean codes refused, 911 and 933 to the stand-in upstream with the right caller ID. Same results, or the
+  difference is in the report.
+
+### 17.4 Identity: the takeover adopts rows, it does not replace them
+
+Today the builder names every row from the phone system's id (uuid5, §5), so a first publish creates new rows. For a takeover, the import
+**binds each document key to the existing row's id** (recorded in `engine_object` before anything is written), and the builder uses that binding
+before it derives a new id. So the publish **updates the same rows in place**: the same extension, box, number and menu ids. What hangs off
+them (registrations, call records, voicemail, PINs and SIP passwords) does not notice. Rows the import could not bind are new; rows nobody
+binds are either the report's hand-built extras (untouched) or listed for removal in the improvement version.
+
+### 17.5 Rehearsal on staging
+
+The domain is copied onto the staging instance (CT 610): its rows and recordings, **never its gateways**; the HTC upstream is replaced by the
+SIPp stand-in, as Connor's staging rule requires. The copy takes the whole takeover: import, compare, the call matrix, the publish, the matrix
+again, the rollback, the matrix again. Timed. This doubles as Step 2's restore drill for one domain (the whole-container restore stays in its
+network-less container).
+
+### 17.6 The cutover (production, a test window)
+
+- **Window:** a quiet hour Connor and the customer agree on, announced; minutes of work, a test window of an hour around it.
+- **Before:** a fresh Proxmox backup of CT 600; PhotonVox's **snapshot of the domain** (every row of it and the global rows it touches);
+  **test calls before** from outside (each of the 4 numbers, the menu's keys, voicemail, one outbound call to a test number) and the registration
+  count (7 phones).
+- **The publish:** the takeover version, **behavior-identical to what is live**: the call classes and the generated block route come later
+  (stage 5). One database transaction updates the adopted rows; vox-agent then clears the domain's cached dial plan and directory entries.
+  **No calls are lost:** a call in progress is already bridged and never reads the dial plan again; a call that arrives in the moment between
+  the commit and the cache clear uses the cached copy, which routes the same way; there is no FreeSWITCH restart or profile rescan (the gateway
+  and the access lists do not change).
+- **After:** the post-publish synthetic check (loopback calls, nothing leaves the engine); **the same test calls after**; the registration
+  count; call records arriving; watched for the rest of the window and the next business day.
+- **Rollback, instant:** "back to hand-built" writes the snapshot back in one transaction and clears the cache: seconds, with the same
+  no-lost-calls property as the publish. It stays available for **a week** (the snapshot is kept). The Proxmox backup is the last resort only
+  if the database itself were damaged (it would lose the voicemail left since).
+- **911:** never a live 911 test call. 911 routing is part of the row compare and the staging matrix; 933 to HTC only if HTC confirms it
+  answers 933 (question 23).
+
+### 17.7 What the customer notices
+
+**Ideally nothing, and by design nothing:** the same numbers, menu and recording, extension numbers, phones and their settings, voicemail and
+greetings, and call history. What they can gain afterwards is optional: their people can use PhotonVox (Hickory Church's admins, from the
+directory) instead of asking Photon; and the improvement version (stage 5) is announced beforehand, since it changes what some extensions may
+dial. If HUEPC's staff log in to FusionPBX's own screens today (question 22), that stops at the takeover (hand edits would be drift); they
+are told in advance.
+
+### 17.8 What has to be built, and R1 or R2
+
+Most of the takeover exists: the compiler, the writer, publishing with the synthetic check, versions and undo, drift detection, vox-agent.
+New:
+1. **The FusionPBX importer** (engine to document) and the **report** of what could not be expressed.
+2. **Identity adoption** in the builder: document keys bound to existing row ids (17.4).
+3. **Recording references** in the document (a menu's greeting or a box's greeting as an existing file).
+4. **The row compare** against rows PhotonVox has not written yet, with normalization and the accepted list; **hand-built extras** ignored by explicit list.
+5. **Adopted upstreams:** an existing gateway used by id and never rewritten.
+6. **The domain copy to staging** (rows and recordings, no gateways) and **the call matrix** (SIPp, from the build test).
+7. **The domain snapshot and "back to hand-built"** (whole domain, one transaction).
+8. **The takeover screen** for Photon staff (Platform: monitored, compared, rehearsed, scheduled, managed; the report; rollback during the week).
+
+From earlier steps: Step 1's monitored adoption and GATE 1c (plus the dial-plan read), Step 2's vox-agent on CT 600, and a write role on CT 600.
+
+**Recommendation: R1, as its last step (Step 7, after the pilot proves publishing in production)**, not R2:
+- HUEPC is the only live customer and small (10 extensions, 1 menu, 4 numbers, no ring groups);
+- in place removes the parts that made it R2 (a second instance, number moves at HTC, GDMS for its phones, voicemail copies);
+- it brings the live engine's protections under PhotonVox (stage 5) instead of applying them by hand and maintaining the hand-built block route;
+- R1 then ends with no hand-built customer left. Moving between instances stays in R2.
+
+### 17.9 Moving between instances (R2, only if ever needed)
+
+The domain is already a document by then: publish it to the new instance; join an inter-instance trunk so calls for the domain reach whichever
+instance has its phones; copy voicemail files and recordings; repoint phones by the instance's names (`sip-a.`/`sip-b.`, §16) or a GDMS push;
+move the numbers at HTC one by one (or keep them on instance A's trunk behind the inter-instance trunk); test; keep the old copy a week. Call
+history stays readable in PhotonVox. **LXC 600 retires** when no domain is left on it (backup kept 60 days).
 
 ---
 
@@ -673,7 +796,7 @@ The reports stay out of git (they name domains); these are the findings as count
 |---|---|
 | Versions | FusionPBX 5.5.12 (installed with the FusionPBX install script), FreeSWITCH 1.11.1, PostgreSQL 18, Debian 12; Proxmox VE 9.1 (two nodes) |
 | Container | 4 cores, 4 GB memory, 32 GB disk on the node's local LVM (16% used), unprivileged; Proxmox's firewall service is disabled cluster-wide (the container's own iptables, policy DROP, is what protects it) |
-| Domains | 2: the one customer (HUEPC) and Photon's own test domain (empty: no extensions) |
+| Domains | 2: the one customer (HUEPC) and Photon's own test domain (empty: no extensions). **HUEPC is the directory organization Hickory Church** (Connor, 2026-11-13; PhotonVox switched on for it the same day): Step 1's adoption links the domain to that organization as monitored-only, and §17 takes it over in place |
 | The customer | 10 extensions (all enabled), 10 voicemail boxes, 5 inbound numbers, 1 IVR menu, 0 ring groups, 0 queues, 0 conferences, 0 fax |
 | Phones | 7 registered, all Grandstream (5 GRP2602G, 1 GRP2650, 1 HT801V2 analog adapter), **all from public addresses** (over the internet, not across HTC's network or a VPN), mostly UDP; **0 devices in FusionPBX**: the phones are not provisioned by FusionPBX (how they are, GDMS or by hand, is open: question 1) |
 | Numbers | 1 of the 5 inbound numbers had no matching dial plan (calls to it dropped); **removed on 2026-11-13**, leaving 4, each with its dial plan |
@@ -687,9 +810,9 @@ The reports stay out of git (they name domains); these are the findings as count
 | Container 601 ("kamailio") | stopped; unused |
 
 **What it changes in this plan:**
-- **§17 (takeover in R2) is small:** one customer, 10 extensions, 5 numbers, 1 IVR, 7 phones. The phones are not FusionPBX-provisioned, so moving
-  them means adding them to GDMS (their MACs and serials, from the phones or GDMS if they are already there) and pointing them at the new
-  instance's names. The broken number is fixed in the takeover if not before.
+- **§17 (the takeover) is small:** one customer, 10 extensions, 4 numbers (the broken fifth was removed), 1 IVR, 7 phones. Taken over **in
+  place** (§17.1, proposed decision 32), the phones need nothing: same server, extensions and passwords. Only a later move to another
+  instance (§17.9) would mean adding them to GDMS (their MACs and serials) and pointing them at the new instance's names.
 - **§15 on the live engine:** the routes are North American only, so international is closed, and the block route (2026-11-13) stops premium
   and high-cost Caribbean numbers. What remains for Step 2: call classes with `toll_allow` on every extension, and the block route generated
   by PhotonVox (§15a) in place of the hand-built one. The unused VoIP.ms gateway is gone (2026-11-13).
@@ -1125,6 +1248,13 @@ since 2026-11-13, §17a.)
 16. **Windows** in the first app release, or iOS, Android and macOS first? (Windows needs a code-signing service, a small monthly fee.)
 17. A **GitHub remote for photonvox** (Xcode Cloud builds from it).
 18. The store name **"PhotonVox"**: a trademark search before the first listing (the suite already suggests one for PhotonGuard).
+
+**Taking over HUEPC (§17)**
+19. Decision 32: the in-place takeover in R1 (Step 7)?
+20. HUEPC's quiet hour for the test window, and who at Hickory Church hears about it.
+21. May the takeover's import read the dial plans (an extension of GATE 1c), and later a write role on CT 600 (as GATE 6a)?
+22. Do Hickory Church's staff log in to FusionPBX's own screens today (the import will also show whether the domain has FusionPBX users)?
+23. Does HTC answer **933** (the address readback test) for the HUEPC numbers? If not, 911 is proven only on staging and by the row compare.
 
 ---
 

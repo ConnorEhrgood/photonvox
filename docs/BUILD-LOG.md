@@ -415,3 +415,12 @@ the directory). Rollback: the previous commit; 0006's downgrade drops the column
   back). id1 then switched PhotonVox on for the organization PhotonConsole uses; the next pull brought in Connor as staff and platform
   administrator (from the directory) and owner there, with one audit event and no sync error. Signed-out deep links still go straight to
   PhotonID (desktop and phone). DEPLOY.md has the details.
+
+## 2026-11-13: the takeover of live customers, redesigned (design only)
+
+Connor: Hickory Church (the directory organization, PhotonVox switched on) is HUEPC on instance A, to be migrated "seamlessly". ARCHITECTURE §17
+is now the plan of record: monitored, imported and compared (row level and a call matrix, with a report of what could not be expressed),
+rehearsed on a staging copy (no gateways), **taken over in place** (rows keep their ids, so phones, passwords, voicemail, PINs and call history
+do not notice; HTC and the numbers unchanged; one behavior-identical publish with no lost calls; a week of instant "back to hand-built"), then
+the protections as a later version. §17a records the mapping. Proposed decision 32 (in place, in R1 as Step 7) and BUILD-GUIDE Step 7 and
+GATE 7a for Connor; questions 19–23 in §22. Nothing changed in production.
