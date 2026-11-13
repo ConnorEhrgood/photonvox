@@ -1,1 +1,1 @@
-Vendored from photonid/directory/client at commit bae1afd (branch photonconsole-rename), 2026-11-13. Do not edit: re-copy from photonid. SOURCE.sha256 is checked by tests/unit/test_vendored.py.
+Vendored from photonid/directory/client at commit b3e8c7f (main), 2026-11-13: person documents carry platform_admin and partners. Do not edit: re-copy from photonid. SOURCE.sha256 is checked by tests/unit/test_vendored.py.

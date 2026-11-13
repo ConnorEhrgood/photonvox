@@ -37,7 +37,7 @@ def test_me_lists_each_organization_with_role_scope_and_capabilities(client, wor
     r = client.get("/me", headers=auth("a-admin-s1"))
     assert r.status_code == 200
     me = r.json()
-    assert me["name"] == "A Admin S1" and me["is_platform_admin"] is False
+    assert me["name"] == "A Admin S1" and me["is_platform_admin"] is False and me["is_staff"] is False
     [t] = me["tenants"]
     assert t["id"] == world.a and t["name"] == "Cedar Works" and t["role"] == "admin" and t["scope"] == {"sites": [world.a1]}
     assert t["source"] == "direct" and t["expires_at"] is None
@@ -115,7 +115,7 @@ def test_the_platform_routes_are_for_platform_staff_only(client, world):
 
 
 def test_platform_directory_status_before_any_pull(client, fake):
-    fake.add_person("staff")           # known only through resolve, which brings the copy up to date with a pull
+    fake.add_person("staff", platform_admin=True)      # known only through resolve, which brings the copy up to date with a pull
     r = client.get("/platform/directory", headers=auth("staff"))
     assert r.status_code == 200 and r.json()["cursor"] == fake.seq and r.json()["last_error"] is None
 

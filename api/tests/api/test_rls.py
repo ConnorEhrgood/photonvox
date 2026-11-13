@@ -132,7 +132,7 @@ def test_an_expired_grant_stops_showing_the_organization_immediately(world, db):
 
 def test_the_app_role_cannot_write_the_directory_copy(world):
     for sql in ("insert into tenant (id, name) values (gen_random_uuid(), 'x')", "update tenant set name = 'hijacked'", "delete from tenant",
-                "update site set name = 'x'", "update access set role = 'owner'", "update person set is_platform_admin = true", "delete from access"):
+                "update site set name = 'x'", "update access set role = 'owner'", "update person set is_platform_admin = true", "update person set is_staff = true", "delete from access"):
         with as_person(world.pid("a-owner")) as s:
             with pytest.raises(ProgrammingError):
                 s.execute(text(sql))
@@ -174,8 +174,11 @@ def test_nobody_can_write_audit_rows_as_someone_else_or_into_another_organizatio
 def test_platform_staff_see_that_organizations_exist_but_not_inside_them(world):
     with as_person(world.pid("staff"), platform_admin=True) as s:
         assert ids(s, Tenant) == {world.a, world.b}
-        for model in (Site, Access, AuditLog):
+        for model in (Site, Access):
             assert s.execute(select(model)).first() is None, model.__name__
+        # Of the audit log, only platform-level rows (no organization: the directory's staff changes) and none of an organization's.
+        rows = s.execute(select(AuditLog)).scalars().all()
+        assert rows and {r.tenant_id for r in rows} == {None} and {r.action for r in rows} == {"directory.staff_flags"}
     with as_person(world.pid("staff"), platform_admin=False) as s:            # the flag is the session's, not the person's: no flag, no privilege
         assert s.execute(select(Tenant)).first() is None
 

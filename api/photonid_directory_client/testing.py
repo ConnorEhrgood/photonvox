@@ -118,8 +118,13 @@ class FakeDirectory:
         self.put("site", doc["id"], doc)
         return doc
 
-    def person(self, sub: Optional[str] = None, email: str = "", name: str = "", id: Optional[str] = None, status: str = "active") -> Doc:
-        doc = {"id": id or str(uuid.uuid4()), "sub": sub, "email": email, "name": name, "status": status}
+    def person(self, sub: Optional[str] = None, email: str = "", name: str = "", id: Optional[str] = None, status: str = "active", platform_admin: bool = False,
+               partners: Optional[List[Doc]] = None) -> Doc:
+        """`platform_admin`: Photon platform staff. `partners`: [{"partner_id", "slug", "role"}] memberships (sorted by partner id, as the directory sends
+        them; role "owner", "admin" or "staff"; Photon's own staff are members of the partner with slug "photon").
+        The directory tells a product about platform staff even when they hold no access in it: call this without `access` to model that."""
+        doc = {"id": id or str(uuid.uuid4()), "sub": sub, "email": email, "name": name, "status": status, "platform_admin": platform_admin,
+               "partners": sorted((dict(p) for p in partners or []), key=lambda p: p["partner_id"])}
         self.put("person", doc["id"], doc)
         return doc
 

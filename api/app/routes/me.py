@@ -35,4 +35,5 @@ def me(who: Who = Depends(current_person), db: Session = Depends(get_db)) -> Dic
             "scope": scope_json(grant), "source": grant.source, "expires_at": grant.expires_at.isoformat() if grant.expires_at else None,
             "capabilities": sorted(access.capabilities(grant, now)),
         })
-    return {"id": str(who.id), "name": who.name, "email": who.email, "is_platform_admin": who.is_platform_admin, "tenants": tenants}
+    return {"id": str(who.id), "name": who.name, "email": who.email, "is_staff": who.is_staff, "is_platform_admin": who.is_platform_admin,
+            "tenants": tenants}

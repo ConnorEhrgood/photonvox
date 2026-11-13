@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     directory_resolve_timeout_s: float = 3.0
     directory_timeout_s: float = 10.0
 
-    # Photon staff, by PhotonID subject (comma separated): the directory's person documents carry no platform flag, so staff are named here,
-    # as PhotonGuard and the PhotonEdge hub do.
+    # Photon staff come from the directory (person documents: `platform_admin`, and membership of partner Photon). This list of PhotonID subjects
+    # (comma separated) is a fallback for one release from 2026-11-13, then removed.
     platform_admin_subs: str = ""
 
     # Fernet key for the secrets PhotonVox keeps: engine database logins, the SIP passwords and voicemail PINs it gave phones, agent secrets.

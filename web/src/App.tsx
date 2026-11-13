@@ -57,9 +57,11 @@ function SignedOut() {
   return <SignedOutRoute auth={source.auth} logo={logo} />
 }
 
-/** Where "/" goes: the customer list for an integrator, the customer's overview for its admin, "My phone" for a user. */
+/** Where "/" goes: Platform for Photon staff with no organization, the customer list for an integrator, the customer's overview for its admin, "My phone" for a user. */
 export function Home() {
+  const { me } = useAuth()
   const { tenants, can } = useTenant()
+  if (tenants.length === 0 && me?.is_staff) return <Navigate to="/platform" replace />     // Photon staff with no organization of their own
   if (isIntegrator(tenants)) return <Navigate to="/customers" replace />
   return <Navigate to={can('vox.phone_system.view') ? '/overview' : '/my-phone'} replace />
 }
@@ -72,7 +74,7 @@ function Needs({ cap }: { cap: string }) {
 
 function PlatformOnly() {
   const { me } = useAuth()
-  return me?.is_platform_admin ? <Outlet /> : <Navigate to="/" replace />
+  return me?.is_staff ? <Outlet /> : <Navigate to="/" replace />
 }
 
 export function App() {

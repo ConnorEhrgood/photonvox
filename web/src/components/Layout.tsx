@@ -14,11 +14,12 @@ export const isIntegrator = (tenants: { source: string }[]): boolean => tenants.
 export function Layout() {
   const { me, signOut } = useAuth()
   const { tenants, current, select, can } = useTenant()
-  if (!current) return <NoOrganization />
+  // Photon staff may belong to no organization at all: they still get the shell, with Platform.
+  if (!current && !me?.is_staff) return <NoOrganization />
 
   // The integrator's tool first (ARCHITECTURE §3): the customer's phone system, page by page. Pages a person has no use for are left out (a user
   // sees only their own phone), which keeps the list short on a phone. The API refuses them anyway.
-  const items: (NavItem & { cap?: string })[] = [
+  const items: (NavItem & { cap?: string })[] = !current ? [] : [
     ...(isIntegrator(tenants) ? [{ to: '/customers', label: 'Customers', icon: 'clients' as const }] : []),
     { to: '/overview', label: 'Overview', icon: 'overview', cap: 'vox.phone_system.view' },
     { to: '/users', label: 'Users', icon: 'people', cap: 'vox.phone_system.view' },
@@ -35,9 +36,9 @@ export function Layout() {
   const groups: NavGroup[] = [{ items: trimmed.map(({ cap: _cap, ...i }) => i) }]
   const footer: NavItem[] = []
   if (settingsTabs(can).length > 0) footer.push({ to: '/settings', label: 'Settings', icon: 'settings' })
-  if (me?.is_platform_admin) footer.push({ to: '/platform', label: 'Platform', icon: 'platform' })
+  if (me?.is_staff) footer.push({ to: '/platform', label: 'Platform', icon: 'platform' })
   const who = me?.name || me?.email || 'Account'
-  const ends = current.expires_at ? new Date(current.expires_at) : null
+  const ends = current?.expires_at ? new Date(current.expires_at) : null
 
   return (
     <AppShell
@@ -45,17 +46,17 @@ export function Layout() {
       home={trimmed[0]?.to ?? '/'}
       groups={groups}
       footer={footer}
-      switcher={tenants.length > 1 ? (
+      switcher={!current ? <span className="ph-hint">Photon staff</span> : tenants.length > 1 ? (
         <select aria-label="Customer" className="ph-input" value={current.id} onChange={(e) => select(e.target.value)}>
           {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       ) : <span className="ph-hint">{current.name}</span>}
-      banner={current.status === 'suspended' ? (
+      banner={current?.status === 'suspended' ? (
         <div className="ph-banner ph-banner-warning" role="alert">
           This organization’s PhotonVox plan needs attention: new numbers and outside calling beyond the usual are paused. Phones, incoming calls and 911 keep working.
         </div>
       ) : ends ? (
-        <div className="ph-banner ph-banner-info" role="status">Your access to {current.name} ends {ends.toLocaleString()}.</div>
+        <div className="ph-banner ph-banner-info" role="status">Your access to {current?.name} ends {ends.toLocaleString()}.</div>
       ) : undefined}
       account={{
         name: who,

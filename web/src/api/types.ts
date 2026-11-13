@@ -20,6 +20,8 @@ export interface Me {
   id: string
   name: string
   email: string
+  /** Photon staff (the directory's platform administrators and partner Photon's members): the Platform pages. */
+  is_staff: boolean
   is_platform_admin: boolean
   tenants: TenantAccess[]
 }

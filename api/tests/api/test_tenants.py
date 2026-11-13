@@ -84,6 +84,6 @@ def test_an_expired_grant_is_404_on_the_organization_even_before_the_directory_s
 def test_who_is_labeled_by_name_then_email_then_id():
     from app.deps import Who
     pid = uuid.uuid4()
-    assert Who(pid, "s", "Ann", "ann@example.com", False).label == "Ann"
-    assert Who(pid, "s", "", "ann@example.com", False).label == "ann@example.com"
-    assert Who(pid, "s", "", "", False).label == str(pid)
+    assert Who(pid, "s", "Ann", "ann@example.com", False, False).label == "Ann"
+    assert Who(pid, "s", "", "ann@example.com", False, False).label == "ann@example.com"
+    assert Who(pid, "s", "", "", False, False).label == str(pid)

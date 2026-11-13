@@ -22,7 +22,7 @@ function withShell(route: string, me = meWith(OWNER), routes: Record<string, unk
     </Routes>, { route, me, routes })
 }
 
-const navNames = () => within(screen.getAllByRole('navigation')[0]).getAllByRole('link').map((a) => a.textContent)
+const navNames = () => within(screen.getAllByRole('navigation')[0]).queryAllByRole('link').map((a) => a.textContent)
 
 describe('the sidebar', () => {
   it('an owner sees the phone system’s pages, Settings, and no Customers list', async () => {
@@ -46,7 +46,7 @@ describe('the sidebar', () => {
     expect(screen.queryByRole('link', { name: /Settings/ })).toBeNull()
   })
   it('platform staff see Platform', async () => {
-    withShell('/overview', { ...meWith(OWNER), is_platform_admin: true })
+    withShell('/overview', { ...meWith(OWNER), is_staff: true })
     await screen.findByText('page')
     expect(screen.getByRole('link', { name: /Platform/ })).toBeInTheDocument()
   })
@@ -62,6 +62,14 @@ describe('the sidebar', () => {
     withShell('/overview', meWith())
     expect(await screen.findByRole('heading', { name: 'No access to PhotonVox yet' })).toBeInTheDocument()
   })
+  it('Photon staff with no organization of their own still get the shell, with Platform and nothing else', async () => {
+    withShell('/overview', { ...meWith(), is_staff: true })
+    await screen.findByText('page')
+    expect(screen.getByRole('link', { name: /Platform/ })).toBeInTheDocument()
+    expect(screen.getByText('Photon staff')).toBeInTheDocument()
+    expect(navNames()).toEqual([])
+    expect(screen.queryByRole('heading', { name: 'No access to PhotonVox yet' })).toBeNull()
+  })
 })
 
 describe('home', () => {
@@ -71,10 +79,15 @@ describe('home', () => {
       <Route path="/customers" element={<p>customers</p>} />
       <Route path="/overview" element={<p>overview</p>} />
       <Route path="/my-phone" element={<p>my phone</p>} />
+      <Route path="/platform" element={<p>platform</p>} />
     </Routes>, { route: '/', me, routes: {} })
   it('goes to the customer list for an integrator', async () => { home(meWith(TECH_A)); expect(await screen.findByText('customers')).toBeInTheDocument() })
   it('goes to the overview for a customer’s admin', async () => { home(); expect(await screen.findByText('overview')).toBeInTheDocument() })
   it('goes to My phone for a user', async () => { home(meWith(USER)); expect(await screen.findByText('my phone')).toBeInTheDocument() })
+  it('goes to Platform for Photon staff with no organization', async () => { home({ ...meWith(), is_staff: true }); expect(await screen.findByText('platform')).toBeInTheDocument() })
+  it('a platform administrator flag alone is not staff in the app (the API says is_staff)', async () => {
+    home({ ...meWith(), is_platform_admin: true }); expect(await screen.findByText('my phone')).toBeInTheDocument()
+  })
 })
 
 describe('the app’s routes', () => {
@@ -187,7 +200,7 @@ describe('the shell’s controls', () => {
     expect(source.signOut).toHaveBeenCalled()
   })
   it('the Platform hub has its tabs', async () => {
-    renderApp(<App />, { route: '/platform/instances', me: { ...meWith(OWNER), is_platform_admin: true }, routes: {}, bare: true })
+    renderApp(<App />, { route: '/platform/instances', me: { ...meWith(OWNER), is_staff: true }, routes: {}, bare: true })
     expect(await screen.findByRole('heading', { name: 'Instances' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Number stock' })).toBeInTheDocument()
   })

@@ -7,7 +7,17 @@ The directory sends four kinds of thing, each keyed by a string:
                  only told about organizations that have you), e.g. ["board", "guard"]. Keys only: no plans, counts or other products' data. Switching any product
                  on or off sends the organization again to every product it still has. `plan_key` is YOUR plan only.
   site           key = site id.           {id, organization_id, slug, name, address, timezone, latitude, longitude, status}
-  person         key = person id.         {id, sub, email, name, status}       (`sub` is the OIDC subject; null until the person has an account)
+  person         key = person id.         {id, sub, email, name, status, platform_admin, partners}
+                 `sub` is the OIDC subject; null until the person has an account.
+                 `platform_admin`: Photon platform staff. `partners`: [{partner_id, slug, role: "owner" | "admin" | "staff"}], the person's partner
+                 memberships, sorted by partner id, limited to partners with a customer that has you switched on (partner "photon" always listed).
+                 Use these instead of a local list of staff: Photon's staff are the platform administrators (`platform_admin`) and the members, in any
+                 role, of the partner with slug "photon".
+                 They say who someone is, never what they may do in an organization: that is the access rows alone (a staff member who is also a direct
+                 owner arrives with `source: "direct"`; read `partners`, not `source`, to tell staff).
+                 You are told about a person while they have access with you somewhere, AND about Photon staff while you are switched on for any
+                 organization, even with no access row: such a person signs in with no organization (decide what your platform pages give them).
+                 Both fields were added on 2026-11-13: treat a document without them (a copy pulled before) as false / [] until the next pull.
   access         key = "<person id>:<organization id>"
                  {person_id, organization_id, role, scope: {"type": "all"} | {"type": "sites", "site_ids": [...]}, source: "direct" | "partner", expires_at,
                   others: [{role, scope, source}, ...]}

@@ -46,7 +46,7 @@ export const USER: TenantAccess = { ...OWNER, role: 'user', capabilities: ['vox.
 export const TECH_A: TenantAccess = { ...OWNER, role: 'admin', source: 'partner', partner_id: 'pa', capabilities: ALL.filter((c) => !['vox.number.port', 'vox.number.release', 'vox.calling.policy', 'vox.audit.view'].includes(c)) }
 export const TECH_B: TenantAccess = { ...TECH_A, id: 't2', name: 'Birch Co' }
 
-export const meWith = (...tenants: TenantAccess[]): Me => ({ id: 'p1', name: 'Ada Owner', email: 'ada@example.com', is_platform_admin: false, tenants })
+export const meWith = (...tenants: TenantAccess[]): Me => ({ id: 'p1', name: 'Ada Owner', email: 'ada@example.com', is_staff: false, is_platform_admin: false, tenants })
 export const ME = meWith(OWNER)
 
 /** Requests are JSON, except a WebRTC offer, which is SDP text. */

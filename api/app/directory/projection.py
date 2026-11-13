@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.models import Access, Person, Site, SyncState, Tenant
 from app.roles import ROLES
 from photonid_directory_client.projection import Doc, Projection
@@ -38,6 +39,19 @@ def _when(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as e:
         raise BadDocument(f"not a time: {value[:40]!r}") from e
+
+
+# Photon's own partner in the directory: every member of it, in any role, is Photon staff (decided 2026-11-13, as in PhotonConsole).
+PHOTON_PARTNER = "photon"
+
+
+def staff_flags(doc: Doc) -> tuple:
+    """(is_staff, is_platform_admin) from a person document. Photon staff are the platform administrators and every member, in any role, of partner
+    Photon. A document from before the directory sent these fields, or a malformed one, gives neither (the client's contract)."""
+    is_platform_admin = doc.get("platform_admin") is True
+    partners = doc.get("partners") if isinstance(doc.get("partners"), list) else []
+    in_photon = any(isinstance(p, dict) and p.get("slug") == PHOTON_PARTNER for p in partners)
+    return is_platform_admin or in_photon, is_platform_admin
 
 
 def _scope(scope: Dict[str, Any]) -> tuple:
@@ -109,7 +123,17 @@ class DbProjection(Projection):
             self.db.add(row)
         row.sub, row.name, row.email = doc.get("sub") or None, doc.get("name", ""), doc.get("email", "")
         row.active = doc["status"] == "active"
+        self._set_flags(row, *staff_flags(doc))
         self.db.flush()
+
+    def _set_flags(self, row: Person, is_staff: bool, is_platform_admin: bool) -> None:
+        """Staff and platform admin come from the directory only. A change is audited: it widens or narrows what someone may do across every
+        organization."""
+        before = (bool(row.is_staff), bool(row.is_platform_admin))
+        row.is_staff, row.is_platform_admin = is_staff, is_platform_admin
+        if before != (is_staff, is_platform_admin):
+            audit.record(self.db, actor_id=None, actor_label="directory", actor_source="directory", action="directory.staff_flags",
+                         target_type="person", target_id=row.id, email=row.email, is_staff=is_staff, is_platform_admin=is_platform_admin)
 
     def upsert_access(self, doc: Doc) -> None:
         pid, tid = _uuid(doc["person_id"]), _uuid(doc["organization_id"])
@@ -142,6 +166,9 @@ class DbProjection(Projection):
         elif kind == "person":
             pid = _uuid(key)
             self.db.execute(update(Person).where(Person.id == pid).values(active=False))
+            row = self.db.get(Person, pid)
+            if row is not None:
+                self._set_flags(row, False, False)
             self.db.execute(delete(Access).where(Access.person_id == pid))
         else:
             person, _, org = key.partition(":")

@@ -48,7 +48,8 @@ class Who:
     sub: str
     name: str
     email: str
-    is_platform_admin: bool
+    is_staff: bool              # Photon staff: the platform pages, and seeing across organizations
+    is_platform_admin: bool     # the directory's platform administrator (shown; staff covers what it may do)
 
     @property
     def label(self) -> str:
@@ -99,14 +100,16 @@ def current_person(
             raise _no_access()
     if not person.active:
         raise _no_access()
-    staff = person.is_platform_admin or sub in settings.platform_admins
+    # Staff come from the directory (person.is_staff). PLATFORM_ADMIN_SUBS is a fallback for one release (from 2026-11-13), then removed.
+    staff = person.is_staff or sub in settings.platform_admins
     rls.as_person(db, person.id, staff)
-    return Who(person.id, sub, person.name, person.email, staff)
+    return Who(person.id, sub, person.name, person.email, staff, bool(person.is_platform_admin))
 
 
 def platform_admin(who: Who = Depends(current_person)) -> Who:
-    if not who.is_platform_admin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform administrators only")
+    """Photon staff only (the directory's platform administrators and partner Photon's members)."""
+    if not who.is_staff:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Photon staff only")
     return who
 
 

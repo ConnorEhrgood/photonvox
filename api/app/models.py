@@ -70,8 +70,10 @@ class Person(Base):
     name: Mapped[str] = mapped_column(String(200), default="")
     email: Mapped[str] = mapped_column(String(320), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    # Photon staff. The directory's documents carry no platform flag; staff are also named in PLATFORM_ADMIN_SUBS.
+    # From the directory's person document (directory/projection.py `staff_flags`), never set here: the directory's platform administrators,
+    # and Photon staff = those administrators and every member, in any role, of partner Photon. `is_staff` is what the platform pages check.
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_staff: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Access(Base):

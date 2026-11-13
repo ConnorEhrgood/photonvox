@@ -16,7 +16,7 @@ from sqlalchemy import text
 os.environ.setdefault("OIDC_ISSUER", "https://idp.test")
 os.environ.setdefault("OIDC_AUDIENCE", "photonvox")
 os.environ.setdefault("DIRECTORY_URL", "https://directory.test")
-os.environ.setdefault("PLATFORM_ADMIN_SUBS", "staff")      # the directory sends no platform flag: staff are named in the configuration
+os.environ.setdefault("PLATFORM_ADMIN_SUBS", "fallback-staff")   # the one-release fallback; staff otherwise come from the directory (test_staff.py)
 os.environ.setdefault("DIRECTORY_NOTICE_SECRET", "notice-secret-for-tests-0123456789-abcdef")
 os.environ.setdefault("SECRETS_KEY", "dGVzdC1zZWNyZXRzLWtleS1mb3ItcGhvdG9udm94LTA=")   # Fernet: 32 bytes, url-safe base64
 
@@ -102,7 +102,8 @@ class World:
 
     Cedar Works (A): sites a1, a2. owner `a-owner`, admin `a-admin`, site-limited admin `a-admin-s1` (a1 only), user `a-user`, user on a2 only `a-user-s2`.
     Birch Co (B): site b1; owner `b-owner`. `tech` is the partner's technician: admin of both through the partner grant (an integrator).
-    `stranger` is in the directory with no access anywhere. `staff` is a platform admin.
+    `stranger` is in the directory with no access anywhere. `staff` is Photon staff: a platform administrator and an owner of partner Photon, with no
+    access in any organization (the directory tells PhotonVox about Photon's staff anyway).
     """
 
     def __init__(self, fake: FakeDirectory) -> None:
@@ -125,7 +126,8 @@ class World:
         for org in (self.a, self.b):
             fake.grant(self.people["tech"], org, "admin", source="partner")
         self.people["stranger"] = fake.add_person("stranger", name="Stranger")
-        self.people["staff"] = fake.add_person("staff", name="Staff")
+        self.photon = str(uuid.uuid4())
+        self.people["staff"] = fake.add_person("staff", name="Staff", platform_admin=True, partners=[{"partner_id": self.photon, "slug": "photon", "role": "owner"}])
         assert pull(fake).ok
 
     def pid(self, sub: str) -> uuid.UUID:

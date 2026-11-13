@@ -51,8 +51,11 @@ class FakeDirectory:
         self.sites[doc["id"]] = doc
         return doc["id"]
 
-    def add_person(self, sub: Optional[str], name: str = "", email: str = "", id: Optional[str] = None, status: str = "active") -> str:
-        doc = self.ref.person(sub=sub, email=email or (f"{sub}@example.com" if sub else ""), name=name, id=id or _id(), status=status)
+    def add_person(self, sub: Optional[str], name: str = "", email: str = "", id: Optional[str] = None, status: str = "active", platform_admin: bool = False,
+                   partners: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Called again with the same `id`, it changes the person (the directory sends the whole document again)."""
+        doc = self.ref.person(sub=sub, email=email or (f"{sub}@example.com" if sub else ""), name=name, id=id or _id(), status=status,
+                              platform_admin=platform_admin, partners=partners)
         self.people[doc["id"]] = doc
         return doc["id"]
 

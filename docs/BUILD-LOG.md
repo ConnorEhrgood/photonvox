@@ -389,3 +389,25 @@ Connor found PhotonVox still showed its own sign-in page. It now follows the sui
   `web/scripts/signin-contract.mjs` against the dev PhotonID (id1's dev app "PhotonVox web (dev)"), 11 checks: signed out at 1440 and 390
   straight to PhotonID, the deep link back after a real sign-in, sessionStorage only, silent SSO in a new tab without a page or an iframe,
   the 401 and 403 pages without a loop, sign-out through `/auth/signed-out` with `prompt=login`, no silent sign-in afterwards, `/login`.
+
+## 2026-11-13: Photon staff from the directory (not deployed: waiting for the go-ahead)
+
+As PhotonConsole did (photon 16a5902): the directory's person documents now carry `platform_admin` and `partners: [{partner_id, slug, role}]`.
+- Re-vendored the directory client from photonid b3e8c7f (`projection.py`'s contract text, `FakeDirectory.person(platform_admin=, partners=)`).
+- `directory/projection.py` `staff_flags(doc)`: platform admin is `platform_admin is True`; **Photon staff is a platform admin or any member, in any
+  role, of partner Photon** (slug `photon`). A document without the fields, or a malformed one, gives neither. Every person document sets
+  `person.is_staff` and `person.is_platform_admin`; a change is audited as `directory.staff_flags` (actor "directory", no organization);
+  a person removed from the directory loses both.
+- The staff gate (the platform routes, and seeing across organizations) is `is_staff`, or the sub in `PLATFORM_ADMIN_SUBS`: **a fallback for
+  one release**, then removed. `/me` says `is_staff` and `is_platform_admin`; the web app shows Platform to staff.
+- **Photon staff with no organization of their own** (Connor today) get the shell with Platform and go there from `/`; before, they got
+  "No access to PhotonVox yet".
+- Migration **0006**: `person.is_staff`, and the sync cursor back to 0 so the first pull after the deploy re-reads every person document.
+- Tests: the flags from eight kinds of document; a Photon member with no access, a platform admin, another partner's owner (not staff);
+  leaving partner Photon (the own grant stays), becoming platform admin, removal, exactly four audit events and none for a rename; a document
+  from before the fields; the fallback; the app role cannot set `is_staff`; staff see only platform-level audit rows. API 500 passed (40
+  staging-only skipped), 100% coverage, critical modules 100%; web 197.
+
+**The deploy** (when approved): `scripts/deploy.sh` (migration 0006 runs in `migrate`); the worker's next pull (within its interval) is the
+full re-read. Check `/platform/directory` (cursor back up, no error) and Connor's `person` row (`is_staff`, `is_platform_admin` true, from
+the directory). Rollback: the previous commit; 0006's downgrade drops the column.
