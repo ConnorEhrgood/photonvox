@@ -1,0 +1,21 @@
+/* PhotonVox-specific layout. Colors, buttons, nav, banners, tables, tabs and the sign-in card come from @photon/ui:
+   add to that package, not here, when a pattern could be used by another Photon product. */
+
+/* A "not built yet" page: a short explanation, left-aligned and readable at any width. */
+.pv-notyet { max-width: 60ch; text-align: left; }
+.pv-notyet p { margin: 0 0 0.75rem; }
+
+/* Tables become stacked cards on a phone: each cell carries its heading (data-label) in a fixed column to the left and its content flows to the right of it,
+   so nothing scrolls sideways, nothing is clipped, and a cell may hold several lines and badges. The cell marked pv-who is the card's title. */
+@media (max-width: 720px) {
+  .pv-table, .pv-table tbody, .pv-table tr, .pv-table td { display: block; width: 100%; }
+  .pv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .pv-table tr { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; background: var(--surface); }
+  .pv-table td { border: 0; padding: 0.3rem 0 0.3rem 6.5rem; position: relative; text-align: left; min-height: 1.6rem; overflow-wrap: anywhere; }
+  .pv-table td::before { content: attr(data-label); position: absolute; left: 0; top: 0.3rem; width: 6rem; color: var(--text-dim); }
+  .pv-table td.pv-who { padding-left: 0; padding-bottom: 0.5rem; margin-bottom: 0.25rem; border-bottom: 1px solid var(--border); }
+  .pv-table td.pv-who::before, .pv-table td[data-label=""]::before { content: none; }
+  .pv-table td[data-label=""] { padding-left: 0; }
+  .pv-table td:empty { display: none; }
+}
+
