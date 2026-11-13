@@ -42,6 +42,7 @@ HANGUP = "photonvox-hangup"     # where "unreachable: none" forwards: a one-line
 ORDER = {"synthetic": 1, "emergency": 100, "block": 105, "service": 110, "national": 120, "toll_free": 130, "international": 140, "group": 101, "menu": 101,
          "hangup": 102, "hours": 300, "inbound": 100}
 # Tables, parents before children: the writer inserts in this order and deletes in reverse.
+AUDIT = ("insert_date", "insert_user", "update_date", "update_user")     # FusionPBX's own bookkeeping columns: never written by PhotonVox
 TABLES = ("v_extensions", "v_voicemails", "v_ring_groups", "v_ring_group_destinations", "v_ivr_menus", "v_ivr_menu_options", "v_dialplans",
           "v_dialplan_details", "v_destinations")
 KEYS = {"v_extensions": "extension_uuid", "v_voicemails": "voicemail_uuid", "v_ring_groups": "ring_group_uuid",
@@ -71,12 +72,29 @@ class Target:
     domain_uuid: str
     gateways: Mapping[str, str]          # upstream key -> v_gateways.gateway_uuid
     speech: bool = False                 # greetings were spoken and put on the engine (app/speech): menus name their files
+    adoption: Optional["Adoption"] = None   # a hand-built domain taken over in place (decision 32)
+
+
+@dataclass(frozen=True)
+class Adoption:
+    """What the takeover importer (app/engine/importer.py) found, for a domain taken over in place (ARCHITECTURE §17.4):
+    `objects`: builder object key ("extension:100", "inbound:+1…", "ivr:main") -> the live rows (table, id) that make it up;
+    `rows`: "table:id" -> the live row; `ids`: builder name -> the live id it keeps; `meanings`: object key -> its meaning when adopted.
+    While an object's meaning is unchanged the builder emits exactly its live rows, so a publish changes nothing; when it changes, the object is
+    regenerated with the same ids, over its live columns. Outside calls, 911 and blocking stay the engine's own: no routes are generated."""
+    objects: Mapping[str, Any]
+    rows: Mapping[str, Mapping[str, Any]]
+    ids: Mapping[str, str]
+    meanings: Mapping[str, str]
 
 
 @dataclass
 class Build:
     rows: Dict[str, List[Dict[str, Any]]] = field(default_factory=lambda: {t: [] for t in TABLES})
     secrets: Dict[Tuple[str, str], str] = field(default_factory=dict)   # (table, uuid) -> column holding a Secret
+    meanings: Dict[str, str] = field(default_factory=dict)              # object key -> what it means (a hash of its part of the plan)
+    adopted: List[str] = field(default_factory=list)                    # objects emitted exactly as they are on the engine
+    row_cache: Dict[Tuple[str, str], List[str]] = field(default_factory=dict)   # (table, uuid) -> its object's cache entries, for a row rewritten alone
     features: Dict[str, bool] = field(default_factory=dict)             # standard dial plan app_uuid -> enabled
     cache: List[str] = field(default_factory=list)                      # /var/cache/fusionpbx file names to delete
 
@@ -126,14 +144,32 @@ class _Builder:
         self.ns = uuid.UUID(target.phone_system_id)
         boxes = [x["key"] for x in plan["voicemail_boxes"]]
         self.box_id = {k: str(SHARED_BOX_BASE + i + 1) for i, k in enumerate(boxes)}
+        self.a = target.adoption
+        self.obj: Optional[str] = None                     # the object being built: its rows and cache entries are recorded under it
+        self.obj_rows: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+        self.obj_cache: Dict[str, List[str]] = {}
 
     # ---- helpers ----
     def uid(self, name: str) -> str:
+        if self.a and name in self.a.ids:          # an adopted row keeps its id
+            return self.a.ids[name]
         return str(uuid.uuid5(self.ns, name))
+
+    def begin(self, obj: str, fragment: Any) -> None:
+        """Start an object: what follows belongs to it; its meaning is its part of the plan."""
+        self.obj = obj
+        self.b.meanings[obj] = hashlib.sha256(json.dumps(fragment, sort_keys=True, default=str).encode()).hexdigest()
+
+    def cache(self, entry: str) -> None:
+        """A cache entry of the object being built (every one belongs to an object; the domain's own entry is added in run)."""
+        self.b.cache.append(entry)
+        self.obj_cache.setdefault(str(self.obj), []).append(entry)
 
     def row(self, table: str, **cols: Any) -> Dict[str, Any]:
         cols["domain_uuid"] = self.t.domain_uuid
         self.b.rows[table].append(cols)
+        if self.obj:
+            self.obj_rows.setdefault(self.obj, []).append((table, cols))
         for k, v in cols.items():
             if isinstance(v, Secret):
                 self.b.secrets[(table, cols[KEYS[table]])] = k
@@ -168,28 +204,75 @@ class _Builder:
     # ---- the parts ----
     def run(self) -> Build:
         for x in self.p["extensions"]:
+            self.begin("extension:" + x["extension"], x)
             self.extension(x)
         for box in self.p["voicemail_boxes"]:
+            self.begin("box:" + box["key"], box)
             self.voicemail(self.box_id[box["key"]], box["name"], box.get("email"), f"box:{box['key']}")
-        self.direction()
-        self.hangup()
-        self.synthetic()
-        for r in self.p["outbound_routes"]:
-            self.block(r) if r.get("reject") else self.route(r)
+        self.obj = None
+        if not self.a:
+            # An adopted domain keeps its own outside calls, 911 and blocking (hand-built) until the protections version: none generated.
+            self.direction()
+            self.hangup()
+            self.synthetic()
+            for r in self.p["outbound_routes"]:
+                self.block(r) if r.get("reject") else self.route(r)
         for g in self.p["ring_groups"]:
+            self.begin("ring_group:" + g["key"], g)
             self.ring_group(g)
         for m in self.p["ivr_menus"]:
+            self.begin("ivr:" + m["key"], m)
             self.menu(m)
         for tc in self.p["time_conditions"]:
+            self.begin("hours:" + tc["key"], tc)
             self.hours(tc)
         for n in self.p["inbound"]:
+            self.begin("inbound:" + n["number"], n)
             self.inbound(n)
-        for name, enabled in self.p["features"].items():
-            for app in FEATURE_APPS[name]:
-                self.b.features[app] = enabled
+        self.obj = None
+        if not self.a:
+            for name, enabled in self.p["features"].items():
+                for app in FEATURE_APPS[name]:
+                    self.b.features[app] = enabled
         self.b.cache.append(f"dialplan.{self.domain}")
+        if self.a:
+            self.adopt()
+        for obj, built in self.obj_rows.items():
+            for table, cols in built:
+                self.b.row_cache[(table, cols[KEYS[table]])] = sorted(set(self.obj_cache.get(obj, [])))
+        if self.a:
+            for obj in self.b.adopted:
+                for table, uid in self.a.objects[obj]:
+                    self.b.row_cache[(table, uid)] = sorted(set(self.obj_cache.get(obj, [])))
         self.b.cache = sorted(set(self.b.cache))
         return self.b
+
+    def adopt(self) -> None:
+        """Objects whose meaning is what it was when adopted: their live rows, exactly. Changed or new objects: as built, over the live columns of
+        rows that keep their id (what the document does not say stays as it was). Only changed objects' cache entries are cleared."""
+        assert self.a
+        keep: List[str] = []
+        for obj, built in self.obj_rows.items():
+            live = self.a.objects.get(obj)
+            if live is not None and self.a.meanings.get(obj) == self.b.meanings[obj]:
+                for table, cols in built:
+                    self.b.rows[table].remove(cols)
+                for table, uid in live:
+                    self.b.rows[table].append({**self.a.rows[f"{table}:{uid}"]})
+                self.b.adopted.append(obj)
+                continue
+            for table, cols in built:
+                base = self.a.rows.get(f"{table}:{cols[KEYS[table]]}")
+                if base:
+                    merged = {k: v for k, v in base.items() if k not in AUDIT}
+                    merged.update(cols)
+                    cols.clear()
+                    cols.update(merged)
+            keep += self.obj_cache.get(obj, [])
+        changed = set(self.obj_rows) - set(self.b.adopted)
+        self.b.cache = sorted(set(keep) | ({f"dialplan.{self.domain}"} if changed else set()))
+        for table in TABLES:
+            self.b.rows[table].sort(key=lambda r: r[KEYS[table]])
 
     def extension(self, x: Mapping[str, Any]) -> None:
         ext = x["extension"]
@@ -202,12 +285,12 @@ class _Builder:
                  toll_allow=":".join(x["toll_allow"]), call_timeout=30, call_screen_enabled=False, extension_dialect="us",
                  extension_voice="callie", extension_type="default", enabled=True, description="PhotonVox", force_ping=False,
                  forward_user_not_registered_enabled=none, forward_user_not_registered_destination=HANGUP if none else None)
-        self.voicemail(ext, x["name"], x.get("email"), "extension:" + ext)
-        self.b.cache.append(f"directory.{ext}@{self.domain}")
+        self.voicemail(ext, x["name"], x.get("email"), "extension:" + ext, x.get("voicemail", True))
+        self.cache(f"directory.{ext}@{self.domain}")
 
-    def voicemail(self, box: str, name: str, email: Optional[str], key: str) -> None:
+    def voicemail(self, box: str, name: str, email: Optional[str], key: str, enabled: bool = True) -> None:
         self.row("v_voicemails", voicemail_uuid=self.uid("voicemail:" + key), voicemail_id=box, voicemail_password=Secret("pin"),
-                 voicemail_mail_to=email, voicemail_file="attach" if email else None, voicemail_local_after_email=True, voicemail_enabled=True,
+                 voicemail_mail_to=email, voicemail_file="attach" if email else None, voicemail_local_after_email=True, voicemail_enabled=enabled,
                  voicemail_recording_instructions=True, voicemail_recording_options=True, voicemail_description=name)
 
     def direction(self) -> None:
@@ -299,7 +382,10 @@ class _Builder:
                 + _act(app, data) + "\t</condition>\n")
         dp = self.dialplan("ivr:" + key, f"photonvox.menu.{key}", ORDER["menu"], IVR_APP, body, number=number)
         # The greeting is text in the document, spoken at publish (decision 30) into a file in the domain's recordings, which FusionPBX finds by name.
-        greeting = speech.file_name(m["greeting"], self.p.get("voice", speech.DEFAULT_VOICE)) if self.t.speech else None
+        if m["greeting"].startswith("recording:"):
+            greeting: Optional[str] = m["greeting"][len("recording:"):]        # a recording already in the domain's recordings
+        else:
+            greeting = speech.file_name(m["greeting"], self.p.get("voice", speech.DEFAULT_VOICE)) if self.t.speech else None
         self.row("v_ivr_menus", ivr_menu_uuid=menu, dialplan_uuid=dp, ivr_menu_name=key, ivr_menu_extension=number, ivr_menu_greet_long=greeting,
                  ivr_menu_dialect="us", ivr_menu_voice="callie", ivr_menu_confirm_attempts=1, ivr_menu_timeout=3000, ivr_menu_exit_app=app,
                  ivr_menu_exit_data=data, ivr_menu_inter_digit_timeout=2000, ivr_menu_max_failures=1, ivr_menu_max_timeouts=1,
@@ -310,7 +396,7 @@ class _Builder:
             self.row("v_ivr_menu_options", ivr_menu_option_uuid=self.uid(f"ivr:{key}:{digits}"), ivr_menu_uuid=menu, ivr_menu_option_digits=digits,
                      ivr_menu_option_action="menu-exec-app", ivr_menu_option_param=f"{oa} {od}", ivr_menu_option_order=i,
                      ivr_menu_option_enabled=True)
-        self.b.cache.append(f"configuration.ivr.conf.{menu}")
+        self.cache(f"configuration.ivr.conf.{menu}")
 
     def hours(self, tc: Mapping[str, Any]) -> None:
         """Open hours in the site's time zone (FreeSWITCH evaluates time conditions in the `timezone` channel variable, set inline first);
@@ -351,7 +437,8 @@ class _Builder:
                  destination_prefix="1", destination_number=ten, destination_number_regex=regex, destination_context="public",
                  destination_record=False, destination_actions=[{"destination_app": app, "destination_data": data}], destination_app=app,
                  destination_data=data, destination_order=100, destination_enabled=True, destination_description="PhotonVox")
-        self.b.cache += [f"dialplan.public.{form}" for form in (number, number[1:], ten)]
+        for form in (number, number[1:], ten):
+            self.cache(f"dialplan.public.{form}")
 
 
 def _exact(number: str) -> str:

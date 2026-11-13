@@ -23,5 +23,8 @@ def publish(engine: Engine, agent: Agent, plan: Mapping[str, Any], target: fusio
         agent.seed_domain()
     with engine.begin() as conn:
         result = writer.write(conn, built, target.domain_uuid, previous)
+        if result.cache and not getattr(agent, "available", True):
+            # No vox-agent on this engine (decision 32): a change FreeSWITCH would only see after its cache is cleared is not committed.
+            raise RuntimeError("this instance has no vox-agent: the change needs the engine's cache cleared, so nothing was written")
     agent.clear_cache(result.cache)
     return result

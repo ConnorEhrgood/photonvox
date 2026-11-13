@@ -51,7 +51,7 @@ export function CallFlowsPage() {
         {menus.length === 0 ? <p className="ph-hint">None yet.</p> : (
           <ul className="pv-plain">{menus.map(([k, m]) => (
             <li key={k}><strong>{k}</strong>: “{m.greeting}” <span className="ph-hint">
-              {Object.entries(m.options).map(([d, t]) => `${d} → ${targetText(draft, t)}`).join('; ')}; no key → {targetText(draft, m.timeout)}</span> {edit('menu', k)}</li>
+              {Object.entries(m.options).map(([d, t]) => `${d} → ${targetText(draft, t)}`).join('; ')}; no key → {m.timeout ? targetText(draft, m.timeout) : 'the call ends'}</span> {edit('menu', k)}</li>
           ))}</ul>
         )}
       </section>

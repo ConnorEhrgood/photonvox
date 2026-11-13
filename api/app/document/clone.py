@@ -32,6 +32,6 @@ def clone(source: Mapping[str, Any], target: Mapping[str, Any]) -> Dict[str, Any
         if members:
             groups[key] = {**g, "members": members, **({"then": target_(g.get("then"))} if g.get("then") else {})}
     out["groups"] = groups
-    out["menus"] = {key: {**m, "options": {d: target_(t) for d, t in m["options"].items()}, "timeout": target_(m["timeout"])}
+    out["menus"] = {key: {**m, "options": {d: target_(t) for d, t in m["options"].items()}, "timeout": target_(m.get("timeout"))}
                     for key, m in source.get("menus", {}).items()}
     return out

@@ -107,7 +107,7 @@ def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str
             prob = _target_problem(doc, t, f"menus.{mid}.options.{digit}")
             if prob:
                 out.append(prob)
-        prob = _target_problem(doc, m.timeout, f"menus.{mid}.timeout")
+        prob = _target_problem(doc, m.timeout, f"menus.{mid}.timeout") if m.timeout else None
         if prob:
             out.append(prob)
 

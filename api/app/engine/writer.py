@@ -1,7 +1,9 @@
 """The FusionPBX adapter's writer: applies a build (app/engine/fusionpbx.py) to an engine's database, in the caller's transaction.
 
 - **Upserts** each row on its id, updating only PhotonVox's columns, so what FusionPBX or a phone user set elsewhere on the same row (call
-  forwarding by feature code, do-not-disturb) survives a republish.
+  forwarding by feature code, do-not-disturb) survives a republish. **A row already as built is not written at all** (not even its
+  update date), so publishing an unchanged phone system, or adopting a hand-built one (decision 32), changes nothing on the engine.
+  FusionPBX's own bookkeeping columns (dates, users) are never written.
 - **Removes** what the previous publish wrote and this one does not (the previous manifest), children first.
 - **Scoped:** every statement names the phone system's `domain_uuid`; a row of another domain is never read, changed or removed.
 - **Secrets:** a SIP password or voicemail PIN is generated only when its row is new; an existing one is kept. New ones are returned once so
@@ -21,7 +23,8 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from app.engine.fusionpbx import KEYS, TABLES, Build, Secret
+from app.engine.compare import norm
+from app.engine.fusionpbx import AUDIT, KEYS, TABLES, Build, Secret
 
 JSON_COLUMNS = {("v_destinations", "destination_actions")}
 
@@ -38,6 +41,7 @@ class Result:
     manifest: List[Dict[str, str]]
     inserted: int = 0
     updated: int = 0
+    unchanged: int = 0
     removed: int = 0
     new_secrets: Dict[str, str] = field(default_factory=dict)      # "extension:1001" / "voicemail:1001" -> value (only rows created now)
     cache: List[str] = field(default_factory=list)
@@ -79,8 +83,13 @@ def write(conn: Connection, b: Build, domain_uuid: str, previous: Sequence[Mappi
                                     {"u": m["uuid"], "d": domain_uuid}).rowcount
 
     for table in TABLES:
+        same = _unchanged(conn, table, b.rows[table], domain_uuid)
         for r in b.rows[table]:
+            if r[KEYS[table]] in same:
+                res.unchanged += 1
+                continue
             inserted, values = _upsert(conn, table, r, domain_uuid, generate)
+            res.cache = sorted(set(res.cache) | set(b.row_cache.get((table, r[KEYS[table]]), [])))   # a row put back alone: its cache too
             if inserted:
                 res.inserted += 1
                 res.new_secrets.update(values)
@@ -93,8 +102,25 @@ def write(conn: Connection, b: Build, domain_uuid: str, previous: Sequence[Mappi
     return res
 
 
+def _unchanged(conn: Connection, table: str, rows: Sequence[Mapping[str, Any]], domain_uuid: str) -> set:
+    """The ids of the rows already on the engine exactly as built (every column PhotonVox writes; secrets are kept by the engine anyway)."""
+    if not rows:
+        return set()
+    key = KEYS[table]
+    cols = sorted({c for r in rows for c, v in r.items() if c not in AUDIT and not isinstance(v, Secret)})
+    have = {str(h[key]): h for h in conn.execute(text(f"select {', '.join(cols)} from {table} where {key} = any(cast(:ids as uuid[])) "
+                                                    "and domain_uuid = :d"), {"ids": [r[key] for r in rows], "d": domain_uuid}).mappings()}
+    out = set()
+    for r in rows:
+        h = have.get(r[key])
+        if h is not None and all(norm(h.get(c)) == norm(r.get(c)) for c in cols if c in r and not isinstance(r[c], Secret)):
+            out.add(r[key])
+    return out
+
+
 def _upsert(conn: Connection, table: str, r: Mapping[str, Any], domain_uuid: str, generate: Callable[[str], str]):
     key = KEYS[table]
+    r = {c: v for c, v in r.items() if c not in AUDIT}          # FusionPBX's bookkeeping: insert_date is set below, the rest is not ours
     secret_cols = {c: v for c, v in r.items() if isinstance(v, Secret)}
     params: Dict[str, Any] = {}
     names, values = [], []

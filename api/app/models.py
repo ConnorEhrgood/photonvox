@@ -146,6 +146,8 @@ class PbxInstance(Base):
     routing: Mapped[Dict[str, List[str]]] = mapped_column(JSONB, default=dict)
     emergency_upstream: Mapped[str] = mapped_column(String(60), default="")
     versions: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)   # FusionPBX, FreeSWITCH, as last reported
+    # The engine's own, hand-built gateways by key -> gateway id (the live engine, decision 32): routing may name them; PhotonVox never writes them.
+    own_gateways: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)
     # Outgoing mail (voicemail to email): {host, port, secure, username, from, from_name}; Postmark's SMTP with a voicemail server's token.
     email: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
     email_password_sealed: Mapped[str] = mapped_column(Text, default="")
@@ -167,6 +169,9 @@ class PhoneSystem(Base):
     # new: nothing published yet | publishing | ready | failed (the last publish failed; the previous version runs) | changed (edited outside)
     status: Mapped[str] = mapped_column(String(20), default="new")
     drift: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)      # the last drift check: {checked_at, changed: [...], missing: [...], extra: [...]}
+    # A hand-built domain taken over in place (decision 32; app/engine/importer.py): {objects, rows, ids, meanings, extras: {"table:id": hash}}.
+    # None for a phone system PhotonVox built itself.
+    adoption: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (CheckConstraint("status in ('new', 'publishing', 'ready', 'failed', 'changed')", name="ck_phone_system_status"),)
 

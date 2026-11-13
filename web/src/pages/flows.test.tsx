@@ -130,6 +130,19 @@ describe('call flows', () => {
     expect(saved[0].menus!.main.timeout).toEqual({ group: 'front-desk' })
   })
 
+  it('a menu that ends the call when no key is pressed (an adopted one) says so, and a rename leaves it so', async () => {
+    const menus = { main: { greeting: 'recording:MainMenu.wav', options: { 1: { group: 'everyone' } } } }
+    const { saved } = withServer(<CallFlowsPage />, { ...DRAFT, menus } as typeof DRAFT)
+    expect(await screen.findByText(/1 → Ring group everyone; no key → the call ends/)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: 'Change everyone' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Ring group everyone' })
+    await userEvent.clear(within(dialog).getByLabelText('Name'))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Front Desk')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await screen.findByText(/no key → the call ends/)
+    expect(saved[0].menus!.main).toEqual({ greeting: 'recording:MainMenu.wav', options: { 1: { group: 'front-desk' } } })
+  })
+
   it('adds a menu with keys, a mailbox and office hours, and sets a site’s hours', async () => {
     const { saved } = withServer(<CallFlowsPage />, { ...DRAFT, menus: {} })
     const add = async (section: string) => userEvent.click(within(await screen.findByRole('region', { name: section })).getByRole('button', { name: 'Add' }))

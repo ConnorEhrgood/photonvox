@@ -66,16 +66,20 @@ def test_the_first_publish_inserts_everything_with_new_secrets(eng):
         assert c.execute(text("select destination_actions->0->>'destination_app' from v_destinations limit 1")).scalar() == "transfer"
 
 
-def test_a_republish_updates_in_place_keeps_secrets_and_what_phone_users_set(eng):
+def test_a_republish_writes_only_what_changed_and_keeps_secrets_and_what_phone_users_set(eng):
     first = write(eng)
     with eng.begin() as c:
         c.execute(text("update v_extensions set forward_all_enabled = true, do_not_disturb = 'true' where extension = '100'"))
+        c.execute(text("update v_extensions set effective_caller_id_name = 'Hand Edit' where extension = '101'"))
     again = write(eng, previous=first.manifest)
-    assert again.inserted == 0 and again.removed == 0 and again.updated == first.inserted and again.new_secrets == {}
+    # The phone user's settings are not PhotonVox's columns: that row is as built. The hand-edited name is put back: one row written.
+    assert again.inserted == 0 and again.removed == 0 and again.updated == 1 and again.unchanged == first.inserted - 1 and again.new_secrets == {}
     with eng.connect() as c:
-        row = c.execute(text("select password, forward_all_enabled, do_not_disturb, update_date is not null as upd from v_extensions "
+        row = c.execute(text("select password, forward_all_enabled, do_not_disturb, update_date is null as untouched from v_extensions "
                              "where extension = '100'")).first()
-    assert row.password == first.new_secrets["extension:100"] and row.forward_all_enabled and row.do_not_disturb == "true" and row.upd
+        fixed = c.execute(text("select effective_caller_id_name, update_date is not null as upd from v_extensions where extension = '101'")).first()
+    assert row.password == first.new_secrets["extension:100"] and row.forward_all_enabled and row.do_not_disturb == "true" and row.untouched
+    assert fixed.effective_caller_id_name != "Hand Edit" and fixed.upd
 
 
 def test_what_left_the_plan_is_removed_with_its_cache_entries(eng):

@@ -97,7 +97,7 @@ export function rename(d: Draft, kind: 'group' | 'menu' | 'voicemail', from: str
     ...d,
     numbers: Object.fromEntries(Object.entries(d.numbers ?? {}).map(([k, n]) => [k, { ...n, open: fix(n.open)!, ...(n.closed ? { closed: fix(n.closed) } : {}) }])),
     groups: Object.fromEntries(Object.entries(d.groups ?? {}).map(([k, g]) => [k, { ...g, ...(g.then ? { then: fix(g.then) } : {}) }])),
-    menus: Object.fromEntries(Object.entries(d.menus ?? {}).map(([k, m]) => [k, { ...m, timeout: fix(m.timeout)!,
+    menus: Object.fromEntries(Object.entries(d.menus ?? {}).map(([k, m]) => [k, { ...m, ...(m.timeout ? { timeout: fix(m.timeout)! } : {}),
       options: Object.fromEntries(Object.entries(m.options).map(([o, t]) => [o, fix(t)!])) }])),
   }
 }

@@ -53,16 +53,20 @@ class InstanceIn(BaseModel):
     role: str = Field("active", pattern=r"^(active|standby|draining)$")
     hostname: str = Field(min_length=1, max_length=120)
     database_url: str = Field(min_length=10)
-    agent_url: str = Field(pattern=r"^https?://[A-Za-z0-9.:\[\]-]+(:[0-9]+)?/?$")
-    agent_secret: str = Field(min_length=32, max_length=200)
+    # No agent: an engine whose domains are only adopted (decision 32) until vox-agent is installed there.
+    agent_url: Optional[str] = Field(None, pattern=r"^https?://[A-Za-z0-9.:\[\]-]+(:[0-9]+)?/?$")
+    agent_secret: Optional[str] = Field(None, min_length=32, max_length=200)
     upstreams: List[UpstreamIn]
     routing: Dict[str, List[str]]
     emergency_upstream: str
+    # The engine's own gateways, hand-built (the live engine, decision 32): routing then names them by key, PhotonVox writes no upstream and
+    # Apply refuses the instance. Key -> the existing gateway's id.
+    own_gateways: Dict[str, uuid.UUID] = Field(default_factory=dict)
 
 
 def _instance_json(i: PbxInstance) -> Dict[str, Any]:
     return {"id": str(i.id), "name": i.name, "region": i.region, "role": i.role, "hostname": i.hostname, "agent_kind": (i.agent or {}).get("kind"),
-            "upstreams": i.upstreams, "routing": i.routing, "emergency_upstream": i.emergency_upstream, "versions": i.versions,
+            "upstreams": i.upstreams, "own_gateways": i.own_gateways or {}, "routing": i.routing, "emergency_upstream": i.emergency_upstream, "versions": i.versions,
             "email": {k: v for k, v in (i.email or {}).items()}, "email_password_set": bool(i.email_password_sealed)}
 
 
@@ -74,12 +78,18 @@ def instances(who: Who = Depends(platform_admin), db: Session = Depends(get_db))
 @router.post("/instances", status_code=201)
 def add_instance(body: InstanceIn, who: Who = Depends(platform_admin), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Register an engine. Its database login and its vox-agent secret are sealed at once and never shown again."""
-    keys = {u.key for u in body.upstreams}
+    if bool(body.agent_url) != bool(body.agent_secret):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "bad_agent", "detail": "An agent needs both its address and its secret."})
+    if body.own_gateways and body.upstreams:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "bad_routing", "detail": "An instance's upstreams are either PhotonVox's or its own, not both."})
+    keys = {u.key for u in body.upstreams} | set(body.own_gateways)
     if body.emergency_upstream not in keys or not body.routing.get("national") or any(k not in keys for ks in body.routing.values() for k in ks):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "bad_routing", "detail": "Routing and 911 must name upstreams of this instance, with one for national calls."})
     i = PbxInstance(name=body.name, region=body.region, role=body.role, hostname=body.hostname, database_url_sealed=crypto.seal(body.database_url),
-                    agent={"kind": "http", "url": body.agent_url}, agent_secret_sealed=crypto.seal(body.agent_secret),
-                    upstreams=[u.model_dump() for u in body.upstreams], routing=body.routing, emergency_upstream=body.emergency_upstream)
+                    agent={"kind": "http", "url": body.agent_url} if body.agent_url else {"kind": "none"},
+                    agent_secret_sealed=crypto.seal(body.agent_secret) if body.agent_secret else "",
+                    upstreams=[u.model_dump() for u in body.upstreams], routing=body.routing, emergency_upstream=body.emergency_upstream,
+                    own_gateways={k: str(v) for k, v in body.own_gateways.items()})
     db.add(i)
     db.flush()
     audit.record(db, actor_id=who.id, actor_label=who.label, actor_source="platform", action="instance.added", target_type="pbx_instance", target_id=i.id,
@@ -194,6 +204,8 @@ def apply_instance(instance_id: uuid.UUID, who: Who = Depends(platform_admin), d
     i = db.get(PbxInstance, instance_id)
     if i is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if not i.upstreams:
+        raise HTTPException(status.HTTP_409_CONFLICT, {"code": "hand_built", "detail": "This instance's upstreams are its own (hand-built): PhotonVox applies nothing to it."})
     try:
         out = service.apply_instance(i, connect)
     except Exception as e:  # noqa: BLE001 - the engine or its agent failed: say so, in a sentence
@@ -202,6 +214,37 @@ def apply_instance(instance_id: uuid.UUID, who: Who = Depends(platform_admin), d
                  target_id=i.id, **out)
     db.commit()
     return out
+
+
+class AdoptIn(BaseModel):
+    tenant_id: uuid.UUID
+    site_id: uuid.UUID
+    domain: str = Field(min_length=1, max_length=200, pattern=r"^[a-z0-9.-]+$")
+
+
+@router.post("/instances/{instance_id}/adopt", status_code=201)
+def adopt_domain(instance_id: uuid.UUID, body: AdoptIn, who: Who = Depends(platform_admin), connect: service.Connect = Depends(get_connect)) -> Dict[str, Any]:
+    """Take a hand-built domain over in place (decision 32, ARCHITECTURE §17): read it, import it, prove its first publish changes nothing, and
+    keep it as the organization's phone system (its draft is the imported document; its numbers are assigned to it). Nothing is written to the
+    engine. Refused, with the reason, when the proof fails. The report lists everything that could not be expressed."""
+    from app.engine import takeover
+    with SystemSession() as s:          # as the system, like assigning numbers: only staff take a domain over
+        i = s.get(PbxInstance, instance_id)
+        if i is None or s.get(Tenant, body.tenant_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        eng, _agent = connect(i)
+        try:
+            with eng.connect() as conn:
+                out = takeover.adopt(s, i, body.tenant_id, body.site_id, body.domain, conn)
+        except takeover.TakeoverError as e:
+            s.rollback()
+            raise HTTPException(status.HTTP_409_CONFLICT, {"code": "not_adopted", "detail": str(e)})
+        finally:
+            eng.dispose()
+        audit.record(s, actor_id=who.id, actor_label=who.label, actor_source="platform", action="phone_system.adopted", tenant_id=body.tenant_id,
+                     target_type="phone_system", target_id=out["phone_system_id"], instance=str(i.id), objects=out["objects"], extras=out["extras"])
+        s.commit()
+        return out
 
 
 # ---- held numbers (security review C2): Photon's stock, and which organization each is assigned to ----

@@ -72,13 +72,13 @@ export interface Problem { path: string; code: string; message: string }
 
 export type PhoneSystemStatus = 'new' | 'publishing' | 'ready' | 'failed' | 'changed'
 
-export interface DraftUser { name: string; site: string; extension: string; email?: string; direct_number?: string; show?: 'site' | 'direct' }
+export interface DraftUser { name: string; site: string; extension: string; email?: string; direct_number?: string; show?: 'site' | 'direct'; voicemail?: boolean }
 
 /** The document being built (api/app/document/model.py). A target is one of {user}, {group}, {menu}, {voicemail}. */
 export type DraftTarget = Record<string, string>
 export interface DraftNumber { site: string; open: DraftTarget; closed?: DraftTarget | null; hours?: string | null }
 export interface DraftGroup { members: string[]; strategy?: 'simultaneous' | 'sequence'; ring_seconds?: number; then?: DraftTarget | null }
-export interface DraftMenu { greeting: string; options: Record<string, DraftTarget>; timeout: DraftTarget }
+export interface DraftMenu { greeting: string; options: Record<string, DraftTarget>; timeout?: DraftTarget }   // none: the call ends (an adopted menu, decision 32)
 export interface DraftHours { week: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', string[]>>; holidays?: 'none' | 'us-federal' }
 export interface DraftSite { emergency_location: string; emergency_number: string; caller_id: string; hours?: string | null; unreachable?: 'voicemail' | 'none'; outside_prefix?: '8' | '9' | null }
 export interface Draft {

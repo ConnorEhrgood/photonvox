@@ -435,9 +435,14 @@ def test_an_instance_is_reached_through_its_sealed_login_and_its_agent(client, w
         eng, a = service.connect(i)
         assert str(eng.url).startswith("postgresql+psycopg://adapter:") and isinstance(a, HttpAgent) and a.url == "http://10.2.1.21:8780"
         assert "a" * 64 not in i.agent_secret_sealed and a.secret == "a" * 64
-        i.agent = {}
-        with pytest.raises(RuntimeError, match="no agent"):
-            service.connect(i)
+        i.agent = {}                       # no vox-agent (an engine whose domains are only adopted, decision 32)
+        _eng, none = service.connect(i)
+        assert isinstance(none, service.NoAgent)
+        none.clear_cache([])               # nothing to clear: fine
+        with pytest.raises(RuntimeError, match="no vox-agent"):
+            none.clear_cache(["dialplan.x"])
+        with pytest.raises(RuntimeError, match="no vox-agent .check."):
+            none.check("inbound", "1", "d", "u", "t")
 
 
 def test_drift_on_a_failed_phone_system_is_recorded_without_changing_its_state(client, world, built, connect, eng):

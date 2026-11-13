@@ -30,6 +30,9 @@ class Context:
     validated_locations: Mapping[str, AbstractSet[str]] = field(default_factory=dict)
     premium_allowed: bool = False               # Photon staff have let premium numbers through for this organization (§15a)
     assigned_numbers: Optional[AbstractSet[str]] = None   # the numbers assigned to the organization (always given when publishing; review C2)
+    # An adopted, hand-built domain (decision 32, ARCHITECTURE §17): its outside calls, 911 and blocking stay hand-built until the protections
+    # version, so the 911 address problem does not stop it (its 911 is the engine's own, unchanged), and the builder generates no routes.
+    adopted: bool = False
 
 
 class CompileError(Exception):
@@ -57,6 +60,8 @@ def _prefixed(pattern: str, prefixes: List[str]) -> str:
 
 def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
     found = problems(doc, ctx.validated_locations, ctx.assigned_numbers)
+    if ctx.adopted:
+        found = [p for p in found if p.code != "emergency_location_unvalidated"]
     if found:
         raise CompileError(found)
     if "premium" in doc.calling.blocking.allow and not ctx.premium_allowed:
@@ -84,12 +89,13 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
             "emergency_caller_id_number": site.emergency_number,       # what a 911 call from this extension shows: the number registered at its site
             "toll_allow": toll_allow,
             "unreachable": f"voicemail:{u.extension}" if site.unreachable == "voicemail" else "hangup",
+            **({} if u.voicemail else {"voicemail": False}),       # only when off, so the plans of documents that never say stay as they were
         })
     boxes = [{"key": k, "name": b.name, "email": b.email} for k, b in sorted(doc.boxes.items())]
     groups = [{"key": k, "strategy": g.strategy, "ring_seconds": g.ring_seconds, "members": [doc.users[m].extension for m in g.members],
                "then": _dest(doc, g.then) if g.then else "hangup"} for k, g in sorted(doc.groups.items())]
     menus = [{"key": k, "greeting": m.greeting, "options": {d: _dest(doc, t) for d, t in sorted(m.options.items())},
-              "timeout": _dest(doc, m.timeout)} for k, m in sorted(doc.menus.items())]
+              "timeout": _dest(doc, m.timeout) if m.timeout else "hangup"} for k, m in sorted(doc.menus.items())]
 
     time_conditions, inbound = [], []
     for num, n in sorted(doc.numbers.items()):
@@ -138,4 +144,5 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         "voice": doc.voice,
         "spend_limit_usd": doc.calling.spend_limit_usd,
         "features": {"eavesdrop": doc.features.eavesdrop, "intercept": doc.features.intercept},
+        "adopted": ctx.adopted,
     }

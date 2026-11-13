@@ -275,14 +275,17 @@
             },
             {
               "$ref": "#/$defs/ToVoicemail"
+            },
+            {
+              "type": "null"
             }
           ],
+          "default": null,
           "title": "Timeout"
         }
       },
       "required": [
-        "greeting",
-        "timeout"
+        "greeting"
       ],
       "title": "Menu",
       "type": "object"
@@ -536,6 +539,11 @@
           ],
           "default": null,
           "title": "Email"
+        },
+        "voicemail": {
+          "default": true,
+          "title": "Voicemail",
+          "type": "boolean"
         }
       },
       "required": [

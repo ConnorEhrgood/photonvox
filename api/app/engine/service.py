@@ -12,7 +12,8 @@ Engines are reached through `connect(instance) -> (sqlalchemy Engine, Agent)`; t
 """
 from __future__ import annotations
 
-import decimal
+import hashlib
+import json
 import logging
 import uuid
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
@@ -26,6 +27,7 @@ from app.config import settings
 from app.compiler.compile import CompileError, Context, compile_plan
 from app.document.model import PhoneSystem as Document
 from app.engine import fusionpbx, instance as instance_settings, publish, upstreams, writer
+from app.engine.compare import norm
 from app.engine.agent import Agent, HttpAgent
 from app.speech import DEFAULT_VOICE, Speech, audio_key, file_name
 from app.speech.google import GoogleSpeech
@@ -35,19 +37,38 @@ Connect = Callable[[PbxInstance], Tuple[Engine, Agent]]
 log = logging.getLogger("photonvox.publish")
 
 
+class NoAgent:
+    """An instance without vox-agent (the live engine while its domains are only adopted, decision 32): nothing to clear is fine; anything else
+    the agent would do is refused, and a publish that would need the cache cleared is rolled back before it commits (app/engine/publish.py)."""
+
+    available = False
+
+    def clear_cache(self, entries: Any) -> None:
+        if entries:
+            raise RuntimeError("this instance has no vox-agent: a change that needs the engine's cache cleared cannot be published to it yet")
+
+    def __getattr__(self, name: str) -> Any:
+        def refuse(*_a: Any, **_k: Any) -> Any:
+            raise RuntimeError(f"this instance has no vox-agent ({name})")
+        return refuse
+
+
 def connect(instance: PbxInstance) -> Tuple[Engine, Agent]:
-    """The instance's engine database (as PhotonVox's adapter role) and its agent."""
+    """The instance's engine database (as PhotonVox's adapter role) and its agent (NoAgent when the instance has none)."""
     from sqlalchemy import create_engine
     eng = create_engine(crypto.unseal(instance.database_url_sealed), pool_pre_ping=True, connect_args={"client_encoding": "utf8"})
     a = instance.agent or {}
     if a.get("kind") != "http" or not instance.agent_secret_sealed:
-        raise RuntimeError(f"instance {instance.name}: no agent configured")
+        return eng, NoAgent()       # type: ignore[return-value]
     return eng, HttpAgent(a["url"], crypto.unseal(instance.agent_secret_sealed))
 
 
 def apply_instance(instance: PbxInstance, connect: Connect = connect) -> Dict[str, Any]:
     """Put the instance's own settings on its engine: its upstreams (gateways and providers entries) and its outgoing mail, in one transaction,
-    then have vox-agent clear the cache, stop removed gateways, rescan and reload the access lists."""
+    then have vox-agent clear the cache, stop removed gateways, rescan and reload the access lists. An instance whose upstreams are its own,
+    hand-built (the live engine, decision 32), has nothing to apply: refused, so its gateways are never touched."""
+    if not instance.upstreams:
+        raise ValueError(f"instance {instance.name}: its upstreams are its own (hand-built); PhotonVox applies nothing to it")
     eng, agent = connect(instance)
     with eng.begin() as conn:
         up = upstreams.write_upstreams(conn, str(instance.id), instance.hostname,
@@ -71,7 +92,8 @@ def context(db: Session, ps: PhoneSystem, instance: PbxInstance) -> Context:
         validated.setdefault(str(loc.site_id), set()).add(loc.key)
     assigned = set(db.execute(select(HeldNumber.number).where(HeldNumber.tenant_id == ps.tenant_id)).scalars())
     return Context(domain=ps.domain_name, timezones={str(s.id): s.timezone for s in sites}, upstreams=dict(instance.routing or {}),
-                   emergency_gateway=instance.emergency_upstream, validated_locations=validated, assigned_numbers=assigned)
+                   emergency_gateway=instance.emergency_upstream, validated_locations=validated, assigned_numbers=assigned,
+                   adopted=ps.adoption is not None)
 
 
 def get_speech() -> Optional[Speech]:
@@ -79,9 +101,18 @@ def get_speech() -> Optional[Speech]:
     return GoogleSpeech(settings.google_tts_api_key) if settings.google_tts_api_key else None
 
 
+def adoption(ps: PhoneSystem) -> Optional[fusionpbx.Adoption]:
+    a = ps.adoption
+    if not a:
+        return None
+    return fusionpbx.Adoption(objects={k: [tuple(x) for x in v] for k, v in a["objects"].items()}, rows=a["rows"], ids=a["ids"],
+                              meanings=a["meanings"])
+
+
 def target(ps: PhoneSystem, instance: PbxInstance, speech_on: bool = False) -> fusionpbx.Target:
-    return fusionpbx.Target(str(ps.id), str(ps.domain_uuid), {u["key"]: upstreams.gateway_uuid(str(instance.id), u["key"]) for u in instance.upstreams},
-                            speech_on)
+    gateways = {u["key"]: upstreams.gateway_uuid(str(instance.id), u["key"]) for u in instance.upstreams}
+    gateways.update(instance.own_gateways or {})            # the engine's own gateways, by their ids (decision 32)
+    return fusionpbx.Target(str(ps.id), str(ps.domain_uuid), gateways, speech_on, adoption(ps))
 
 
 def speak(db: Session, provider: Speech, agent: Agent, plan: Mapping[str, Any]) -> int:
@@ -89,6 +120,8 @@ def speak(db: Session, provider: Speech, agent: Agent, plan: Mapping[str, Any]) 
     Returns how many were new (paid for)."""
     voice, new = plan.get("voice", DEFAULT_VOICE), 0
     for m in plan["ivr_menus"]:
+        if m["greeting"].startswith("recording:"):
+            continue                    # a recording already on the engine: nothing to speak
         key = audio_key(m["greeting"], voice)
         cached = db.get(SpeechAudio, key)
         if cached is None:
@@ -152,7 +185,8 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
     try:
         _write(db, ps, instance, plan, eng, agent)
         db.commit()
-        results = run_checks(agent, plan, target(ps, instance, get_speech() is not None))
+        # An adopted domain has none of PhotonVox's check gates (decision 32): its first publish is proven by the compare and by test calls.
+        results = [] if plan.get("adopted") else run_checks(agent, plan, target(ps, instance, get_speech() is not None))
     except Exception as e:  # noqa: BLE001 - the engine refused or failed: record it, put the previous version back
         db.rollback()
         # The details (SQL, addresses) go to the log for Photon staff; integrators read a sentence (security review L4).
@@ -168,8 +202,12 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
     ps.published_version, ps.status, ps.drift = v.number, "ready", {}
     from app.emergency import sync_numbers     # 911 registrations follow what is published (decision 31)
     try:
+        if plan.get("adopted"):
+            raise _Kept()           # an adopted domain's 911 stays hand-built: no registrations or carrier requests until the protections version
         with db.begin_nested():
             sync_numbers(db, ps, v.document)
+    except _Kept:
+        pass
     except Exception:  # noqa: BLE001 - the engine is published; a 911 bookkeeping error must not leave it "publishing"
         log.exception("911 registrations for %s not updated", ps.id)
         v.note = (v.note + "; " if v.note else "") + "911 registrations not updated (Photon has been told)"
@@ -177,6 +215,10 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
                  tenant_id=ps.tenant_id, target_type="phone_system", target_id=ps.id, version=v.number, checks=len(results))
     db.commit()
     return "ready"
+
+
+class _Kept(Exception):
+    pass
 
 
 def _fail(db: Session, ps: PhoneSystem, v: PhoneSystemVersion, error: str, engine: Optional[Tuple[Engine, Agent]]) -> str:
@@ -229,13 +271,6 @@ def publish_queued(db: Session, connect: Connect = connect) -> int:
 
 # ---- hand edits (drift) ----
 
-def _norm(v: Any) -> Any:
-    if isinstance(v, uuid.UUID):
-        return str(v)
-    if isinstance(v, decimal.Decimal):
-        return int(v) if v == v.to_integral_value() else float(v)
-    return v
-
 
 # Kinds of object a person may add by hand in FusionPBX's screens; any in the domain that PhotonVox did not write are listed (and left alone).
 HAND_MADE = {"v_extensions": "extension", "v_ring_groups": "ring_group_extension", "v_ivr_menus": "ivr_menu_name", "v_destinations": "destination_number"}
@@ -251,7 +286,7 @@ def compare(conn: Any, b: fusionpbx.Build, domain_uuid: str) -> Dict[str, List[D
         want = {r[fusionpbx.KEYS[table]]: r for r in b.rows[table]}
         if not want:
             continue
-        cols = sorted({c for r in want.values() for c in r if not isinstance(r[c], fusionpbx.Secret)})
+        cols = sorted({c for r in want.values() for c in r if not isinstance(r[c], fusionpbx.Secret) and c not in fusionpbx.AUDIT})
         rows = conn.execute(text(f"select {', '.join(cols)} from {table} where {fusionpbx.KEYS[table]} = any(cast(:ids as uuid[])) "
                                  "and domain_uuid = :d"), {"ids": list(want), "d": domain_uuid}).mappings().all()
         have = {str(r[fusionpbx.KEYS[table]]): r for r in rows}
@@ -260,7 +295,7 @@ def compare(conn: Any, b: fusionpbx.Build, domain_uuid: str) -> Dict[str, List[D
             if h is None:
                 missing.append({"table": table, "uuid": key})
                 continue
-            diff = [c for c in cols if not isinstance(w.get(c), fusionpbx.Secret) and _norm(h[c]) != w.get(c)]
+            diff = [c for c in cols if c in w and not isinstance(w.get(c), fusionpbx.Secret) and norm(h[c]) != norm(w.get(c))]
             if diff:
                 changed.append({"table": table, "uuid": key, "columns": diff})
     for table, label in HAND_MADE.items():
@@ -276,6 +311,40 @@ def compare(conn: Any, b: fusionpbx.Build, domain_uuid: str) -> Dict[str, List[D
     return {"changed": changed, "missing": missing, "extra": extra}
 
 
+def watch_extras(conn: Any, extras: Mapping[str, str], domain_uuid: str) -> List[Dict[str, Any]]:
+    """An adopted domain's hand-built rows (not PhotonVox's, never written): each one's columns now against its hash when adopted. A change or
+    a removal is reported (a hand edit); PhotonVox does not put them back."""
+    out: List[Dict[str, Any]] = []
+    by: Dict[str, Dict[str, str]] = {}
+    for k, h in extras.items():
+        table, uid = k.split(":", 1)
+        by.setdefault(table, {})[uid] = h
+    for table, want in sorted(by.items()):
+        key = fusionpbx.KEYS[table]
+        cols = [r[0] for r in conn.execute(text("select column_name from information_schema.columns where table_schema = current_schema() and table_name = :t "
+                                                "and has_column_privilege(current_user, quote_ident(table_schema) || '.' || table_name, column_name, 'select') "
+                                                "order by ordinal_position"), {"t": table})]
+        cols = [c for c in cols if c not in fusionpbx.AUDIT and c not in SECRET_COLUMNS]
+        rows = conn.execute(text(f"select {', '.join(cols)} from {table} where {key} = any(cast(:ids as uuid[])) and domain_uuid = :d"),
+                            {"ids": list(want), "d": domain_uuid}).mappings().all()
+        have = {str(r[key]): extra_hash(dict(r)) for r in rows}
+        for uid, h in want.items():
+            if uid not in have:
+                out.append({"table": table, "uuid": uid, "kind": "removed"})
+            elif have[uid] != h:
+                out.append({"table": table, "uuid": uid, "kind": "changed"})
+    return out
+
+
+SECRET_COLUMNS = {"password", "voicemail_password", "ivr_menu_pin_number"}
+
+
+def extra_hash(row: Mapping[str, Any]) -> str:
+    """A hand-built row's fingerprint: every column but FusionPBX's bookkeeping and the secrets, normalized."""
+    body = {k: norm(v) for k, v in row.items() if k not in fusionpbx.AUDIT and k not in SECRET_COLUMNS}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
+
+
 def check_drift(db: Session, ps: PhoneSystem, connect: Connect = connect) -> Dict[str, Any]:
     """Compare the engine with the running version and record it on the phone system; a change or a missing row marks it "changed"."""
     v = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id, PhoneSystemVersion.number == ps.published_version)).scalar_one()
@@ -285,10 +354,12 @@ def check_drift(db: Session, ps: PhoneSystem, connect: Connect = connect) -> Dic
     eng, _agent = connect(instance)
     with eng.connect() as conn:
         found = compare(conn, b, str(ps.domain_uuid))
+        if ps.adoption and ps.adoption.get("extras"):
+            found["hand_built_changed"] = watch_extras(conn, ps.adoption["extras"], str(ps.domain_uuid))
     result = {"checked_at": utcnow().isoformat(), "version": v.number, **found}
     ps.drift = result
     if ps.status in ("ready", "changed"):
-        ps.status = "changed" if (found["changed"] or found["missing"]) else "ready"
+        ps.status = "changed" if (found["changed"] or found["missing"] or found.get("hand_built_changed")) else "ready"
     db.commit()
     return result
 

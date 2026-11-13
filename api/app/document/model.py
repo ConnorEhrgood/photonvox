@@ -86,10 +86,22 @@ class Number(Strict):
     hours: Optional[str] = Field(None, pattern=NAME)   # defaults to the site's hours
 
 
+# A greeting that is a recording already on the engine (a domain taken over in place keeps its own: decision 32), not text to speak.
+RECORDING = re.compile(r"^recording:[A-Za-z0-9._-]{1,200}$")
+
+
 class Menu(Strict):
-    greeting: str = Field(min_length=1, max_length=500, pattern=r"^[^\x00-\x1f\x7f]+$")          # text to speak, or a recording's id once recordings exist
+    # Text to speak (decision 30), or "recording:<file>" for a recording already in the domain's recordings.
+    greeting: str = Field(min_length=1, max_length=500, pattern=r"^[^\x00-\x1f\x7f]+$")
     options: Dict[Literal["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], Target] = Field(default_factory=dict)
-    timeout: Target
+    timeout: Optional[Target] = None            # where the call goes when nobody presses a key; none: the call ends
+
+    @field_validator("greeting")
+    @classmethod
+    def _recording_name(cls, g: str) -> str:
+        if g.startswith("recording:") and not RECORDING.match(g):
+            raise ValueError("a recording is named by its file: letters, digits, dots, dashes and underscores")
+        return g
 
 
 class Group(Strict):
@@ -106,6 +118,7 @@ class User(Strict):
     direct_number: Optional[str] = Field(None, pattern=E164)
     show: Literal["site", "direct"] = "site"
     email: Optional[Email] = None
+    voicemail: bool = True                       # the user's own voicemail box answers; False: the box is kept but switched off
 
 
 class Box(Strict):
