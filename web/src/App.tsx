@@ -1,11 +1,11 @@
-import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
+import logo from './assets/photon-logo.png'
 import { useAuth } from './auth/AuthContext'
+import { DevTokenPage } from './auth/DevTokenPage'
 import { TenantProvider, useTenant } from './auth/TenantContext'
 import { isIntegrator, Layout } from './components/Layout'
-import { Loading } from './components/ui'
 import { CustomersPage } from './pages/Customers'
 import { NotForYou, PlatformHub, SettingsHub, SettingsIndex } from './pages/Hubs'
-import { CallbackPage, LoginPage } from './pages/Login'
 import { CallFlowsPage } from './pages/CallFlows'
 import { Emergency911Page } from './pages/Emergency911'
 import { NumberStockPage } from './pages/NumberStock'
@@ -19,32 +19,42 @@ import {
 } from './pages/Soon'
 import { TeamPage } from './pages/Team'
 import { UsersPage } from './pages/Users'
+import { AccessPending, CallbackRoute, NoAccess, RequireSignIn, SignedOutRoute, SignInProblem, SigningIn } from './ph-auth/pages'
 
+/** Everything but the auth routes needs a session. Signed out: straight to PhotonID with the deep link kept (the suite's sign-in contract, ph-auth).
+ *  A 401 just after signing in, and any 403, are pages here: never another redirect. */
 function Protected() {
-  const { status, error, me, signOut } = useAuth()
-  const loc = useLocation()
-  if (status === 'loading') return <div className="ph-auth"><Loading what="your session" /></div>
-  if (status === 'signedOut') return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />
-  if (status === 'pending') return (
-    <div className="ph-auth"><div className="ph-card">
-      <h1>Setting up your access</h1>
-      <p>You have been added, and PhotonVox is still being told. This takes a moment; the page will continue by itself.</p>
-      <p className="ph-hint" role="status">Checking…</p>
-    </div></div>
-  )
-  if (status === 'noAccess') return (
-    <div className="ph-auth"><div className="ph-card">
-      <h1>No access to PhotonVox</h1>
-      <p>{me?.email ?? 'This account'} isn’t a member of an organization that has PhotonVox. Ask an administrator of your organization, or your Photon partner, to add you, or sign in with another account.</p>
-      <button className="ph-btn ph-btn-secondary" onClick={() => void signOut()}>Sign out</button>
-    </div></div>
-  )
+  const { status, error, source, signIn, signOut } = useAuth()
+  const out = () => void signOut()
+  if (status === 'loading') return <SigningIn logo={logo} title="Loading" hint="Opening PhotonVox." />
+  if (status === 'signedOut') {
+    if (source.supportsPaste) return <Navigate to="/login" replace /> // development builds: the paste-a-token page
+    return <RequireSignIn auth={source.auth!} signedIn={false} logo={logo}>{null}</RequireSignIn>
+  }
+  if (status === 'problem') return <SignInProblem logo={logo} onRetry={() => void signIn()} onSignOut={out} detail="PhotonID signed you in, but PhotonVox did not accept the sign-in." />
+  if (status === 'pending') return <AccessPending logo={logo} product="PhotonVox" onSignOut={out} />
+  if (status === 'noAccess') return <NoAccess logo={logo} product="PhotonVox" detail={error} onSignOut={out} />
   if (status === 'error') return <div className="ph-auth"><div className="ph-card"><h1>Something went wrong</h1><p className="ph-error">{error}</p><button className="ph-btn" onClick={() => location.reload()}>Try again</button></div></div>
   return (
     <TenantProvider>
       <Outlet />
     </TenantProvider>
   )
+}
+
+/** PhotonID sends the browser here with ?code=…: load the person, then go where they were headed. */
+function Callback() {
+  const { source, refreshMe } = useAuth()
+  const nav = useNavigate()
+  if (!source.auth) return <Navigate to="/login" replace />
+  return <CallbackRoute auth={source.auth} logo={logo} onSignedIn={async (to) => { await refreshMe(); nav(to, { replace: true }) }} />
+}
+
+/** PhotonID's post-logout address: straight on to its sign-in form. */
+function SignedOut() {
+  const { source } = useAuth()
+  if (!source.auth) return <Navigate to="/login" replace />
+  return <SignedOutRoute auth={source.auth} logo={logo} />
 }
 
 /** Where "/" goes: the customer list for an integrator, the customer's overview for its admin, "My phone" for a user. */
@@ -68,8 +78,10 @@ function PlatformOnly() {
 export function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/auth/callback" element={<CallbackPage />} />
+      {/* `/login` is the development paste-a-token page; in production an old address for home. There is no sign-in page. */}
+      <Route path="/login" element={<DevTokenPage />} />
+      <Route path="/auth/callback" element={<Callback />} />
+      <Route path="/auth/signed-out" element={<SignedOut />} />
       <Route element={<Protected />}>
         <Route element={<Layout />}>
           <Route index element={<Home />} />

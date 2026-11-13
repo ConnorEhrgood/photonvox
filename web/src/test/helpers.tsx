@@ -6,15 +6,32 @@ import type { Me, TenantAccess } from '../api/types'
 import { AuthProvider, useAuth } from '../auth/AuthContext'
 import { TenantProvider } from '../auth/TenantContext'
 import type { TokenSource } from '../auth/tokenSource'
+import type { PhotonSignIn } from '../ph-auth/signin'
+
+/** A stand-in for the shared sign-in (ph-auth's PhotonSignIn): each step is a spy. */
+export function fakeAuth() {
+  return {
+    signIn: vi.fn(async (_returnTo?: string, _opts?: unknown) => {}),
+    signOut: vi.fn(async () => {}),
+    handleCallback: vi.fn(async () => '/overview'),
+    afterSignOut: vi.fn(async () => {}),
+    unauthorized: vi.fn(async (): Promise<'redirect' | 'problem'> => 'redirect'),
+    getAccessToken: vi.fn(async () => null),
+  }
+}
 
 export class FakeSource implements TokenSource {
   supportsPaste = true
   token: string | null
+  readonly fake = fakeAuth()
+  /** The shared sign-in the auth routes drive (a fake here). */
+  auth = this.fake as unknown as PhotonSignIn
   constructor(token: string | null = 'tok') { this.token = token }
   getAccessToken = async () => this.token
-  signIn = vi.fn(async () => {})
+  signIn = vi.fn(async (_returnTo: string) => {})
   signOut = vi.fn(async () => { this.token = null })
-  handleCallback = vi.fn(async () => '/overview')
+  /** What the shared sign-in says about a 401: 'redirect' (the session ended) unless a test says 'problem' (just signed in). */
+  unauthorized = vi.fn(async (): Promise<'redirect' | 'problem'> => { this.token = null; return 'redirect' })
   paste = (t: string) => { this.token = t }
 }
 

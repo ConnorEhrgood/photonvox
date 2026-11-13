@@ -71,9 +71,9 @@ describe('the app’s front doors', () => {
   }
   it('pending shows a calm page that continues by itself', async () => {
     app({ 'GET /me': () => err(503, 'access_pending') })
-    expect(await screen.findByRole('heading', { name: 'Setting up your access' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Setting up your access to PhotonVox' })).toBeInTheDocument()
   })
-  it('no access shows who is signed in and offers sign out', async () => {
+  it('no access says so and offers sign out', async () => {
     app({ 'GET /me': () => err(403, 'no_access') })
     expect(await screen.findByRole('heading', { name: 'No access to PhotonVox' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()

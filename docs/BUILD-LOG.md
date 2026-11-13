@@ -373,3 +373,19 @@ A review of the document, compiler, adapter, vox-agent and the routes (an advers
   create `.env` just before the stack starts (DEPLOY.md, "Learned").
 - Open: nobody can sign in until an organization has `vox` switched on (Connor is choosing; Photon's own is the suggestion); the
   directory's `platform_admin` field is not mapped yet; GATE 1c is not run, and nothing touched the live engine.
+
+## 2026-11-13: sign-in on the suite's shared module (ph-auth)
+
+Connor found PhotonVox still showed its own sign-in page. It now follows the suite's sign-in contract through `@photon/ui/auth`
+(vendored into `web/src/ph-auth` with `sync-vendored.mjs --auth`; the PhotonID directory app is the reference):
+- No sign-in page: a signed-out visitor goes straight to PhotonID with the deep link kept (path, query and hash); `pages/Login.tsx` is gone and
+  `/login` is an old address for home (a development build keeps a paste-a-token page there). Silent SSO; renewal by refresh token only, no iframe.
+- Loop guards: a 401 just after signing in is the "We couldn't sign you in" page, never another redirect; a 401 later goes to PhotonID again.
+  A 403 is always a page (No access to PhotonVox, with Sign out); "access being set up" is the shared page and checks again by itself.
+- Sign-out ends the PhotonID session and comes back to `/auth/signed-out`, which goes on to PhotonID's sign-in form (`prompt=login`).
+  Tokens in sessionStorage only.
+- Tests: 194 web tests (the contract's unit tests in `src/auth/signin.test.tsx`, the reference token-source tests, the module's own), coverage
+  above the ratchet; the API's contract test (401 JSON with `WWW-Authenticate: Bearer` and no `Location`, 403 JSON with a `code`);
+  `web/scripts/signin-contract.mjs` against the dev PhotonID (id1's dev app "PhotonVox web (dev)"), 11 checks: signed out at 1440 and 390
+  straight to PhotonID, the deep link back after a real sign-in, sessionStorage only, silent SSO in a new tab without a page or an iframe,
+  the 401 and 403 pages without a loop, sign-out through `/auth/signed-out` with `prompt=login`, no silent sign-in afterwards, `/login`.

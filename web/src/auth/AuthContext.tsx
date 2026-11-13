@@ -1,11 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ApiError, createApi, type Api } from '../api/client'
 import type { Me } from '../api/types'
-import type { SignInOptions, TokenSource } from './tokenSource'
+import type { TokenSource } from './tokenSource'
 
-/** `pending`: signed in, but the directory has not told us about this person yet (a fresh invitation); we keep asking.
- *  `noAccess`: signed in with an account that has no access to PhotonVox. */
-type Status = 'loading' | 'signedOut' | 'ready' | 'pending' | 'noAccess' | 'error'
+/** The suite's sign-in contract (photonid docs/SIGNIN-PLAN.md, through the shared `ph-auth` module):
+ *  `signedOut`: go straight to PhotonID. `problem`: PhotonID signed the person in a moment ago and the API still refuses (401): shown, never
+ *  redirected again (no loop). `pending`: signed in, but the directory has not told us about this person yet (a fresh invitation); we keep asking.
+ *  `noAccess`: signed in with an account that has no access to PhotonVox. A 403 is always one of those pages, never a redirect. */
+type Status = 'loading' | 'signedOut' | 'problem' | 'ready' | 'pending' | 'noAccess' | 'error'
 
 interface AuthState {
   status: Status
@@ -13,8 +15,8 @@ interface AuthState {
   error: string | null
   api: Api
   source: TokenSource
-  /** `returnTo`: where to land after signing in (default: this page). */
-  signIn: (opts?: SignInOptions, returnTo?: string) => Promise<void>
+  /** Straight to PhotonID; back to `returnTo` (default: this page, query and hash included). */
+  signIn: (returnTo?: string) => Promise<void>
   signOut: () => Promise<void>
   refreshMe: () => Promise<void>
   /** Dev-only: accept a pasted token. */
@@ -37,10 +39,10 @@ export function AuthProvider({ source, baseUrl, children }: { source: TokenSourc
   const [me, setMe] = useState<Me | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pendingTries, setPendingTries] = useState(0)    // counts "still pending" answers, so each one re-arms the retry timer below
-  const signedOutRef = useRef(() => {})
+  const unauthorizedRef = useRef(() => {})
 
   const api = useMemo(
-    () => createApi({ baseUrl, getToken: () => source.getAccessToken(), onUnauthorized: () => signedOutRef.current() }),
+    () => createApi({ baseUrl, getToken: () => source.getAccessToken(), onUnauthorized: () => unauthorizedRef.current() }),
     [baseUrl, source],
   )
 
@@ -53,14 +55,18 @@ export function AuthProvider({ source, baseUrl, children }: { source: TokenSourc
     } catch (e) {
       const code = e instanceof ApiError ? (e.data?.code as string | undefined) : undefined
       if (code === 'access_pending') { setStatus('pending'); setPendingTries((n) => n + 1); return }
-      if (code === 'no_access') { setStatus('noAccess'); return }
-      // A 401 already flipped us to signedOut via onUnauthorized; anything else is a real error.
-      setStatus((s) => (s === 'signedOut' ? s : 'error'))
+      if (code === 'no_access' || (e instanceof ApiError && e.status === 403)) { setStatus('noAccess'); setError(e instanceof Error ? e.message : null); return }
+      // A 401: onUnauthorized decides (PhotonID again, or the problem page). Anything else is a real error.
+      if (e instanceof ApiError && e.status === 401) return
+      setStatus('error')
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [api, source])
 
-  signedOutRef.current = () => { setMe(null); setStatus('signedOut') }
+  unauthorizedRef.current = () => {
+    setMe(null)
+    void source.unauthorized().then((next) => setStatus(next === 'problem' ? 'problem' : 'signedOut'))
+  }
 
   useEffect(() => { void load() }, [load])
   // The directory's notice, or the next periodic pull, makes a freshly invited person known within moments: keep asking, quietly.
@@ -72,10 +78,7 @@ export function AuthProvider({ source, baseUrl, children }: { source: TokenSourc
 
   const value: AuthState = {
     status, me, error, api, source,
-    signIn: (opts, returnTo) => {
-      const to = returnTo ?? location.pathname + location.search
-      return opts ? source.signIn(to, opts) : source.signIn(to)
-    },
+    signIn: (returnTo) => source.signIn(returnTo ?? location.pathname + location.search + location.hash),
     signOut: async () => { await source.signOut(); setMe(null); setStatus('signedOut') },
     refreshMe: load,
     pasteToken: async (t) => { source.paste?.(t); setStatus('loading'); await load() },

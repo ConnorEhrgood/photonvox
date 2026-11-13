@@ -22,6 +22,17 @@ def test_no_token_or_a_bad_token_is_401(client, world):
     assert client.get("/me", headers={"Authorization": f"Bearer {unsigned}"}).status_code == 401      # a token cannot pick its own algorithm
 
 
+def test_the_sign_in_contract_answers_are_json_and_never_redirects(client, world):
+    """The suite's sign-in contract (photonid docs/SIGNIN-BRIEFS.md, item 7): a request without a usable token is a 401 JSON answer with
+    `WWW-Authenticate: Bearer` and no `Location`; a refused one is a 403 JSON answer with a `code`. The web app decides what to show."""
+    for headers in ({}, {"Authorization": "Bearer garbage"}):
+        r = client.get("/me", headers=headers, follow_redirects=False)
+        assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer" and "location" not in r.headers
+        assert r.headers["content-type"].startswith("application/json") and r.json()["detail"]
+    r = client.get("/me", headers=auth("nobody-at-all"), follow_redirects=False)
+    assert r.status_code == 403 and "location" not in r.headers and r.json()["detail"]["code"] == "no_access"
+
+
 def test_me_lists_each_organization_with_role_scope_and_capabilities(client, world):
     r = client.get("/me", headers=auth("a-admin-s1"))
     assert r.status_code == 200
