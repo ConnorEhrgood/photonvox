@@ -15,7 +15,7 @@ if [ "${COVERAGE:-}" = 1 ]; then PYTEST="sh -c 'pytest --cov=app --cov-branch --
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-tar --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.coverage' --exclude='.env' -czf "$TMP/vox-test.tgz" api docker-compose.test.yml
+tar --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.coverage' --exclude='.env' -czf "$TMP/vox-test.tgz" api contract docker-compose.test.yml
 cat > "$TMP/run.sh" <<RUN
 #!/bin/bash
 cd $DIR

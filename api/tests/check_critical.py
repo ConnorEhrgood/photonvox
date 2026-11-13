@@ -13,6 +13,9 @@ CRITICAL = [
     "app/rls.py",               # who the database thinks it is talking to
     "app/sync.py",              # keeping the directory copy; resolving a first sign-in
     "app/directory/projection.py",   # applying the directory's documents to our copy
+    "app/document/validate.py", # whether a phone system may be published (911 first)
+    "app/compiler/compile.py",  # the phone system as the engine runs it: routes, caller IDs, the locked 911 route
+    "app/compiler/classes.py",  # which numbers each call class allows
 ]
 
 data = json.load(open(sys.argv[1]))["files"]

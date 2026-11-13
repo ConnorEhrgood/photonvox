@@ -129,3 +129,20 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   matter). Added for a second run: a rough classification of what the enabled outbound routes' patterns allow (international, premium, North
   American), without printing the patterns.
 - Connor's rule for staging, written into Step 0.6, the house rules and §16: no carrier gateways, never the HTC trunk, outbound SIP blocked.
+
+## 2026-11-13: Step 3's pure core, ahead of order (the document, validation, the compiler)
+
+- Built while the staging container waits for Connor's approval, because it needs no resources: `app/document/model.py` (the phone-system
+  document of ARCHITECTURE §8 as strict models; `contract/phone-system/schema.json` generated from it, with a small-office sample),
+  `app/document/validate.py` (every problem by path: dangling references, 911 prerequisites (a validated emergency location and a held emergency
+  number per site), caller ID and direct numbers only from held numbers, reserved and prefix-colliding extensions, loops of automatic forwards),
+  and `app/compiler/` (the document to an **engine plan**: extensions with caller IDs, emergency caller IDs and call classes; voicemail, ring
+  groups, menus, time conditions, inbound numbers; outbound routes per class in the instance's upstream order; the locked emergency route first).
+- **The compiler stops at an engine plan, not FusionPBX rows**: how each object is written to FusionPBX is the write-path spike's question
+  (Step 0.7, on staging). The adapter will map the plan to rows.
+- Choices made here (say if any is wrong): 911 and 933 match with or without any site's outside-line prefix (over-matching 911 is the safe side);
+  988, 711, 211, 311, 511 and 811 are always allowed and 411 is not (it costs money); premium 900 and 976 match no route at all; the high-cost
+  North American area codes are off unless an owner switches one on like a country ("1876"); a 911 call shows the site's emergency number even
+  for a user who shows a direct line; shared voicemail boxes are separate from users' own; every user gets a voicemail box.
+- Tests: 275 on LXC 800, 100% line and branch coverage, with `validate.py`, `compile.py` and `classes.py` added to the critical modules. The
+  golden plan for the sample was read line by line before it was frozen.

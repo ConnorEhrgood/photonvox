@@ -43,4 +43,5 @@ services:
       DIRECTORY_NOTICE_SECRET: notice-secret-for-tests-0123456789-abcdef
     volumes:
       - ./api:/app
+      - ./contract:/contract:ro      # the phone-system schema and samples the unit tests read
     command: ["pytest"]

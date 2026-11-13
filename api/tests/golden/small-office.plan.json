@@ -1,0 +1,212 @@
+{
+  "domain": "k3x9q2.sip.photoninfra.xyz",
+  "extensions": [
+    {
+      "caller_id_number": "+17245550100",
+      "email": "ada@example.com",
+      "emergency_caller_id_number": "+17245550100",
+      "extension": "100",
+      "name": "Ada Front",
+      "site": "11111111-1111-4111-8111-111111111111",
+      "toll_allow": [
+        "international",
+        "national",
+        "service",
+        "toll_free"
+      ],
+      "unreachable": "voicemail:100",
+      "user": "u-ada"
+    },
+    {
+      "caller_id_number": "+17245550100",
+      "email": null,
+      "emergency_caller_id_number": "+17245550100",
+      "extension": "101",
+      "name": "Ben Office",
+      "site": "11111111-1111-4111-8111-111111111111",
+      "toll_allow": [
+        "international",
+        "national",
+        "service",
+        "toll_free"
+      ],
+      "unreachable": "voicemail:101",
+      "user": "u-ben"
+    },
+    {
+      "caller_id_number": "+17245550123",
+      "email": null,
+      "emergency_caller_id_number": "+17245550100",
+      "extension": "102",
+      "name": "Pat Pastor",
+      "site": "11111111-1111-4111-8111-111111111111",
+      "toll_allow": [
+        "international",
+        "national",
+        "service",
+        "toll_free"
+      ],
+      "unreachable": "voicemail:102",
+      "user": "u-pastor"
+    },
+    {
+      "caller_id_number": "+17245550110",
+      "email": null,
+      "emergency_caller_id_number": "+17245550110",
+      "extension": "200",
+      "name": "Cy Annex",
+      "site": "22222222-2222-4222-8222-222222222222",
+      "toll_allow": [
+        "international",
+        "national",
+        "service",
+        "toll_free"
+      ],
+      "unreachable": "hangup",
+      "user": "u-cy"
+    }
+  ],
+  "inbound": [
+    {
+      "number": "+17245550100",
+      "site": "11111111-1111-4111-8111-111111111111",
+      "to": "time_condition:number-17245550100"
+    },
+    {
+      "number": "+17245550110",
+      "site": "22222222-2222-4222-8222-222222222222",
+      "to": "ring_group:annex"
+    },
+    {
+      "number": "+17245550123",
+      "site": "11111111-1111-4111-8111-111111111111",
+      "to": "extension:102"
+    }
+  ],
+  "ivr_menus": [
+    {
+      "greeting": "Thank you for calling Cedar Works. For the office, press 1. For the pastor, press 2.",
+      "key": "main",
+      "options": {
+        "1": "ring_group:office",
+        "2": "extension:102"
+      },
+      "timeout": "ring_group:office"
+    }
+  ],
+  "outbound_routes": [
+    {
+      "caller_id": "emergency_caller_id_number",
+      "gateways": [
+        "htc"
+      ],
+      "key": "emergency",
+      "locked": true,
+      "pattern": "^(?:9)?(911|933)$",
+      "requires": null,
+      "send": "$1"
+    },
+    {
+      "caller_id": "caller_id_number",
+      "gateways": [
+        "htc"
+      ],
+      "key": "service",
+      "locked": true,
+      "pattern": "^(?:9)?(988|711|211|311|511|811)$",
+      "requires": "service",
+      "send": "$1"
+    },
+    {
+      "caller_id": "caller_id_number",
+      "gateways": [
+        "htc"
+      ],
+      "key": "national",
+      "locked": false,
+      "pattern": "^(?:9)?1?((?!242|246|264|268|284|345|441|473|649|658|664|721|758|767|784|809|829|849|868|869|876|900|800|833|844|855|866|877|888)[2-9]\\d{2}(?!976)[2-9]\\d{6})$",
+      "requires": "national",
+      "send": "+1$1"
+    },
+    {
+      "caller_id": "caller_id_number",
+      "gateways": [
+        "htc"
+      ],
+      "key": "toll_free",
+      "locked": false,
+      "pattern": "^(?:9)?1?((?:800|833|844|855|866|877|888)[2-9]\\d{6})$",
+      "requires": "toll_free",
+      "send": "+1$1"
+    },
+    {
+      "caller_id": "caller_id_number",
+      "gateways": [
+        "upstream-b",
+        "htc"
+      ],
+      "key": "international-44",
+      "locked": false,
+      "pattern": "^(?:9)?011(44\\d{4,13})$",
+      "requires": "international",
+      "send": "+$1"
+    }
+  ],
+  "ring_groups": [
+    {
+      "key": "annex",
+      "members": [
+        "200"
+      ],
+      "ring_seconds": 20,
+      "strategy": "sequence",
+      "then": "voicemail:200"
+    },
+    {
+      "key": "office",
+      "members": [
+        "100",
+        "101"
+      ],
+      "ring_seconds": 25,
+      "strategy": "simultaneous",
+      "then": "voicemail_box:general"
+    }
+  ],
+  "spend_limit_usd": 50,
+  "time_conditions": [
+    {
+      "closed": "voicemail_box:general",
+      "holidays": "us-federal",
+      "hours": "office",
+      "key": "number-17245550100",
+      "open": "ivr:main",
+      "timezone": "America/New_York",
+      "week": {
+        "fri": [
+          "08:00-12:00",
+          "13:00-17:00"
+        ],
+        "mon": [
+          "08:00-17:00"
+        ],
+        "thu": [
+          "08:00-17:00"
+        ],
+        "tue": [
+          "08:00-17:00"
+        ],
+        "wed": [
+          "08:00-17:00"
+        ]
+      }
+    }
+  ],
+  "voicemail_boxes": [
+    {
+      "email": "office@example.com",
+      "key": "general",
+      "name": "General mailbox"
+    }
+  ]
+}

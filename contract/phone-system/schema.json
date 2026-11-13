@@ -1,0 +1,543 @@
+{
+  "$defs": {
+    "Box": {
+      "additionalProperties": false,
+      "description": "A shared voicemail box (\"general\"), separate from users' own.",
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "maxLength": 320,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Box",
+      "type": "object"
+    },
+    "Calling": {
+      "additionalProperties": false,
+      "description": "What outside calls the organization may make (\u00a715). Emergency, 988 and relay services are always allowed and are not listed here.",
+      "properties": {
+        "international": {
+          "items": {
+            "type": "string"
+          },
+          "title": "International",
+          "type": "array"
+        },
+        "national": {
+          "default": true,
+          "title": "National",
+          "type": "boolean"
+        },
+        "spend_limit_usd": {
+          "default": 50,
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Spend Limit Usd",
+          "type": "integer"
+        },
+        "toll_free": {
+          "default": true,
+          "title": "Toll Free",
+          "type": "boolean"
+        }
+      },
+      "title": "Calling",
+      "type": "object"
+    },
+    "Group": {
+      "additionalProperties": false,
+      "properties": {
+        "members": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Members",
+          "type": "array"
+        },
+        "ring_seconds": {
+          "default": 25,
+          "maximum": 120,
+          "minimum": 10,
+          "title": "Ring Seconds",
+          "type": "integer"
+        },
+        "strategy": {
+          "default": "simultaneous",
+          "enum": [
+            "simultaneous",
+            "sequence"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "then": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToUser"
+            },
+            {
+              "$ref": "#/$defs/ToGroup"
+            },
+            {
+              "$ref": "#/$defs/ToMenu"
+            },
+            {
+              "$ref": "#/$defs/ToVoicemail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Then"
+        }
+      },
+      "required": [
+        "members"
+      ],
+      "title": "Group",
+      "type": "object"
+    },
+    "Hours": {
+      "additionalProperties": false,
+      "description": "Open hours per weekday, in the site's time zone, as \"HH:MM-HH:MM\" spans (24:00 allowed as an end); days not listed are closed.",
+      "properties": {
+        "holidays": {
+          "default": "none",
+          "enum": [
+            "none",
+            "us-federal"
+          ],
+          "title": "Holidays",
+          "type": "string"
+        },
+        "week": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "propertyNames": {
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ]
+          },
+          "title": "Week",
+          "type": "object"
+        }
+      },
+      "title": "Hours",
+      "type": "object"
+    },
+    "Menu": {
+      "additionalProperties": false,
+      "properties": {
+        "greeting": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Greeting",
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ToUser"
+              },
+              {
+                "$ref": "#/$defs/ToGroup"
+              },
+              {
+                "$ref": "#/$defs/ToMenu"
+              },
+              {
+                "$ref": "#/$defs/ToVoicemail"
+              }
+            ]
+          },
+          "propertyNames": {
+            "enum": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9"
+            ]
+          },
+          "title": "Options",
+          "type": "object"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToUser"
+            },
+            {
+              "$ref": "#/$defs/ToGroup"
+            },
+            {
+              "$ref": "#/$defs/ToMenu"
+            },
+            {
+              "$ref": "#/$defs/ToVoicemail"
+            }
+          ],
+          "title": "Timeout"
+        }
+      },
+      "required": [
+        "greeting",
+        "timeout"
+      ],
+      "title": "Menu",
+      "type": "object"
+    },
+    "Number": {
+      "additionalProperties": false,
+      "description": "A number the organization holds and what it rings. Without `closed`, it rings `open` at all hours.",
+      "properties": {
+        "closed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToUser"
+            },
+            {
+              "$ref": "#/$defs/ToGroup"
+            },
+            {
+              "$ref": "#/$defs/ToMenu"
+            },
+            {
+              "$ref": "#/$defs/ToVoicemail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Closed"
+        },
+        "hours": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hours"
+        },
+        "open": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToUser"
+            },
+            {
+              "$ref": "#/$defs/ToGroup"
+            },
+            {
+              "$ref": "#/$defs/ToMenu"
+            },
+            {
+              "$ref": "#/$defs/ToVoicemail"
+            }
+          ],
+          "title": "Open"
+        },
+        "site": {
+          "title": "Site",
+          "type": "string"
+        }
+      },
+      "required": [
+        "site",
+        "open"
+      ],
+      "title": "Number",
+      "type": "object"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "Per site: its 911 (the emergency location and the number registered at it, both locked: \u00a711), what its calls show, its hours.",
+      "properties": {
+        "caller_id": {
+          "pattern": "^\\+1[2-9][0-9]{2}[2-9][0-9]{6}$",
+          "title": "Caller Id",
+          "type": "string"
+        },
+        "emergency_location": {
+          "title": "Emergency Location",
+          "type": "string"
+        },
+        "emergency_number": {
+          "pattern": "^\\+1[2-9][0-9]{2}[2-9][0-9]{6}$",
+          "title": "Emergency Number",
+          "type": "string"
+        },
+        "hours": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hours"
+        },
+        "outside_prefix": {
+          "anyOf": [
+            {
+              "enum": [
+                "8",
+                "9"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outside Prefix"
+        },
+        "unreachable": {
+          "default": "voicemail",
+          "enum": [
+            "voicemail",
+            "none"
+          ],
+          "title": "Unreachable",
+          "type": "string"
+        }
+      },
+      "required": [
+        "emergency_location",
+        "emergency_number",
+        "caller_id"
+      ],
+      "title": "Site",
+      "type": "object"
+    },
+    "ToGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
+          "title": "Group",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group"
+      ],
+      "title": "ToGroup",
+      "type": "object"
+    },
+    "ToMenu": {
+      "additionalProperties": false,
+      "properties": {
+        "menu": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
+          "title": "Menu",
+          "type": "string"
+        }
+      },
+      "required": [
+        "menu"
+      ],
+      "title": "ToMenu",
+      "type": "object"
+    },
+    "ToUser": {
+      "additionalProperties": false,
+      "properties": {
+        "user": {
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user"
+      ],
+      "title": "ToUser",
+      "type": "object"
+    },
+    "ToVoicemail": {
+      "additionalProperties": false,
+      "properties": {
+        "voicemail": {
+          "title": "Voicemail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "voicemail"
+      ],
+      "title": "ToVoicemail",
+      "type": "object"
+    },
+    "User": {
+      "additionalProperties": false,
+      "properties": {
+        "direct_number": {
+          "anyOf": [
+            {
+              "pattern": "^\\+1[2-9][0-9]{2}[2-9][0-9]{6}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct Number"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "maxLength": 320,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "extension": {
+          "pattern": "^[1-8][0-9]{1,4}$",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "show": {
+          "default": "site",
+          "enum": [
+            "site",
+            "direct"
+          ],
+          "title": "Show",
+          "type": "string"
+        },
+        "site": {
+          "title": "Site",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "site",
+        "extension"
+      ],
+      "title": "User",
+      "type": "object"
+    }
+  },
+  "$id": "https://vox.photonind.com/contract/phone-system/v1.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "boxes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Box"
+      },
+      "title": "Boxes",
+      "type": "object"
+    },
+    "calling": {
+      "$ref": "#/$defs/Calling"
+    },
+    "groups": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Group"
+      },
+      "title": "Groups",
+      "type": "object"
+    },
+    "hours": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Hours"
+      },
+      "title": "Hours",
+      "type": "object"
+    },
+    "menus": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Menu"
+      },
+      "title": "Menus",
+      "type": "object"
+    },
+    "numbers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Number"
+      },
+      "title": "Numbers",
+      "type": "object"
+    },
+    "sites": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Site"
+      },
+      "title": "Sites",
+      "type": "object"
+    },
+    "users": {
+      "additionalProperties": {
+        "$ref": "#/$defs/User"
+      },
+      "title": "Users",
+      "type": "object"
+    },
+    "version": {
+      "const": 1,
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "title": "PhotonVox phone-system document, version 1",
+  "type": "object"
+}
