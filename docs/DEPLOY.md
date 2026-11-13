@@ -39,10 +39,17 @@ host's `.env`; then the steps below, in order.
   Checked signed out in production (`web/scripts/signin-prod-check.mjs`): at 1440×900 and 390×844 a deep link goes straight to PhotonID's
   sign-in form with redirect `/auth/callback`, one trip, no page of PhotonVox's own, no iframe. id1 drops the old `/` post-logout address.
 
+- 2026-11-13 about 22:36 UTC, 3a282eb: Photon staff from the directory, migration 0006. Backup first:
+  `/opt/photon/backups-manual/pre-vox-staff-20261113T223517Z/vox-db.dump` (mode 600, read back: 37 tables of data; outside `backups/`, so it
+  takes no rotation slot). `migrate` ran 0005 → 0006; api and worker healthy; Board, the directory and Console 200. Then id1 switched
+  PhotonVox on for the organization PhotonConsole uses: the worker's next pull (22:37) brought in Connor with `is_staff` and
+  `is_platform_admin` true (from the directory: platform administrator, partner Photon) and owner of that organization, one
+  `directory.staff_flags` audit event, cursor 22, no error. Signed out, a deep link still goes straight to PhotonID at 1440 and 390.
+
 **Open:**
-- **Nobody can sign in yet.** A person must be known to PhotonVox through the directory, which sends people only for organizations that
-  have `vox` switched on, and none has. Connor is choosing the first organization (Photon's own is the suggestion).
-- PhotonVox reads only `PLATFORM_ADMIN_SUBS` for staff, not the directory's `platform_admin` field. Mapping it is a follow-up.
+- **Connor's first real sign-in:** PhotonVox now has his account and flags (PhotonVox switched on for PhotonConsole's organization,
+  2026-11-13), but nobody has signed in yet.
+- `PLATFORM_ADMIN_SUBS` is a fallback for one release: remove it in the next one.
 - GATE 1c and Step 1's adoption of the live domains.
 
 ## Where it runs

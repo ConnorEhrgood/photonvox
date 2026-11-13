@@ -411,3 +411,7 @@ As PhotonConsole did (photon 16a5902): the directory's person documents now carr
 **The deploy** (when approved): `scripts/deploy.sh` (migration 0006 runs in `migrate`); the worker's next pull (within its interval) is the
 full re-read. Check `/platform/directory` (cursor back up, no error) and Connor's `person` row (`is_staff`, `is_platform_admin` true, from
 the directory). Rollback: the previous commit; 0006's downgrade drops the column.
+- **Deployed 2026-11-13, about 22:36 UTC** (Connor approved, with 0006), after a backup (`backups-manual/pre-vox-staff-…/vox-db.dump`, read
+  back). id1 then switched PhotonVox on for the organization PhotonConsole uses; the next pull brought in Connor as staff and platform
+  administrator (from the directory) and owner there, with one audit event and no sync error. Signed-out deep links still go straight to
+  PhotonID (desktop and phone). DEPLOY.md has the details.
