@@ -115,3 +115,17 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   tested through the app. Earlier the same day 933 was never handed off.
 - Stopped here: the next BUILD-GUIDE item, Step 0.6 (the staging instance), needs GATE 0a (a staging container in the colo), and the spikes after
   it need the GDMS key and phones (GATES 0c, 0d). Running the inventory needs Connor (GATE 0b).
+
+## 2026-11-13: the inventory, read
+
+- Connor approved the run; the operator reviewed both scripts and ran them read-only, with no errors. Findings (counts only) in ARCHITECTURE
+  §17a and `docs/ENGINE.md`; the reports stay out of git. The most serious: **no Proxmox backup of the engine** (only an in-container backup on
+  the same disk); 1 of 5 numbers drops its calls (no dial plan); 10 of 10 extensions without a call class and 6 short voicemail PINs (no
+  international calls in 90 days, so the defaults cost the customer nothing); both carrier gateways live in the test domain. The fixes are being
+  raised with Connor by the operator; none are written here.
+- Small faults in my own scripts, shown by the real run and fixed: the FusionPBX version had "unknown" appended (a `grep` over two paths, one
+  missing, failed under `pipefail`); the git line printed empty; two registrations' transport was not recognized (`UDP-NAT` style); the SIP
+  profiles printed their call count, not their state; the provisioning settings printed hundreds of model-specific lines (now only the ones that
+  matter). Added for a second run: a rough classification of what the enabled outbound routes' patterns allow (international, premium, North
+  American), without printing the patterns.
+- Connor's rule for staging, written into Step 0.6, the house rules and §16: no carrier gateways, never the HTC trunk, outbound SIP blocked.

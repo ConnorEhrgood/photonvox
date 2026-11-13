@@ -13,7 +13,7 @@ location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps sti
 | Item | State |
 |---|---|
 | Design | `docs/ARCHITECTURE.md` revision 2 with §18a (the app); **decisions 1–28 decided 2026-11-13** (23 as Connor revised it) |
-| The live engine | FusionPBX in LXC 600 (`10.10.0.21`) on Proxmox `py`, in HTC's central office. **Production with real customers' phones and 911 on it.** Facts unknown (ARCHITECTURE §22) |
+| The live engine | FusionPBX in LXC 600 (`10.10.0.21`) on Proxmox `py`, in HTC's central office. **Production with real customers' phones and 911 on it.** Inventoried read-only 2026-11-13 (ARCHITECTURE §17a): one customer, 10 extensions, 7 phones, 5 numbers; **no backup off the node**; fixes being raised with Connor, not written here |
 | PhotonConsole | Polls the engine today (`photon_pbx`: read-only Postgres `photon_ro` + `photon-fpbx-shim`, over mgmtnet). Its code is the reference for every read query |
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
 | GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
@@ -60,7 +60,9 @@ never print secrets; production is Connor's. For PhotonVox in particular:
   after (inbound to each affected number, outbound, 933 where supported).
 - **GDMS holds real customers' phones** (if Photon's account already has them): until Connor says otherwise, the API touches only the staging
   GDMS organization.
-- Inside an engine's container, packages only with `--no-install-recommends`. **Never place a real 911 call.**
+- Inside an engine's container, packages only with `--no-install-recommends`. **Never place a real 911 call**, except the scheduled live
+  test of phase A5, arranged with the PSAP and run by its runbook.
+- **Staging never reaches a carrier** (Connor, 2026-11-13): no carrier gateways on it, outbound SIP to the internet blocked (Step 0.6).
 - On LXC 800: your own directory `/root/vox-test` and your own compose project; its disk is low and shared: **never prune Docker globally**,
   clean up after yourself.
 - American spelling everywhere.
@@ -169,7 +171,11 @@ looked at.
 project name, cleaned up after.
 
 0.6 **Staging instance** (needs **GATE 0a**: an LXC in the colo, isolated from production phones). The **same FusionPBX and FreeSWITCH versions
-as production** (from 0.2), a SIPp "upstream", vox-agent's first version. `docs/ENGINE.md` records the install so it can be rebuilt.
+as production** (FusionPBX 5.5.12, FreeSWITCH 1.11.1, PostgreSQL 18, Debian 12: ARCHITECTURE §17a), a SIPp "upstream" on LXC 800, vox-agent's
+first version. `docs/ENGINE.md` records the install so it can be rebuilt. **Connor's rule: staging never uses or reaches the HTC trunk. It has no
+carrier gateways at all (no HTC, no VoIP.ms, nothing copied from production), and its firewall blocks outbound SIP (5060, 5061 and the RTP
+range) to anything but LXC 800's SIPp upstream.** A check in `scripts/` lists staging's gateways and fails if any exists that is not the SIPp
+upstream, and a test from staging proves an INVITE to a public address is blocked.
 
 0.7 **Spikes** (findings with numbers in `docs/SPIKES.md`):
 - **Engine write path:** for each object the compiler writes (extension and voicemail, ring group, IVR, time condition, destination and its
@@ -438,7 +444,7 @@ R3 adds texting and chat to the app (one conversation model with the web app).
 |---|---|---|
 | decisions | Answers to "Decisions for Connor" and ARCHITECTURE §22 | Step 0.6 onward |
 | 0a | A staging LXC in the colo, isolated from production phones | Step 0.6–0.7 engine |
-| 0b | Running the inventory script on the live engine (or approving each run) | `docs/ENGINE.md` |
+| 0b | ~~Running the inventory script~~ done 2026-11-13 (ARCHITECTURE §17a); a second run for the outbound-route classification | the route question |
 | 0c | A GDMS API Developer key, an API user, a staging GDMS organization | GDMS spike |
 | 0d | Two boxed Grandstream phones of the models Photon will stock | zero-touch and barcode spikes |
 | 1a | The PhotonVox VPS, a `deploy` user, DNS | first deploy |

@@ -541,7 +541,7 @@ procedure for lawful requests; RLS, tenant-isolation tests on every route, criti
 | **More instances** | Added as needed: in the colo, or at Equinix DC10 (Misaka) |
 | **Standby for instance A** (R2) | DC10: FusionPBX's Postgres a streaming replica, files synced, promoted by a runbook (target 15 minutes), drilled quarterly |
 | **PhotonVox app** | Its own small VPS, Misaka Ashburn (decision 18), standalone Caddy like PhotonGuard; reaches instances over mgmtnet |
-| **Staging instance** | A staging LXC in the colo, same versions as production, isolated from production phones |
+| **Staging instance** | A staging LXC in the colo, same versions as production, isolated from production phones. **Connor's rule (2026-11-13): it never uses or reaches the HTC trunk, has no carrier gateways at all, and its outbound SIP to the internet is blocked**; a SIPp "upstream" on LXC 800 stands in for every carrier |
 
 - **Stages** (the suite's): Stage 1 now (backups of each instance's database, configuration and voicemail; a rebuild drilled on staging;
   phones on names); Stage 2 in R2 (warm standby at DC10); Stage 3 (active/active with Kamailio in front of live instances) only when a
@@ -568,6 +568,41 @@ procedure for lawful requests; RLS, tenant-isolation tests on every route, criti
   (if they are not already) and point them at the new instance; move its numbers at HTC; test; remove the old copy a week later. Connor's own
   domain first, HUEPC after a clean week. Each step has its way back; none takes a phone offline for longer than its re-registration.
 - **LXC 600 retires** when no domain is left on it (backup kept 60 days).
+
+---
+
+## 17a. What the live engine holds (inventory, 2026-11-13)
+
+Read with Connor's go-ahead by `scripts/inventory/engine.sh` and `host.sh` (read-only; run by the operator, reviewed beforehand, no errors).
+The reports stay out of git (they name domains); these are the findings as counts.
+
+| Area | Finding |
+|---|---|
+| Versions | FusionPBX 5.5.12 (installed with the FusionPBX install script), FreeSWITCH 1.11.1, PostgreSQL 18, Debian 12; Proxmox VE 9.1 (two nodes) |
+| Container | 4 cores, 4 GB memory, 32 GB disk on the node's local LVM (16% used), unprivileged; Proxmox's firewall service is disabled cluster-wide (the container's own iptables, policy DROP, is what protects it) |
+| Domains | 2: the one customer (HUEPC) and Photon's own test domain (empty: no extensions) |
+| The customer | 10 extensions (all enabled), 10 voicemail boxes, 5 inbound numbers, 1 IVR menu, 0 ring groups, 0 queues, 0 conferences, 0 fax |
+| Phones | 7 registered, all Grandstream (5 GRP2602G, 1 GRP2650, 1 HT801V2 analog adapter), **all from public addresses** (over the internet, not across HTC's network or a VPN), mostly UDP; **0 devices in FusionPBX**: the phones are not provisioned by FusionPBX (how they are, GDMS or by hand, is open: question 1) |
+| Numbers | **1 of the 5 inbound numbers has no matching dial plan: calls to it drop** |
+| Call volume (30 days) | 123 inbound (122 answered, about 225 minutes), 41 outbound (40 answered, about 170 minutes), 27 internal; no recorded calls |
+| Carriers | 2 gateways, **both owned by the test domain**, not the customer's and not global (the customer's outbound calls use them across domains): Hickory Telephone (IP-authenticated, its own `htc` SIP profile; carried all 41 outbound calls) and VoIP.ms (registering, failing, 0 calls: unused) |
+| Dial plans | the customer: 3 outbound routes (2 enabled), inbound routes for its numbers, the IVR; also 9 dial plans left in an old context named after the server's own address (from the install, before the domains existed) |
+| Toll-fraud exposure | **all 10 extensions have no call class (`toll_allow`) set**; **6 voicemail PINs are shorter than 6 digits**; SIP passwords are all 16+ characters; call forwarding off everywhere; **no international calls in 90 days** (so switching international off costs the customer nothing); what the outbound routes' patterns allow is not yet read (the script now classifies it, for the next run) |
+| Provisioning, email, recording | FusionPBX provisioning not in use; voicemail to email not in use, and the mail settings have no SMTP host; call recording not in use |
+| Protection | fail2ban and FusionPBX's event guard running; iptables policy DROP with 35 rules; NAT by FreeSWITCH's autonat. Listening: SIP on 5060 (internal), 5080 (external), 5082 (`htc`), web 80/443, and also PostgreSQL, SNMP, mail, the event socket and the status shim (whether only on private addresses, and what the firewall lets through, is not in the report) |
+| **Backups** | **Proxmox has no backup job for the container.** The only backup is FusionPBX's own daily job inside the container, **on the same disk** (21 MB). A disk or node failure loses the phone system and its backups together |
+| Container 601 ("kamailio") | stopped; unused |
+
+**What it changes in this plan:**
+- **§17 (takeover in R2) is small:** one customer, 10 extensions, 5 numbers, 1 IVR, 7 phones. The phones are not FusionPBX-provisioned, so moving
+  them means adding them to GDMS (their MACs and serials, from the phones or GDMS if they are already there) and pointing them at the new
+  instance's names. The broken number is fixed in the takeover if not before.
+- **§15 on the live engine:** the call-class and PIN gaps are exactly what Step 2's defaults close; with no international traffic, those
+  defaults can go on without customer impact. The VoIP.ms gateway (unused, holding credentials) should go.
+- **§16 Stage 1 is urgent:** with no backup off the node, the backup and rebuild drill (BUILD-GUIDE Step 2) comes first.
+- **§9 and §5:** upstream gateways belong in the instance's global scope, generated by PhotonVox, never inside a customer's or the test domain.
+
+The fixes on the live engine are being raised with Connor separately; nothing here changes it.
 
 ---
 
@@ -970,10 +1005,9 @@ and application ids under Photon's reverse domain (`com.photonind.vox`). Repo `p
 7. CNAM (caller-ID name) updates; per-number failover destinations; delivering to two addresses (an instance and its standby).
 8. Texting (R3): does HTC offer SMS/MMS and 10DLC registration?
 
-**The live system** (not read; the read-only inventory script is BUILD-GUIDE Step 0.2)
-9. FusionPBX and FreeSWITCH versions; number of domains, extensions and phones; which gateways carry production calls (is VoIP.ms used?);
-   how phones reach and are provisioned by the engine today; how 911 is routed today; whether LXC 600 is backed up; what LXC 601 (kamailio)
-   was for; whether anyone outside Photon uses FusionPBX's screens.
+**The live system**: question 9 is **answered by the inventory of 2026-11-13 (§17a)**. Still open from it: how the phones are provisioned (by
+hand, or GDMS: question 1); what the outbound routes' patterns allow (the next inventory run); whether anyone outside Photon uses FusionPBX's
+screens.
 
 **The business**
 10. Photon's regulatory standing for selling voice (§19): what it holds, what HTC covers, and who to ask.

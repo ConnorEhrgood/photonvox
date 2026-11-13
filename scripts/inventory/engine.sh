@@ -22,7 +22,7 @@ parse_registrations() {
     function is_private(ip) { return ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[01])\./ || ip ~ /^127\./ || ip ~ /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./ }
     /^User:/   { n++; split($2, u, "@"); dom[u[2]]++ }
     /^Agent:/  { $1 = ""; sub(/^ +/, ""); split($0, w, " "); agent[w[1] " " w[2]]++ }
-    /^Status:/ { if (match($0, /\((UDP|TCP|TLS|WSS|WS)\)/)) tr[substr($0, RSTART + 1, RLENGTH - 2)]++; else tr["?"]++ }
+    /^Status:/ { if (match($0, /\((UDP|TCP|TLS|WSS|WS)(-NAT)?\)/)) tr[substr($0, RSTART + 1, RLENGTH - 2)]++; else tr["?"]++ }
     /^IP:/     { if (is_private($2)) priv++; else pub++ }
     /^Ping-Status:/ { ping[$2]++ }
     END {
@@ -70,8 +70,11 @@ fs() { command -v fs_cli >/dev/null && fs_cli -x "$1" 2>/dev/null; }
 section "1. versions"
 note "debian: $(cat /etc/debian_version 2>/dev/null || echo unknown)"
 # software::version() is in core/software/ on current FusionPBX (5.7 on master, checked 2026-11-13) and in resources/classes/ on older releases.
-note "fusionpbx: $(grep -hoE "return '[0-9]+\.[0-9]+\.[0-9]+'" /var/www/fusionpbx/core/software/resources/classes/software.php /var/www/fusionpbx/resources/classes/software.php 2>/dev/null | head -1 | tr -dc '0-9.' || echo unknown)"
-[ -d /var/www/fusionpbx/.git ] && note "fusionpbx git: $(git -C /var/www/fusionpbx log -1 --format='%h %cs' 2>/dev/null) on $(git -C /var/www/fusionpbx rev-parse --abbrev-ref HEAD 2>/dev/null)"
+FPBX_VERSION="$(cat /var/www/fusionpbx/core/software/resources/classes/software.php /var/www/fusionpbx/resources/classes/software.php 2>/dev/null | grep -oE "return '[0-9]+\.[0-9]+\.[0-9]+'" | head -1 | tr -dc '0-9.')"
+note "fusionpbx: ${FPBX_VERSION:-unknown}"
+if [ -d /var/www/fusionpbx/.git ] && command -v git >/dev/null && GITREV="$(git -C /var/www/fusionpbx log -1 --format='%h %cs' 2>/dev/null)"; then
+  note "fusionpbx git: $GITREV on $(git -C /var/www/fusionpbx rev-parse --abbrev-ref HEAD 2>/dev/null)"
+fi
 note "freeswitch: $(fs version | head -1 | sed 's/^FreeSWITCH Version //')"
 note "postgres: $(sql "show server_version")"
 note "install method: $(ls -d /usr/src/fusionpbx-install.sh 2>/dev/null >/dev/null && echo 'fusionpbx-install.sh found in /usr/src' || echo 'install script not found in /usr/src')"
@@ -122,13 +125,16 @@ rows "select g.gateway, count(c.*) from v_gateways g left join v_xml_cdr c on c.
 section "6. dial plans by FusionPBX app and context (count, enabled)"
 note "app uuids (from FusionPBX's app_config.php, checked 2026-11-13): 8c914ec3… outbound routes, c03b422e… inbound routes, 4b821450… time conditions"
 rows "select coalesce(app_uuid::text, '(none)'), dialplan_context, count(*), sum(case when dialplan_enabled = 'true' then 1 else 0 end) from v_dialplans group by 1, 2 order by 3 desc limit 40"
+note "enabled outbound routes, per domain, by what their patterns allow (classified; the patterns are not printed):"
+rows "select coalesce(d.domain_name, '(global)'), count(distinct p.dialplan_uuid), bool_or(x.dialplan_detail_data like '%011%' or x.dialplan_detail_data like '%+%'), bool_or(x.dialplan_detail_data like '%900%' or x.dialplan_detail_data like '%976%'), bool_or(x.dialplan_detail_data like '%{10}%' or x.dialplan_detail_data like '%{11}%' or x.dialplan_detail_data like '%[2-9]%') from v_dialplans p left join v_domains d on d.domain_uuid = p.domain_uuid join v_dialplan_details x on x.dialplan_uuid = p.dialplan_uuid where p.app_uuid = '8c914ec3-9fc0-8ab5-4cda-6c9288bdc9a3' and p.dialplan_enabled = 'true' and x.dialplan_detail_type = 'destination_number' group by 1 order by 1"
+note "(columns: domain, routes, some pattern mentions 011 or +, mentions 900 or 976, has a 10/11-digit or [2-9] North American form; a rough classification: read the routes themselves to be sure)"
 section "7. inbound numbers whose destination has no matching dial plan (calls to them drop)"
 rows "select d.domain_name, count(*) from v_destinations x join v_domains d on d.domain_uuid = x.domain_uuid where x.destination_type = 'inbound' and (x.dialplan_uuid is null or not exists (select 1 from v_dialplans p where p.dialplan_uuid = x.dialplan_uuid)) group by 1 order by 1"
 
 # ---- 8. settings that matter (values only where they are not secret) --------------------------------------------------------------------------
 section "8. settings (global; values shown only for non-secret settings)"
 SAFE="'enabled','http_auth_enabled','dialplan_mode','method','smtp_secure','smtp_auth','smtp_port','record_extension','voicemail_to_email','keep_local'"
-rows "select default_setting_category, default_setting_subcategory, default_setting_enabled, case when default_setting_subcategory in ($SAFE) then coalesce(default_setting_value, '') when coalesce(default_setting_value, '') = '' then '(empty)' else '(set)' end from v_default_settings where default_setting_category in ('provision', 'destinations', 'email', 'voicemail', 'recordings') order by 1, 2"
+rows "select default_setting_category, default_setting_subcategory, default_setting_enabled, case when default_setting_subcategory in ($SAFE) then coalesce(default_setting_value, '') when coalesce(default_setting_value, '') = '' then '(empty)' else '(set)' end from v_default_settings where default_setting_category in ('destinations', 'email', 'voicemail', 'recordings') or (default_setting_category = 'provision' and default_setting_subcategory in ('enabled', 'http_auth_enabled', 'http_auth_username', 'http_auth_password', 'cidr', 'admin_name', 'admin_password')) order by 1, 2"
 note "domain-level overrides of those categories, per domain:"
 rows "select d.domain_name, s.domain_setting_category, count(*) from v_domain_settings s join v_domains d on d.domain_uuid = s.domain_uuid where s.domain_setting_category in ('provision', 'destinations', 'email', 'voicemail', 'recordings') group by 1, 2 order by 1, 2"
 
@@ -155,7 +161,7 @@ fi
 
 # ---- 11. the network edge -----------------------------------------------------------------------------------------------------------------------
 section "11. SIP profiles and listening ports"
-fs 'sofia status' | awk '$2 == "profile" { printf "   profile %s: %s\n", $1, $NF }'
+fs 'sofia status' | awk '$2 == "profile" { printf "   profile %s: %s %s\n", $1, $(NF - 1), $NF }'    # state, then the call count
 ss -ltnup 2>/dev/null | awk 'NR > 1 { n = split($5, a, ":"); p = a[n]; split($7, q, "\""); print "   listening " $1 " " p " (" q[2] ")" }' | sort -u
 section "12. NAT settings in vars.xml (kind only)"
 for v in external_rtp_ip external_sip_ip; do
