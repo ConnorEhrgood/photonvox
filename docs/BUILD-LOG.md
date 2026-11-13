@@ -457,3 +457,17 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   domain's and the global ones) matches 911, 933, 9911 or 1911; the outbound routes all need 10 or 11 digits. A 911 call through FusionPBX
   would end with no route. Whether the phones reach 911 another way (a second account, the HT801's line) is for Connor. Read from the export,
   never dialed. Not changed by the takeover (its first publish is a no-op); raised with the operator at once.
+- **Staging rehearsal, through PhotonVox (offline, about 23:20–23:55 UTC):** the copy adopted and published through the API and the worker
+  exactly as on the live engine (no vox-agent; the instance's own gateway): 15 objects, 47 rows, **every row of the domain identical after the
+  publish, to the last date**; the drift check ready. **The 22 calls after the takeover: identical to the run before.** The rollback
+  (`engine/live/restore_domain.sh`: the domain's rows in the nine writable tables back from the pre-takeover dump, in one transaction, through a
+  scratch database) rehearsed: a renamed extension, a deleted number, a stray dial plan and an edited hand-built detail all put back exactly
+  (fingerprints identical) in 2.5 s; the calls identical again; nothing left behind. Fixed on the way: the scratch folder (postgres cannot
+  enter /root) and reading the root-only dump.
+- **The write role (`engine/live/gate-rw.sh`/`.sql`) rehearsed on staging:** a member of photonvox_ro, insert/update/delete on the nine
+  tables PhotonVox writes and nothing else, no secrets readable; the takeover run as that role, including a hand edit put back through
+  staging's vox-agent (a real write). Found on the way: the writer's upsert read `xmax` (RETURNING), which needs table-wide SELECT; it now
+  writes an existing row with an UPDATE and a new one with an INSERT (it already knew which exist), so the role stays column-limited.
+  Staging's roles undone and its pg_hba restored byte for byte afterwards; a clean copy reloaded.
+- **Operator commands** (`python -m app.manage`: add-instance, adopt, publish, drift, show) so the production steps run from reviewed files,
+  each audited with the operator's name.

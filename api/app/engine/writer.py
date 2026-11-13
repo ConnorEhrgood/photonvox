@@ -1,6 +1,6 @@
 """The FusionPBX adapter's writer: applies a build (app/engine/fusionpbx.py) to an engine's database, in the caller's transaction.
 
-- **Upserts** each row on its id, updating only PhotonVox's columns, so what FusionPBX or a phone user set elsewhere on the same row (call
+- **Writes** each row on its id (an update when this domain has it, else an insert), changing only PhotonVox's columns, so what FusionPBX or a phone user set elsewhere on the same row (call
   forwarding by feature code, do-not-disturb) survives a republish. **A row already as built is not written at all** (not even its
   update date), so publishing an unchanged phone system, or adopting a hand-built one (decision 32), changes nothing on the engine.
   FusionPBX's own bookkeeping columns (dates, users) are never written.
@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import IntegrityError
 
 from app.engine.compare import norm
 from app.engine.fusionpbx import AUDIT, KEYS, TABLES, Build, Secret
@@ -83,12 +84,13 @@ def write(conn: Connection, b: Build, domain_uuid: str, previous: Sequence[Mappi
                                     {"u": m["uuid"], "d": domain_uuid}).rowcount
 
     for table in TABLES:
-        same = _unchanged(conn, table, b.rows[table], domain_uuid)
+        have = _existing(conn, table, b.rows[table], domain_uuid)
         for r in b.rows[table]:
-            if r[KEYS[table]] in same:
+            h = have.get(r[KEYS[table]])
+            if h is not None and _same(h, r):
                 res.unchanged += 1
                 continue
-            inserted, values = _upsert(conn, table, r, domain_uuid, generate)
+            inserted, values = _write_row(conn, table, r, domain_uuid, h is not None, generate)
             res.cache = sorted(set(res.cache) | set(b.row_cache.get((table, r[KEYS[table]]), [])))   # a row put back alone: its cache too
             if inserted:
                 res.inserted += 1
@@ -102,42 +104,42 @@ def write(conn: Connection, b: Build, domain_uuid: str, previous: Sequence[Mappi
     return res
 
 
-def _unchanged(conn: Connection, table: str, rows: Sequence[Mapping[str, Any]], domain_uuid: str) -> set:
-    """The ids of the rows already on the engine exactly as built (every column PhotonVox writes; secrets are kept by the engine anyway)."""
+def _existing(conn: Connection, table: str, rows: Sequence[Mapping[str, Any]], domain_uuid: str) -> Dict[str, Mapping[str, Any]]:
+    """The rows of this domain already on the engine, by id, with every column PhotonVox writes (never a secret)."""
     if not rows:
-        return set()
+        return {}
     key = KEYS[table]
-    cols = sorted({c for r in rows for c, v in r.items() if c not in AUDIT and not isinstance(v, Secret)})
-    have = {str(h[key]): h for h in conn.execute(text(f"select {', '.join(cols)} from {table} where {key} = any(cast(:ids as uuid[])) "
+    cols = sorted({c for r in rows for c, v in r.items() if c not in AUDIT and not isinstance(v, Secret)} | {key})
+    return {str(h[key]): h for h in conn.execute(text(f"select {', '.join(cols)} from {table} where {key} = any(cast(:ids as uuid[])) "
                                                     "and domain_uuid = :d"), {"ids": [r[key] for r in rows], "d": domain_uuid}).mappings()}
-    out = set()
-    for r in rows:
-        h = have.get(r[key])
-        if h is not None and all(norm(h.get(c)) == norm(r.get(c)) for c in cols if c in r and not isinstance(r[c], Secret)):
-            out.add(r[key])
-    return out
 
 
-def _upsert(conn: Connection, table: str, r: Mapping[str, Any], domain_uuid: str, generate: Callable[[str], str]):
+def _same(have: Mapping[str, Any], r: Mapping[str, Any]) -> bool:
+    return all(norm(have.get(c)) == norm(v) for c, v in r.items() if c not in AUDIT and not isinstance(v, Secret))
+
+
+def _write_row(conn: Connection, table: str, r: Mapping[str, Any], domain_uuid: str, exists: bool, generate: Callable[[str], str]):
+    """An existing row of this domain is updated (never its secrets); a new one is inserted, with new secrets. Plain statements: the write
+    role reads no column it does not need (no RETURNING), and an id that exists in another domain makes the insert fail, never touch it."""
     key = KEYS[table]
-    r = {c: v for c, v in r.items() if c not in AUDIT}          # FusionPBX's bookkeeping: insert_date is set below, the rest is not ours
-    secret_cols = {c: v for c, v in r.items() if isinstance(v, Secret)}
-    params: Dict[str, Any] = {}
-    names, values = [], []
+    r = {c: v for c, v in r.items() if c not in AUDIT}          # FusionPBX's bookkeeping: insert_date / update_date are set below
+    secret_cols = {c for c, v in r.items() if isinstance(v, Secret)}
+    params: Dict[str, Any] = {"domain_uuid": domain_uuid}
     for c, v in r.items():
-        names.append(c)
         params[c] = generate(str(v)) if c in secret_cols else (json.dumps(v) if (table, c) in JSON_COLUMNS else v)
-        values.append(f"cast(:{c} as json)" if (table, c) in JSON_COLUMNS else f":{c}")
-    sets = [f"{c} = excluded.{c}" for c in names if c not in secret_cols and c != key] + ["update_date = now()"]
-    sql = (f"insert into {table} ({', '.join(names)}, insert_date) values ({', '.join(values)}, now()) "
-           f"on conflict ({key}) do update set {', '.join(sets)} where {table}.domain_uuid = :domain_uuid "
-           f"returning (xmax = 0) as inserted")
-    row = conn.execute(text(sql), params).first()
-    if row is None:      # the id exists in another domain: never touch it
-        raise ValueError(f"{table} row {r[key]} belongs to another domain")
-    if row.inserted and secret_cols:
-        return True, {_label(table, r): params[c] for c in secret_cols}
-    return bool(row.inserted), {}
+    val = lambda c: f"cast(:{c} as json)" if (table, c) in JSON_COLUMNS else f":{c}"       # noqa: E731
+    if exists:
+        sets = [f"{c} = {val(c)}" for c in r if c not in secret_cols and c != key] + ["update_date = now()"]
+        done = conn.execute(text(f"update {table} set {', '.join(sets)} where {key} = :{key} and domain_uuid = :domain_uuid"), params).rowcount
+        if done != 1:
+            raise ValueError(f"{table} row {r[key]} changed under the publish")
+        return False, {}
+    try:
+        with conn.begin_nested():
+            conn.execute(text(f"insert into {table} ({', '.join(r)}, insert_date) values ({', '.join(val(c) for c in r)}, now())"), params)
+    except IntegrityError as e:     # the id is another domain's: never touched
+        raise ValueError(f"{table} row {r[key]} belongs to another domain") from e
+    return True, ({_label(table, r): params[c] for c in secret_cols} if secret_cols else {})
 
 
 def _label(table: str, r: Mapping[str, Any]) -> str:

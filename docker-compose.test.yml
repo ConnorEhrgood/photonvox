@@ -50,6 +50,7 @@ services:
       VOX_STAGING_TAKEOVER: ${VOX_STAGING_TAKEOVER:-}
       VOX_STAGING_DOMAIN: ${VOX_STAGING_DOMAIN:-}
       VOX_STAGING_GATEWAY: ${VOX_STAGING_GATEWAY:-}
+      VOX_STAGING_RW_URL: ${VOX_STAGING_RW_URL:-}
     volumes:
       - ./api:/app
       - ./contract:/contract:ro      # the phone-system schema and samples the unit tests read

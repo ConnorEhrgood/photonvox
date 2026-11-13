@@ -20,7 +20,7 @@ tar --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' --exclud
 if [ "${VOX_STAGING_E2E:-}" = 1 ]; then
   (umask 077; { echo "VOX_STAGING_E2E=1"; echo "VOX_STAGING_DB_URL=$VOX_STAGING_DB_URL"; echo "VOX_STAGING_AGENT_URL=${VOX_STAGING_AGENT_URL:-}";
                 echo "VOX_STAGING_AGENT_SECRET=${VOX_STAGING_AGENT_SECRET:-}"; echo "VOX_STAGING_TAKEOVER=${VOX_STAGING_TAKEOVER:-}";
-                echo "VOX_STAGING_DOMAIN=${VOX_STAGING_DOMAIN:-}"; echo "VOX_STAGING_GATEWAY=${VOX_STAGING_GATEWAY:-}"; } > "$TMP/staging.env")
+                echo "VOX_STAGING_DOMAIN=${VOX_STAGING_DOMAIN:-}"; echo "VOX_STAGING_GATEWAY=${VOX_STAGING_GATEWAY:-}"; echo "VOX_STAGING_RW_URL=${VOX_STAGING_RW_URL:-}"; } > "$TMP/staging.env")
 fi
 cat > "$TMP/run.sh" <<RUN
 #!/bin/bash
