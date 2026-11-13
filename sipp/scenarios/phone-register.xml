@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!-- A phone registering its extension (digest auth: -au extension -ap password, -s extension). Its Contact is this SIPp's own address and port,
+     where phone-answer.xml then listens. Domain from -set domain <name>. -->
+<scenario name="phone-register">
+  <Global variables="domain"/>
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:[$domain] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[service]@[$domain]>;tag=[pid]reg[call_number]
+      To: <sip:[service]@[$domain]>
+      Call-ID: [call_id]
+      CSeq: 1 REGISTER
+      Contact: <sip:[service]@[local_ip]:[local_port];transport=[transport]>
+      Max-Forwards: 70
+      Expires: 600
+      User-Agent: PhotonVox-SIPp-phone
+      Content-Length: 0
+    ]]>
+  </send>
+  <recv response="401" auth="true"/>
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:[$domain] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[service]@[$domain]>;tag=[pid]reg[call_number]
+      To: <sip:[service]@[$domain]>
+      Call-ID: [call_id]
+      CSeq: 2 REGISTER
+      Contact: <sip:[service]@[local_ip]:[local_port];transport=[transport]>
+      [authentication]
+      Max-Forwards: 70
+      Expires: 600
+      User-Agent: PhotonVox-SIPp-phone
+      Content-Length: 0
+    ]]>
+  </send>
+  <recv response="200"/>
+</scenario>

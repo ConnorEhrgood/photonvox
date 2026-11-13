@@ -190,3 +190,25 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   public address and the packet to the HTC trunk's network were both counted by the guard's drop rules.
 - Live engine: the CT 600 backups are now copied nightly to the NAS (01:30 Pacific, 30 days, zstd-checked), so they leave the node; ARCHITECTURE
   §17a updated. What remains of §16's Stage 1 is the restore drill onto staging (Step 2).
+
+## 2026-11-13: Step 0.7, the engine write path (SPIKES §1)
+
+- **SIPp upstream** on LXC 800: `sipp/` (image `photonvox-sipp:3.6.1`, SIPp 3.6.1 from Debian 12; scenarios for the upstream, a registering
+  phone, an answering phone, a call, a call that presses a key by SIP INFO) and `scripts/sipp.sh` (named, labeled containers removed on exit,
+  logs in `/root/vox-test/sipp`; no global prune). A gateway `sipp-upstream` (10.10.0.80) on staging; `staging-check.sh` now matches
+  FreeSWITCH's uuid-named gateways and was proven to fail on a stray one.
+- **Every object written by FusionPBX's own pages** (driven in headless Chromium, `engine/spike/page.mjs`) and diffed table by table
+  (`engine/spike/snapshot.py`), each proven by a SIPp call: domain, gateway, the upstream's address in the providers list, extensions with
+  voicemail, outbound routes (national and 911), inbound numbers, ring group, IVR menu, time condition.
+- **The same phone system written straight into the database** (`engine/spike/direct.py`), the domain seeded by FusionPBX's own
+  `upgrade.php --defaults`, the cache cleared key by key: `engine/spike/prove.sh` passes 20 of 20 (calls out with the outbound and the emergency
+  caller ID, a call refused by its call class, numbers in, ring group, menu with a key press, closed hours). Decision taken by the spike: the
+  adapter writes the database directly; FusionPBX 5.5.12 has no write API.
+- Traps recorded in SPIKES §1b–§1c: unanchored call-class matching (`national` matches `international-44`), FreeSWITCH reads only
+  `dialplan_xml`, file cache entries never expire, inbound numbers need a destination row and dial plan describing the same number, the
+  providers list also applies to the internal profile, the domain page leaves 72 empty dial plan rows, eavesdrop and intercept enabled by
+  default, caller ID in `Remote-Party-ID` (HTC: which header?).
+- A FusionPBX source study (outside git, in the scratchpad) supports the findings.
+- LXC 800: no containers or logs left; the image stays (121 MB, about 30 MB unique) for the engine tests; 12.9 GB free.
+- From Connor: the live engine's new block route (premium, NXX 976, 21 high-cost Caribbean area codes) recorded in ARCHITECTURE §17a; the
+  **Call blocking** design added as ARCHITECTURE §15a with **proposed decision 29**, and in BUILD-GUIDE Steps 2 and 3 and the R2 table.

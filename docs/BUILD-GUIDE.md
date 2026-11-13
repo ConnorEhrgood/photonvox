@@ -18,7 +18,7 @@ location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps sti
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
 | GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
 | Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1–0.5 done 2026-11-13** (skeleton; inventory scripts, run once by the operator; API on the directory fake; web shell; compose and smoke). **Ahead of order, because it needs no resources: Step 3's document, its validation and the compiler to an engine plan** (no FusionPBX writes: those wait for the write-path spike) |
-| Staging instance, PhotonVox VPS | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); the SIPp upstream is next. VPS: does not exist (GATE 1a) |
+| Staging instance, PhotonVox VPS | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1). VPS: does not exist (GATE 1a) |
 
 **Dev ports** (they collide with no other agent): web **5183**, API **8113**.
 
@@ -177,7 +177,7 @@ carrier gateways at all (no HTC, no VoIP.ms, nothing copied from production), an
 range) to anything but LXC 800's SIPp upstream.** A check in `scripts/` lists staging's gateways and fails if any exists that is not the SIPp
 upstream, and a test from staging proves an INVITE to a public address is blocked.
 
-0.7 **Spikes** (findings with numbers in `docs/SPIKES.md`):
+0.7 **Spikes** (findings with numbers in `docs/SPIKES.md`; the engine write path is done, 2026-11-13: SPIKES §1):
 - **Engine write path:** for each object the compiler writes (extension and voicemail, ring group, IVR, time condition, destination and its
   dial plan, outbound route, gateway, caller ID, the 911 route), how FusionPBX's own page writes it; whether the installed version has a usable
   API of its own; a prototype write of each, proven by a SIPp call.
@@ -214,7 +214,8 @@ Production changes, each with Connor's go-ahead, in a quiet hour, with test call
 - Backups of the engine (database, configuration, voicemail, greetings) in the nightly encrypted backup; a rebuild onto the staging LXC,
   timed, in `docs/OPERATIONS.md`.
 - Toll-fraud defaults (ARCHITECTURE §15): call classes, voicemail PIN rules and no outdial, forwarding by class, unused gateways removed, event
-  guard; built and attacked on staging first with SIPp.
+  guard; built and attacked on staging first with SIPp. The live engine's hand-built block route (`Block-premium-and-Caribbean`, 2026-11-13,
+  §17a) is replaced by the generated one (§15a) once Step 3's compiler writes it.
 - The spend breaker in vox-worker (911 still passes, proven on staging); upstreams' own limits (HTC: Connor asks).
 - FusionPBX's screens, the event socket and Postgres only over mgmtnet; MFA on staff screens.
 - vox-agent installed on the live engine beside the shim.
@@ -234,12 +235,16 @@ queue in PhotonVox with HTC's turnaround is the R1 path).
 - The **compiler** and the **adapter**: every object of ARCHITECTURE §8 generated and written to the staging instance; publish with the
   synthetic check; undo; drift detection.
 - **Photon trunking:** upstream gateways per instance generated from `upstream`; outbound routes per call class in Photon's order; caller ID
-  only from held numbers; the **locked 911 route** per site.
+  only from held numbers; the **locked 911 route** per site; the **locked block route** right after it (ARCHITECTURE §15a, if decision 29 is
+  taken): Photon's default list on the Platform page, the organization's **Call blocking** page (allow a category, add or remove numbers and
+  prefixes), blocked attempts reported by vox-agent to the audit and the partner. Per-extension overrides here if small, else R2; inbound
+  blocking in R2.
 - Voicemail to email through Postmark (its own stream; paid tier: Connor).
 
 **Done when:** on staging, a phone system built from a template with 30 pasted users, two sites and four numbers is published in under 10
 minutes of the tester's time; SIPp proves every outcome (each number by schedule, menus, groups, unreachable forwarding), caller ID per site and
-per user, each call class allowed or refused, 911 selecting the site's route and number; a hand edit in FusionPBX is detected and replaced by
+per user, each call class allowed or refused, each blocked category and number refused while 911 and 933 still pass, 911 selecting the site's
+route and number; a hand edit in FusionPBX is detected and replaced by
 the next publish; a security review of the compiler, adapter and agent is done. **GATE 3.**
 
 ### Step 4: GDMS and barcode enrollment
@@ -288,6 +293,7 @@ PhotonConsole. **GATE 6: R1 done.**
 | R2 | Partner trunks | ARCHITECTURE §9: per-domain gateways, numbers on partner trunks, "the trunk that holds the caller ID", failover to Photon trunking, 911 never on them |
 | R2 | Take over live customers | ARCHITECTURE §17: import, compile, compare, move with an inter-instance trunk, GDMS for their phones; retire LXC 600 |
 | R2 | Standby at DC10 | Replica, file sync, runbook, drill; GDMS SIP servers list both |
+| R2 | Inbound call blocking | ARCHITECTURE §15a: block a caller, anonymous callers; spam scoring later; per-extension blocking overrides if not done in R1 |
 | R2 | Numbers by API | Ordering, porting and E911 records through an upstream with APIs (if HTC has none, the upstream Connor chooses) |
 | R2 | **The PhotonVox app** (browser, desktop, mobile): phase A below | ARCHITECTURE §18a |
 | R2 | Voicemail and recordings in the app (B2); metering; queues and supervisors; Yealink | ARCHITECTURE §18 |

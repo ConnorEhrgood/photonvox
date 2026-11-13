@@ -56,6 +56,7 @@ the row below is the decided version.** The BUILD-GUIDE follows them. Changing o
 | 26 | **A key per device in the Secure Enclave or Keystore, no SIP credentials on devices**; signing out a device or removing the user cuts it off at the gateway at once and wipes the app's data on its next run | A stolen phone carries nothing that works elsewhere | 18a |
 | 27 | **Builds: Android and Windows on the runner, iOS and macOS on Xcode Cloud** (25 hours a month included; needs the photonvox repo on GitHub), Connor's Mac as the fallback. **Apple Developer Program and Google Play Console as organization accounts, Connor the Account Holder**; Play App Signing with our upload key in `~/keys`; APNs and FCM keys on the gateway hosts and in Bitwarden. *Costs money (Apple $99 a year, Google $25 once, Windows signing a small monthly fee)* | No Mac to buy or keep running; keys held the way PhotonBoard's are | 18a |
 | 28 | **Phase A sits in R2**, first after R1, with its spikes during R1; about **4–5 months** to the stores | It needs R1's instances, numbers and locked 911; nothing in R1 waits for it | 18a |
+| 29 | *Proposed, for Connor:* **Call blocking per organization** (§15a): Photon's default list (international until switched on, premium, high-cost Caribbean and other non-US North American codes, satellite and other high-cost ranges) blocked by default; the partner or an admin allows a category or adds and removes numbers and prefixes; compiled as one locked block route right after the emergency routes; 911 and 933 never blocked; Photon keeps the list current suite-wide. The block route, the default list and the page in R1; per-extension overrides and blocked-call alerts with it if small, else R2; inbound blocking (callers, anonymous) in R2, spam scoring later | The riskiest destinations closed for everyone without depending on each extension's call class; the live engine already needed a hand-built version (§17a) | 15a |
 
 Dropped from revision 1 (no longer decisions now): Telnyx as the second carrier (replaced by 7), a login per phone (replaced by 13), and the
 R3 items (texting, chat, B2 bucket for recordings), which keep their design in §18 and come back as decisions before their release. Revision 1's
@@ -315,6 +316,7 @@ Integrators set these through screens, never as JSON; the document is what Photo
 | "this site's calls show this number"; "this user shows their direct line" | outbound caller ID per extension (effective and outbound caller-ID name and number), from the site default and user overrides; **only numbers the organization holds** |
 | which trunk a call uses | outbound routes per call class (§15) with the instance's upstream gateways in Photon's order (§9); in R2, partner trunks for numbers they hold |
 | 911 | one locked emergency route per site (§11) |
+| blocked destinations | **one locked block route right after the emergency routes** (§15a): Photon's default list less what the organization allows, plus its own numbers and prefixes |
 | unreachable phones | each extension's "not registered" forwarding to the site's choice |
 | internal dialing | extension range, feature codes (voicemail `*97`, etc.), consistent in every phone system |
 
@@ -528,6 +530,24 @@ Defaults for every organization, applied to the live engine first (decision 17):
 | **GDMS** | The API user and secret encrypted; the GDMS web login for staff with MFA; phones' admin passwords set by Photon's template; the phones' web interface limited |
 | **Caller ID** | Only held numbers; signed by the upstream |
 
+### 15a. Call blocking (proposed: decision 29)
+
+A **Call blocking** page in each organization's settings, for the partner (all its organizations) and the organization's admins.
+- **Blocked by default**, from **Photon's default list**: international (until switched on per country, §15), premium (900, NXX 976, premium
+  international ranges), the high-cost Caribbean and other non-US North American area codes, satellite and other high-cost ranges. Photon
+  keeps the list current suite-wide (a versioned list on the Platform page; a change reaches every organization at its next publish, and
+  PhotonVox republishes all of them when the list changes).
+- **The partner or an admin can allow a category** (audited, and premium stays blocked unless Photon staff allow it), and **add or remove
+  specific numbers and prefixes** (a number to block, or one to let through inside a blocked category).
+- **Optional:** per-extension overrides (an extension allowed one category, or held to a stricter list); a **"call blocked" record** in the
+  audit with an alert to the partner (repeated attempts from one extension are a fraud sign); **911 and 933 are never blocked**: the emergency
+  routes come first, and the page refuses an entry that would match an emergency or service code.
+- **The compiler emits it as one locked block route right after the emergency routes**: hang up with `CALL_REJECTED`, log a warning, and
+  vox-agent reports the attempt (as the live engine's hand-built `Block-premium-and-Caribbean` route does today, §17a). It sits beside the
+  call classes: classes decide what an extension may dial, the block route removes the riskiest destinations for everyone.
+- **Inbound blocking** on the same page, later: block a caller's number, block anonymous callers (to a message or voicemail), and spam scoring
+  (from the upstream's attestation and a reputation feed) after that.
+
 Also: SIP over TLS and SRTP where the model supports it; secrets at rest with Fernet (`SECRETS_KEY`); CPNI rules for call records; a written
 procedure for lawful requests; RLS, tenant-isolation tests on every route, critical modules at 100% branch coverage (BUILD-GUIDE §7).
 
@@ -587,7 +607,7 @@ The reports stay out of git (they name domains); these are the findings as count
 | Call volume (30 days) | 123 inbound (122 answered, about 225 minutes), 41 outbound (40 answered, about 170 minutes), 27 internal; no recorded calls |
 | Carriers | 2 gateways, **both owned by the test domain**, not the customer's and not global (the customer's outbound calls use them across domains): Hickory Telephone (IP-authenticated, its own `htc` SIP profile; carried all 41 outbound calls) and VoIP.ms (registering, failing, 0 calls: unused). **VoIP.ms and its disabled route were removed on 2026-11-13**; HTC is the only gateway |
 | Dial plans | the customer: 3 outbound routes (2 enabled; the disabled VoIP.ms one since removed), inbound routes for its numbers, the IVR; also 9 dial plans left in an old context named after the server's own address (from the install, before the domains existed) |
-| Toll-fraud exposure | **all 10 extensions have no call class (`toll_allow`) set**; voicemail PINs are 4 digits (Connor's choice: kept); SIP passwords are all 16+ characters; call forwarding off everywhere; no international calls in 90 days. **Outbound routes: 2 enabled, both North American only** (the operator read them, 2026-11-13; the second run's "international" was the inventory script counting the `\+1` of a North American pattern, since fixed), so **international dialing is not possible today**, call class or not. No pattern names 900 or 976; whether a broad North American pattern lets premium 900 numbers and the high-cost Caribbean area codes through is open (§22, the live system) |
+| Toll-fraud exposure | **all 10 extensions have no call class (`toll_allow`) set**; voicemail PINs are 4 digits (Connor's choice: kept); SIP passwords are all 16+ characters; call forwarding off everywhere; no international calls in 90 days. **Outbound routes: 2 enabled, both North American only** (the operator read them, 2026-11-13; the second run's "international" was the inventory script counting the `\+1` of a North American pattern, since fixed), so **international dialing is not possible today**, call class or not. **Since 2026-11-13 a block route `Block-premium-and-Caribbean` (order 45, before the HTC routes)** hangs up with `CALL_REJECTED` and logs a warning for 900 numbers, NXX 976 and 21 high-cost Caribbean area codes (242 246 264 268 284 345 441 473 649 658 664 721 758 767 784 809 829 849 868 869 876); US territories (340, 787 and others), toll-free and ordinary North American numbers still pass. Tested with FreeSWITCH's regex; the regenerated dial plan holds it (SQL kept on CT 600 in `/root/photon-changes`). It is the hand-built form of §15a's block route |
 | Provisioning, email, recording | FusionPBX provisioning not in use; voicemail to email not in use, and the mail settings have no SMTP host; call recording not in use |
 | Protection | fail2ban and FusionPBX's event guard running; iptables policy DROP with 35 rules; NAT by FreeSWITCH's autonat. Listening: SIP on 5060 (internal), 5080 (external), 5082 (`htc`), web 80/443, and also PostgreSQL, SNMP, mail, the event socket and the status shim (whether only on private addresses, and what the firewall lets through, is not in the report) |
 | **Backups** | At the inventory, Proxmox had no backup job for the container, and the only backup was FusionPBX's own daily job on the same disk (21 MB). **Since 2026-11-13 a Proxmox backup of CT 600 runs nightly** (02:15, keep 3) to the node's local storage, and **is copied nightly to the NAS** (01:30 Pacific, kept 30 days, each copy checked with zstd), so the backups are off the node. Not yet drilled: a restore onto staging (BUILD-GUIDE Step 2) |
@@ -597,9 +617,9 @@ The reports stay out of git (they name domains); these are the findings as count
 - **§17 (takeover in R2) is small:** one customer, 10 extensions, 5 numbers, 1 IVR, 7 phones. The phones are not FusionPBX-provisioned, so moving
   them means adding them to GDMS (their MACs and serials, from the phones or GDMS if they are already there) and pointing them at the new
   instance's names. The broken number is fixed in the takeover if not before.
-- **§15 on the live engine:** the routes are North American only, so international is closed; premium 900 and high-cost North American numbers
-  may still be open through a broad pattern (§22, the live system). Step 2's call classes close that and set `toll_allow` on every extension. The
-  unused VoIP.ms gateway is gone (2026-11-13).
+- **§15 on the live engine:** the routes are North American only, so international is closed, and the block route (2026-11-13) stops premium
+  and high-cost Caribbean numbers. What remains for Step 2: call classes with `toll_allow` on every extension, and the block route generated
+  by PhotonVox (§15a) in place of the hand-built one. The unused VoIP.ms gateway is gone (2026-11-13).
 - **§16 Stage 1:** the nightly backup now leaves the node (to the NAS); what remains is the rebuild drill (BUILD-GUIDE Step 2), restoring it
   onto staging.
 - **§9 and §5:** upstream gateways belong in the instance's global scope, generated by PhotonVox, never inside a customer's or the test domain.
@@ -1008,8 +1028,8 @@ and application ids under Photon's reverse domain (`com.photonind.vox`). Repo `p
 8. Texting (R3): does HTC offer SMS/MMS and 10DLC registration?
 
 **The live system**: question 9 is **answered by the inventory of 2026-11-13 (§17a)**. Still open from it: how the phones are provisioned (by
-hand, or GDMS: question 1); whether the two North American outbound patterns exclude premium 900 numbers and the high-cost Caribbean area
-codes (reading the two patterns settles it); whether anyone outside Photon uses FusionPBX's screens.
+hand, or GDMS: question 1); whether anyone outside Photon uses FusionPBX's screens. (Premium and high-cost Caribbean numbers: answered, blocked
+since 2026-11-13, §17a.)
 
 **The business**
 10. Photon's regulatory standing for selling voice (§19): what it holds, what HTC covers, and who to ask.

@@ -17,12 +17,14 @@ for c in "HTC trunk: never from staging" "no SIP to public addresses" "no SIP ov
   grep -qF "\"$c\"" <<<"$guard" && ok "guard rule: $c" || bad "guard rule missing: $c"
 done
 
-# Gateways, in FusionPBX's table and in FreeSWITCH itself. The only one allowed is the SIPp upstream.
-db="$(on "sudo -u postgres psql -d fusionpbx -qtAX -F'|' -c \"select gateway, proxy, enabled from v_gateways\"")"
-others="$(awk -F'|' 'NF && !($1 == "sipp-upstream" && $2 ~ /^10\.10\.0\.80(:[0-9]+)?$/)' <<<"$db")"
-[ -z "$others" ] && ok "FusionPBX gateways: $(grep -c . <<<"$db" || true) (only the SIPp upstream allowed)" || bad "FusionPBX has a gateway other than the SIPp upstream: $(cut -d'|' -f1 <<<"$others" | paste -sd, -)"
-fsgw="$(on "fs_cli -x 'sofia status gateway'" | awk 'NF >= 2 && $1 ~ /::/ && $1 != "Profile::Gateway-Name" { print $1 }' | grep -v '::sipp-upstream$' || true)"
-[ -z "$fsgw" ] && ok "FreeSWITCH gateways: none but the SIPp upstream" || bad "FreeSWITCH has gateways: $(paste -sd, - <<<"$fsgw")"
+# Gateways, in FusionPBX's table and in FreeSWITCH itself (which names them by FusionPBX's gateway uuid). The only one allowed is the SIPp upstream.
+db="$(on "sudo -u postgres psql -d fusionpbx -qtAX -F'|' -c \"select gateway_uuid, gateway, proxy from v_gateways\"")"
+allowed="$(awk -F'|' '$2 == "sipp-upstream" && $3 ~ /^10\.10\.0\.80(:[0-9]+)?$/ { print $1 }' <<<"$db")"
+others="$(awk -F'|' 'NF && !($2 == "sipp-upstream" && $3 ~ /^10\.10\.0\.80(:[0-9]+)?$/) { print $2 }' <<<"$db")"
+[ -z "$others" ] && ok "FusionPBX gateways: $(grep -c . <<<"$db" || true) (only the SIPp upstream allowed)" || bad "FusionPBX has a gateway other than the SIPp upstream: $(paste -sd, - <<<"$others")"
+fsgw="$(on "fs_cli -x 'sofia status gateway'" | awk 'NF >= 2 && $1 ~ /::/ && $1 != "Profile::Gateway-Name" { sub(/^[^:]*::/, "", $1); print $1 }' \
+        | grep -vxF -f <(printf '%s\n' $allowed none-allowed) || true)"
+[ -z "$fsgw" ] && ok "FreeSWITCH gateways: none but the SIPp upstream" || bad "FreeSWITCH has gateways that are not the SIPp upstream: $(paste -sd, - <<<"$fsgw")"
 
 # The blocked INVITE. 198.51.100.10 is a documentation address (RFC 5737): public as far as the guard is concerned, routed nowhere.
 count() { on "nft list table inet vox_guard" | grep -F "\"$1\"" | grep -oE 'packets [0-9]+' | awk '{print $2}'; }
