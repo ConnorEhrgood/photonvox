@@ -48,7 +48,16 @@ const PHONE_SYSTEM = {
   id: 'ps1', status: 'ready', domain: 'k3x9q2.sip.photoninfra.xyz', instance: 'colo-a', published_version: 3, draft_updated_at: '2026-11-13T12:00:00Z',
   draft: { version: 1, users: { 'u-ada': user('Ada Front', '100', 's1', { email: 'ada@example.com' }), 'u-ben': user('Ben Office', '101'),
     'u-pat': user('Pat Pastor', '102', 's1', { direct_number: '+17245550123', show: 'direct' }), 'u-cy': user('Cy Annex', '200', 's2') },
-  numbers: { '+17245550100': {}, '+17245550110': {}, '+17245550123': {} }, groups: { everyone: { members: ['u-ada', 'u-ben'] } } },
+  sites: { s1: { emergency_location: 'main', emergency_number: '+17245550100', caller_id: '+17245550100', hours: 'office' },
+    s2: { emergency_location: 'annex', emergency_number: '+17245550110', caller_id: '+17245550110', hours: 'office' } },
+  hours: { office: { week: { mon: ['08:00-17:00'], tue: ['08:00-17:00'], wed: ['08:00-17:00'], thu: ['08:00-17:00'], fri: ['08:00-12:00', '13:00-17:00'] }, holidays: 'us-federal' } },
+  numbers: { '+17245550100': { site: 's1', open: { menu: 'main' }, closed: { voicemail: 'general' } }, '+17245550110': { site: 's2', open: { group: 'annex' } },
+    '+17245550123': { site: 's1', open: { user: 'u-pat' } } },
+  menus: { main: { greeting: 'Thank you for calling Cedar Works. For the office, press 1. For the pastor, press 2.', options: { 1: { group: 'everyone' }, 2: { user: 'u-pat' } },
+    timeout: { group: 'everyone' } } },
+  groups: { everyone: { members: ['u-ada', 'u-ben'], strategy: 'simultaneous', ring_seconds: 25, then: { voicemail: 'general' } },
+    annex: { members: ['u-cy'], strategy: 'sequence', ring_seconds: 20, then: { voicemail: 'u-cy' } } },
+  boxes: { general: { name: 'General mailbox', email: 'office@example.com' } } },
   problems: [], drift: { checked_at: new Date().toISOString(), changed: 0, missing: 0, extra: [] },
 }
 const ver = (number, state, o = {}) => ({ number, state, note: '', error: '', created_by: 'Tom Tech', created_at: '2026-11-13T12:00:00Z',
@@ -82,7 +91,7 @@ const PAGES = [
   ['login', '/login', 'signedout'], ['pending', '/', 'pending'], ['noaccess', '/', 'noaccess'],
   ['customers-tech', '/', 'tech'], ['overview-owner', '/overview', 'owner'], ['phones-owner', '/phones', 'owner'], ['sites', '/sites', 'owner'],
   ['team', '/settings/team', 'owner'], ['myphone-user', '/', 'user'], ['platform-orgs', '/platform', 'staff'], ['platform-gdms', '/platform/gdms', 'staff'],
-  ['users', '/users', 'owner'], ['setup-wizard', '/overview', 'owner', 'Start again from a template'], ['platform-911', '/platform/911', 'staff'],
+  ['users', '/users', 'owner'], ['numbers', '/numbers', 'owner'], ['call-flows', '/call-flows', 'owner'], ['menu-form', '/call-flows', 'owner', 'Change main'], ['setup-wizard', '/overview', 'owner', 'Start again from a template'], ['platform-911', '/platform/911', 'staff'],
 ].filter(([name]) => !only || name.includes(only))
 
 mkdirSync('screenshots', { recursive: true })

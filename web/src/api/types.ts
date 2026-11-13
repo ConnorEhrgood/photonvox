@@ -72,14 +72,24 @@ export type PhoneSystemStatus = 'new' | 'publishing' | 'ready' | 'failed' | 'cha
 
 export interface DraftUser { name: string; site: string; extension: string; email?: string; direct_number?: string; show?: 'site' | 'direct' }
 
-/** The document being built (api/app/document/model.py). Only the parts the web app reads are typed; the rest passes through. */
+/** The document being built (api/app/document/model.py). A target is one of {user}, {group}, {menu}, {voicemail}. */
+export type DraftTarget = Record<string, string>
+export interface DraftNumber { site: string; open: DraftTarget; closed?: DraftTarget | null; hours?: string | null }
+export interface DraftGroup { members: string[]; strategy?: 'simultaneous' | 'sequence'; ring_seconds?: number; then?: DraftTarget | null }
+export interface DraftMenu { greeting: string; options: Record<string, DraftTarget>; timeout: DraftTarget }
+export interface DraftHours { week: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', string[]>>; holidays?: 'none' | 'us-federal' }
+export interface DraftSite { emergency_location: string; emergency_number: string; caller_id: string; hours?: string | null; unreachable?: 'voicemail' | 'none'; outside_prefix?: '8' | '9' | null }
 export interface Draft {
   version: 1
-  sites?: Record<string, { emergency_location: string; emergency_number: string; caller_id: string; hours?: string }>
-  numbers?: Record<string, { site: string; open: Record<string, string>; closed?: Record<string, string> }>
+  sites?: Record<string, DraftSite>
+  hours?: Record<string, DraftHours>
+  numbers?: Record<string, DraftNumber>
+  menus?: Record<string, DraftMenu>
+  groups?: Record<string, DraftGroup>
   users?: Record<string, DraftUser>
-  groups?: Record<string, { members: string[] }>
-  [key: string]: unknown
+  boxes?: Record<string, { name: string; email?: string | null }>
+  calling?: Record<string, unknown>
+  features?: Record<string, boolean>
 }
 
 export interface PhoneSystemSummary {

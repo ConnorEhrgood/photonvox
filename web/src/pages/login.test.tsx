@@ -108,7 +108,7 @@ describe('CallbackPage', () => {
 
 describe('pages for later steps', () => {
   const pages: [string, () => React.ReactElement, string][] = [
-    ['Phones', Soon.PhonesPage, 'Step 4'], ['Numbers', Soon.NumbersPage, 'Step 3'], ['Call flows', Soon.CallFlowsPage, 'Step 3'],
+    ['Phones', Soon.PhonesPage, 'Step 4'],
     ['Monitor', Soon.MonitorPage, 'Step 5'], ['My phone', Soon.MyPhonePage, 'Step 3'], ['Templates', Soon.TemplatesPage, 'Step 3'], ['Alerts', Soon.AlertsPage, 'Step 5'],
     ['PhotonConsole connection', Soon.ConsolePage, 'Step 5'], ['Audit log', Soon.AuditPage, 'Step 3'], ['Instances', Soon.InstancesPage, 'Step 1'],
     ['Upstreams', Soon.UpstreamsPage, 'Step 3'], ['GDMS', Soon.GdmsPage, 'Step 4'], ['Number stock', Soon.NumberStockPage, 'Step 3'],

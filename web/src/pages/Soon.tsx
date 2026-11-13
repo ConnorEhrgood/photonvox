@@ -9,18 +9,6 @@ export const PhonesPage = () => (
   </NotYet>
 )
 
-export const NumbersPage = () => (
-  <NotYet title="Numbers" arrives="Step 3: the builder">
-    <p>The organization’s numbers and what each one rings: a person, a group or the main menu, by business hours. New numbers come from Photon’s stock in seconds; ports are tracked here.</p>
-  </NotYet>
-)
-
-export const CallFlowsPage = () => (
-  <NotYet title="Call flows" arrives="Step 3: the builder">
-    <p>Business hours and holidays, the main menu, ring groups and voicemail, chosen as plain outcomes. PhotonVox builds the phone system from them; routing, trunks and 911 are handled for you.</p>
-  </NotYet>
-)
-
 export const MonitorPage = () => (
   <NotYet title="Monitor" arrives="Step 5: the monitoring pane">
     <p>Every phone’s status from GDMS and from the phone system, trunks, and calls in progress, per site, with problems first and said in words: “the site’s internet is down”, not twenty offline phones.</p>

@@ -1,0 +1,238 @@
+import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it } from 'vitest'
+import type { Draft, PhoneSystemSummary } from '../api/types'
+import { rename, slug, targetText, targetValue, toTarget } from '../components/draft'
+import { meWith, OWNER, renderApp } from '../test/helpers'
+import { CallFlowsPage } from './CallFlows'
+import { NumbersPage, toE164 } from './Numbers'
+
+const B = '/tenants/t1'
+const SITES = [{ id: 's1', slug: 'cw-main', name: 'Main office', address: '', timezone: 'America/New_York' }]
+const NONE = () => new Response(JSON.stringify({ detail: { code: 'no_phone_system', detail: 'x' } }), { status: 404 })
+const DRAFT: Draft = {
+  version: 1,
+  sites: { s1: { emergency_location: 'main', emergency_number: '+17245550100', caller_id: '+17245550100', hours: 'office' } },
+  hours: { office: { week: { mon: ['08:00-17:00'], fri: ['08:00-12:00', '13:00-17:00'] }, holidays: 'us-federal' } },
+  numbers: { '+17245550100': { site: 's1', open: { menu: 'main' }, closed: { voicemail: 'general' } }, '+17245550123': { site: 's1', open: { user: 'u-ada' } } },
+  menus: { main: { greeting: 'Thanks for calling.', options: { '1': { group: 'everyone' } }, timeout: { group: 'everyone' } } },
+  groups: { everyone: { members: ['u-ada'], strategy: 'simultaneous', ring_seconds: 25, then: { voicemail: 'general' } } },
+  users: { 'u-ada': { name: 'Ada Front', site: 's1', extension: '100' }, 'u-ben': { name: 'Ben Office', site: 's1', extension: '101' } },
+  boxes: { general: { name: 'General mailbox', email: 'office@example.com' } },
+}
+const PS = (draft: Draft = DRAFT): PhoneSystemSummary => ({ id: 'ps1', status: 'new', domain: 'd', instance: 'colo-a', published_version: null,
+  draft_updated_at: 'x', draft, problems: [], drift: { checked_at: null, changed: 0, missing: 0, extra: [] } })
+
+/** The page as it would be, with the server keeping the last draft saved. */
+function withServer(page: React.ReactElement, start: Draft = DRAFT, me = meWith(OWNER)) {
+  let current = start
+  const saved: Draft[] = []
+  const r = renderApp(page, { me, routes: {
+    [`GET ${B}/phone-system`]: () => PS(current), [`GET ${B}/sites`]: SITES,
+    [`PUT ${B}/phone-system/draft`]: (body) => { current = (body as { document: Draft }).document; saved.push(current); return PS(current) },
+  } })
+  return { ...r, saved }
+}
+
+describe('the draft helpers', () => {
+  it('turn targets to and from one value, words, and slugs', () => {
+    expect(targetValue({ group: 'everyone' })).toBe('group:everyone')
+    expect(targetValue(null)).toBe('')
+    expect(toTarget('menu:main')).toEqual({ menu: 'main' })
+    expect(toTarget('')).toBeNull()
+    expect(slug('  Front Desk!! ')).toBe('front-desk')
+    expect(targetText(DRAFT, { voicemail: 'u-ben' })).toBe('Ben Office’s voicemail')
+    expect(targetText(DRAFT, { voicemail: 'general' })).toBe('General mailbox')
+    expect(targetText(DRAFT, { user: 'u-x' })).toBe('u-x')
+    expect(targetText(DRAFT, null)).toBe('—')
+    expect(toE164('(724) 555-0100')).toBe('+17245550100')
+    expect(toE164('')).toBe('')
+  })
+  it('renaming follows every reference, and does nothing for the same name', () => {
+    const d = rename(DRAFT, 'group', 'everyone', 'desk')
+    expect(d.menus!.main).toEqual({ greeting: 'Thanks for calling.', options: { '1': { group: 'desk' } }, timeout: { group: 'desk' } })
+    expect(rename(DRAFT, 'voicemail', 'general', 'office').numbers!['+17245550100'].closed).toEqual({ voicemail: 'office' })
+    expect(rename(DRAFT, 'group', 'everyone', 'everyone')).toBe(DRAFT)
+    expect(rename({ version: 1 }, 'menu', 'a', 'b')).toEqual({ version: 1, numbers: {}, groups: {}, menus: {} })
+  })
+})
+
+describe('numbers', () => {
+  it('lists numbers by what they ring, adds one and changes another', async () => {
+    const { saved } = withServer(<NumbersPage />)
+    expect(await screen.findByText('Menu main')).toBeInTheDocument()
+    expect(screen.getByText('General mailbox')).toBeInTheDocument()
+    expect(screen.getByText('the same, at all hours')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add a number' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Add a number' })
+    await userEvent.type(within(dialog).getByLabelText('Number'), '724-555-0111')
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+    await userEvent.selectOptions(within(dialog).getByLabelText('It rings'), 'group:everyone')
+    await userEvent.click(within(dialog).getByLabelText('Something else after hours'))
+    await userEvent.selectOptions(within(dialog).getByLabelText('After hours it rings'), 'voicemail:general')
+    await userEvent.selectOptions(within(dialog).getByLabelText('Office hours'), 'office')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('+17245550111')).toBeInTheDocument()
+    expect(saved[0].numbers!['+17245550111']).toEqual({ site: 's1', open: { group: 'everyone' }, closed: { voicemail: 'general' }, hours: 'office' })
+    await userEvent.click(screen.getByRole('button', { name: 'Change +17245550123' }))
+    dialog = await screen.findByRole('dialog', { name: 'Change +17245550123' })
+    expect(within(dialog).getByLabelText('Site (its 911 address and caller ID)')).toHaveDisplayValue('Main office')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove +17245550123' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(saved[1].numbers).not.toHaveProperty('+17245550123')
+  })
+
+  it('shows what the server refused, and says when there is no phone system', async () => {
+    renderApp(<NumbersPage />, { routes: { [`GET ${B}/phone-system`]: PS(), [`GET ${B}/sites`]: SITES,
+      [`PUT ${B}/phone-system/draft`]: new Response(JSON.stringify({ detail: { code: 'invalid_document', detail: 'x',
+        errors: [{ path: 'numbers.+1', message: 'not a North American number' }] } }), { status: 422 }) } })
+    await userEvent.click(await screen.findByRole('button', { name: 'Change +17245550123' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('numbers.+1: not a North American number')
+    renderApp(<NumbersPage />, { routes: { [`GET ${B}/phone-system`]: NONE, [`GET ${B}/sites`]: SITES } })
+    expect(await screen.findByText(/has no phone system yet/)).toBeInTheDocument()
+  })
+
+  it('without numbers or the right to build, it says so and offers nothing', async () => {
+    withServer(<NumbersPage />, { ...DRAFT, numbers: {} }, meWith({ ...OWNER, capabilities: ['vox.phone_system.view'] }))
+    expect(await screen.findByText('No numbers yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add a number' })).toBeNull()
+  })
+})
+
+describe('call flows', () => {
+  it('shows groups, menus, mailboxes and hours in words', async () => {
+    withServer(<CallFlowsPage />)
+    expect(await screen.findByText(/all at once, 25 s, then General mailbox/)).toBeInTheDocument()
+    expect(screen.getByText(/1 → Ring group everyone; no key → Ring group everyone/)).toBeInTheDocument()
+    expect(screen.getByText('emails office@example.com')).toBeInTheDocument()
+    expect(screen.getByText(/Mon 08:00-17:00; Fri 08:00-12:00, 13:00-17:00; closed on US federal holidays/)).toBeInTheDocument()
+  })
+
+  it('renames a ring group, changes who it rings, and the menu follows', async () => {
+    const { saved } = withServer(<CallFlowsPage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Change everyone' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Ring group everyone' })
+    await userEvent.clear(within(dialog).getByLabelText('Name'))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Front Desk')
+    await userEvent.click(within(dialog).getByLabelText('Ben Office (101)'))
+    await userEvent.selectOptions(within(dialog).getByLabelText('How'), 'sequence')
+    await userEvent.selectOptions(within(dialog).getByLabelText('If nobody answers'), '')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/one after another, 25 s, then hang up/)).toBeInTheDocument()
+    expect(saved[0].groups).toEqual({ 'front-desk': { members: ['u-ada', 'u-ben'], strategy: 'sequence', ring_seconds: 25, then: null } })
+    expect(saved[0].menus!.main.timeout).toEqual({ group: 'front-desk' })
+  })
+
+  it('adds a menu with keys, a mailbox and office hours, and sets a site’s hours', async () => {
+    const { saved } = withServer(<CallFlowsPage />, { ...DRAFT, menus: {} })
+    const add = async (section: string) => userEvent.click(within(await screen.findByRole('region', { name: section })).getByRole('button', { name: 'Add' }))
+    await add('Menus')
+    let dialog = await screen.findByRole('dialog', { name: 'New menu' })
+    await userEvent.type(within(dialog).getByLabelText('What callers hear'), 'Press 1 for the desk.')
+    await userEvent.selectOptions(within(dialog).getByLabelText('Key 1'), 'group:everyone')
+    await userEvent.selectOptions(within(dialog).getByLabelText('If no key is pressed'), 'user:u-ada')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/“Press 1 for the desk.”/)).toBeInTheDocument()
+    expect(saved[0].menus!.main).toEqual({ greeting: 'Press 1 for the desk.', options: { '1': { group: 'everyone' } }, timeout: { user: 'u-ada' } })
+    await add('Shared mailboxes')
+    dialog = await screen.findByRole('dialog', { name: 'New shared mailbox' })
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Billing')
+    await userEvent.type(within(dialog).getByLabelText('Email new messages to'), 'not-an-email')
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+    await userEvent.clear(within(dialog).getByLabelText('Email new messages to'))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(saved[1].boxes!.billing).toEqual({ name: 'Billing', email: null })
+    await add('Office hours')
+    dialog = await screen.findByRole('dialog', { name: 'New office hours' })
+    await userEvent.clear(within(dialog).getByLabelText('Name'))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Weekend')
+    await userEvent.type(within(dialog).getByLabelText('Saturday'), '9-5')
+    expect(within(dialog).getByText('Not a time span: Saturday.')).toBeInTheDocument()
+    await userEvent.clear(within(dialog).getByLabelText('Saturday'))
+    await userEvent.type(within(dialog).getByLabelText('Saturday'), '09:00-13:00')
+    await userEvent.click(within(dialog).getByLabelText('Closed on US federal holidays'))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(saved[2].hours!.weekend).toEqual({ holidays: 'none', week: { sat: ['09:00-13:00'] } })
+    await userEvent.selectOptions(await screen.findByLabelText('Main office: office hours'), 'weekend')
+    expect(saved[3].sites!.s1.hours).toBe('weekend')
+  })
+
+  it('renames hours with the sites and numbers that use them, removes things, and refuses a taken name', async () => {
+    const { saved } = withServer(<CallFlowsPage />, { ...DRAFT, numbers: { ...DRAFT.numbers, '+17245550100': { ...DRAFT.numbers!['+17245550100'], hours: 'office' } } })
+    await userEvent.click(await screen.findByRole('button', { name: 'Change office' }))
+    let dialog = await screen.findByRole('dialog')
+    await userEvent.clear(within(dialog).getByLabelText('Name'))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'week')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(saved[0].sites!.s1.hours).toBe('week')
+    expect(saved[0].numbers!['+17245550100'].hours).toBe('week')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change main' }))
+    dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove main' }))
+    expect(saved[1].menus).toEqual({})
+    await userEvent.click(await screen.findByRole('button', { name: 'Change general' }))
+    dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove general' }))
+    expect(saved[2].boxes).toEqual({})
+    await userEvent.click(within(await screen.findByRole('region', { name: 'Ring groups' })).getByRole('button', { name: 'Add' }))
+    dialog = await screen.findByRole('dialog', { name: 'New ring group' })
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'everyone')
+    expect(within(dialog).getByText('That name is taken.')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Change everyone' }))
+    dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove everyone' }))
+    expect(saved[3].groups).toEqual({})
+    await userEvent.click(await screen.findByRole('button', { name: 'Change week' }))
+    dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove week' }))
+    expect(saved[4].hours).toEqual({})
+  })
+
+  it('an empty phone system says so, a view-only role cannot change it, and no phone system is explained', async () => {
+    withServer(<CallFlowsPage />, { version: 1 }, meWith({ ...OWNER, capabilities: ['vox.phone_system.view'] }))
+    expect(await screen.findAllByText('None yet.')).toHaveLength(3)
+    expect(screen.getByText('None yet. Everyone also has their own.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
+    renderApp(<CallFlowsPage />, { routes: { [`GET ${B}/phone-system`]: NONE, [`GET ${B}/sites`]: SITES } })
+    expect(await screen.findByText(/has no phone system yet/)).toBeInTheDocument()
+  })
+})
+
+describe('the forms’ small paths', () => {
+  it('closing each form leaves the draft alone, and the ring time can be changed', async () => {
+    const { saved } = withServer(<CallFlowsPage />)
+    for (const name of ['Change main', 'Change general', 'Change office']) {
+      await userEvent.click(await screen.findByRole('button', { name }))
+      await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Close' }))
+    }
+    await userEvent.click(await screen.findByRole('button', { name: 'Change everyone' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.clear(within(dialog).getByLabelText('Ring for (seconds)'))
+    await userEvent.type(within(dialog).getByLabelText('Ring for (seconds)'), '40')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(saved).toHaveLength(1)
+    expect(saved[0].groups!.everyone.ring_seconds).toBe(40)
+  })
+
+  it('a number can move to another site, and its form can be closed', async () => {
+    const two = { ...DRAFT, sites: { ...DRAFT.sites, s2: { emergency_location: 'annex', emergency_number: '+17245550123', caller_id: '+17245550123' } } }
+    const { saved } = withServer(<NumbersPage />, two)
+    await userEvent.click(await screen.findByRole('button', { name: 'Change +17245550123' }))
+    let dialog = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dialog).getByLabelText('Site (its 911 address and caller ID)'), 's2')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(saved[0].numbers!['+17245550123'].site).toBe('s2')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a number' }))
+    dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a failed load is shown', async () => {
+    renderApp(<CallFlowsPage />, { routes: { [`GET ${B}/phone-system`]: new Response(JSON.stringify({ detail: 'down' }), { status: 500 }), [`GET ${B}/sites`]: SITES } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('down')
+  })
+})
