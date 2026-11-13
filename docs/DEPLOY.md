@@ -33,11 +33,16 @@ host's `.env`; then the steps below, in order.
 - An authoritative DNS query from the runner is not reliable (its UDP 53 is intercepted: even known names answer SERVFAIL). Check names
   with DNS over HTTPS instead.
 
+**Later deploys:**
+- 2026-11-13 about 22:50 UTC, cd4ed49: sign-in on the suite's shared module (ph-auth). The API answered 503 through the proxy for about
+  20 seconds while it was recreated (Caddy's 15-second health check), then 200; Board, the directory and Console answered throughout.
+  Checked signed out in production (`web/scripts/signin-prod-check.mjs`): at 1440×900 and 390×844 a deep link goes straight to PhotonID's
+  sign-in form with redirect `/auth/callback`, one trip, no page of PhotonVox's own, no iframe. id1 drops the old `/` post-logout address.
+
 **Open:**
 - **Nobody can sign in yet.** A person must be known to PhotonVox through the directory, which sends people only for organizations that
   have `vox` switched on, and none has. Connor is choosing the first organization (Photon's own is the suggestion).
 - PhotonVox reads only `PLATFORM_ADMIN_SUBS` for staff, not the directory's `platform_admin` field. Mapping it is a follow-up.
-- Once the web app moves to the shared ph-auth module, its post-logout becomes `/auth/signed-out`, and id1 drops `/` from the PhotonID app.
 - GATE 1c and Step 1's adoption of the live domains.
 
 ## Where it runs
