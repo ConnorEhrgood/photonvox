@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { ErrorText } from '../components/ui'
-import logo from '@photon/ui/assets/photon-logo.png'
+import logo from '../assets/photon-logo.png'
 
 export function LoginPage() {
   const { status, signIn, source, pasteToken, error } = useAuth()

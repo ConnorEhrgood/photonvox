@@ -1,0 +1,106 @@
+/* GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. */
+/* Photon design tokens. The original colour values are lifted verbatim from PhotonConsole's web/src/index.css so all
+   products look identical. Change a token here, not in an app (apps that cannot depend on this package, like
+   PhotonConsole, get a vendored copy: `node scripts/sync-vendored.mjs <src> --css`, checked by `--check`). */
+:root {
+  /* The product is dark. Declaring `light dark` here, as before, made scrollbars and native pickers follow the
+     operating system while the page stayed dark. A light theme is opt-in: <html data-theme="light">. */
+  color-scheme: dark;
+
+  /* Surfaces and lines */
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-raised: #1e222b;
+  --surface-hover: #262b36;
+  --border: #2a2f3a;
+  /* Controls (inputs, checkboxes) need a 3:1 edge against the surface (WCAG 1.4.11); --border is a divider only. */
+  --border-strong: #667084;
+
+  /* Text */
+  --text: #e6e8eb;
+  --text-dim: #9aa1ad;
+
+  /* Accent. --accent is for text, links, focus and edges; it is too light to carry white text. Anything FILLED
+     with white text on it uses --accent-strong (4.5:1 or better), and gets darker on hover, never lighter. */
+  --accent: #4f8cff;
+  --accent-hover: #6fa0ff;
+  --accent-strong: #2f6bdf;
+  --accent-strong-hover: #2a64d6;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --on-accent: #fff;
+  --danger: #ff6b6b;
+  --danger-strong: #c93c3c;
+  --danger-strong-hover: #b53434;
+  --on-danger: #fff;
+
+  /* The company's own yellow (the ring in the Photon logo). Identity only: favicon, wordmark, sign-in. Never a status colour. */
+  --brand: #f6e55a;
+
+  /* Status. Used for text, badges and the 3px edge on tiles and rows (.ph-edge). */
+  --sev-info: #4f8cff;
+  --sev-warning: #e8a33d;
+  --sev-error: #ff6b6b;
+  --sev-ok: #3ecf8e;
+
+  /* Shape */
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Space (4px grid, in rem) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  /* Type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.85rem;
+  --fs-md: 0.95rem;
+  --fs-lg: 1.15rem;
+  --fs-xl: 1.4rem;
+  --fs-2xl: 1.8rem;
+
+  /* Depth and motion */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --focus-ring: 2px solid var(--accent);
+  --dur: 140ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --content-max: 1200px;
+}
+
+/* Opt-in light theme. Nothing sets it yet; the contrast of every pair below is checked by test/tokens.test.js. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6f9;
+  --surface: #fff;
+  --surface-raised: #f0f2f6;
+  --surface-hover: #e6e9ef;
+  --border: #d8dce4;
+  --border-strong: #7c8597;
+  --text: #14171c;
+  --text-dim: #515b6b;
+  --accent: #1f5fd1;
+  --accent-hover: #174bab;
+  --accent-strong: #2f6bdf;
+  --accent-strong-hover: #2a64d6;
+  --danger: #c62828;
+  --danger-strong: #c93c3c;
+  --danger-strong-hover: #b53434;
+  --sev-info: #1f5fd1;
+  --sev-warning: #96590a;
+  --sev-error: #c62828;
+  --sev-ok: #12744a;
+  --shadow-sm: 0 1px 2px rgba(20, 23, 28, 0.08);
+  --shadow-md: 0 4px 14px rgba(20, 23, 28, 0.12);
+  --shadow-lg: 0 18px 48px rgba(20, 23, 28, 0.2);
+}

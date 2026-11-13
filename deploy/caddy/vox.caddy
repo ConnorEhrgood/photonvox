@@ -1,0 +1,28 @@
+# vox.caddy: PhotonVox's two names on the Photon host, where PhotonBoard's Caddy terminates TLS for every Photon service. Hostnames are spelled
+# out (no environment variables) so the site loads on a graceful reload: a new variable would need the proxy recreated, which drops its other
+# networks for a minute (found deploying the directory, b1). Copy to /opt/photon/photonboard/deploy/caddy/sites/vox.caddy (a PhotonBoard repo
+# change, so it is Connor's go-ahead), connect the proxy to vox-edge, validate, reload: docs/DEPLOY.md.
+# DNS: grey cloud (DNS only), pointing at the host, as for the other names.
+#
+# The containers are addressed by their unique aliases on vox-edge (docker-compose.prod.yml), never by the bare service names.
+# The API trusts X-Forwarded-For from private addresses only (FORWARDED_ALLOW_IPS), so its sign-in throttle sees the real client.
+vox.photonind.com {
+	import secure
+	encode zstd gzip
+	# The web server (nginx) sets the page's Content-Security-Policy and the other security headers itself.
+	reverse_proxy vox-web:8080
+}
+
+api.vox.photonind.com {
+	import secure
+	encode zstd gzip
+	# Everything the API takes is JSON: a phone system's draft is the largest (the document's own limits keep it well under this).
+	request_body {
+		max_size 2MB
+	}
+	# Liveness, not readiness: a database blip must not make the proxy stop sending people to the API.
+	reverse_proxy vox-api:8000 {
+		health_uri /healthz
+		health_interval 15s
+	}
+}

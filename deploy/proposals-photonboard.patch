@@ -1,0 +1,140 @@
+diff --git a/deploy/caddy/sites/vox.caddy.example b/deploy/caddy/sites/vox.caddy.example
+new file mode 100644
+index 0000000..b676f42
+--- /dev/null
++++ b/deploy/caddy/sites/vox.caddy.example
+@@ -0,0 +1,28 @@
++# vox.caddy.example (source: the photonvox repo's deploy/caddy/vox.caddy): PhotonVox's two names on the Photon host, where PhotonBoard's Caddy terminates TLS for every Photon service. Hostnames are spelled
++# out (no environment variables) so the site loads on a graceful reload: a new variable would need the proxy recreated, which drops its other
++# networks for a minute (found deploying the directory, b1). Copy to vox.caddy beside it,
++# connect the proxy to vox-edge, validate, reload: docs/DEPLOY.md.
++# DNS: grey cloud (DNS only), pointing at the host, as for the other names.
++#
++# The containers are addressed by their unique aliases on vox-edge (docker-compose.prod.yml), never by the bare service names.
++# The API trusts X-Forwarded-For from private addresses only (FORWARDED_ALLOW_IPS), so its sign-in throttle sees the real client.
++vox.photonind.com {
++	import secure
++	encode zstd gzip
++	# The web server (nginx) sets the page's Content-Security-Policy and the other security headers itself.
++	reverse_proxy vox-web:8080
++}
++
++api.vox.photonind.com {
++	import secure
++	encode zstd gzip
++	# Everything the API takes is JSON: a phone system's draft is the largest (the document's own limits keep it well under this).
++	request_body {
++		max_size 2MB
++	}
++	# Liveness, not readiness: a database blip must not make the proxy stop sending people to the API.
++	reverse_proxy vox-api:8000 {
++		health_uri /healthz
++		health_interval 15s
++	}
++}
+diff --git a/docker-compose.vox-edge.yml b/docker-compose.vox-edge.yml
+new file mode 100644
+index 0000000..ca863d1
+--- /dev/null
++++ b/docker-compose.vox-edge.yml
+@@ -0,0 +1,16 @@
++# Overlay for serving PhotonVox (the photonvox repo, deployed on the host at /opt/photon/vox) from the same Caddy: the proxy joins PhotonVox's edge
++# network and serves its two names (vox.photonind.com, api.vox.photonind.com). Compose merges a service's networks across files, so this adds
++# vox-edge to whatever the other overlays give the proxy.
++#   docker network create --label photon.product=vox vox-edge   # once, before either stack starts (PhotonVox's docker-compose.prod.yml uses it too)
++#   cp deploy/caddy/sites/vox.caddy.example deploy/caddy/sites/vox.caddy
++# On a running host, do not recreate the proxy to add it (that drops its other networks for a minute): `docker network connect vox-edge
++# photonboard-proxy-1`, then validate and reload Caddy (photonvox docs/DEPLOY.md). This overlay keeps it there whenever the proxy IS recreated:
++# deploy-photon-host.sh and restore-host.sh include it when vox.caddy exists.
++services:
++  proxy:
++    networks: [default, vox-edge]
++
++networks:
++  vox-edge:
++    external: true
++    name: vox-edge
+diff --git a/scripts/backup-host.sh b/scripts/backup-host.sh
+index 49bff5b..e6848c5 100755
+--- a/scripts/backup-host.sh
++++ b/scripts/backup-host.sh
+@@ -6,6 +6,7 @@
+ #   zitadel-db.dump.enc      PhotonID database (every Photon product's identities), ENCRYPTED the same way
+ #   directory-db.dump.enc    PhotonID directory database (organizations, sites, people, grants; a second database in PhotonID's Postgres), ENCRYPTED the same way
+ #   console-db.dump.enc      PhotonConsole database (only where PhotonConsole runs on this host, at $BASE/console), ENCRYPTED the same way
++#   vox-db.dump.enc          PhotonVox database (only where PhotonVox runs on this host, at $BASE/vox), ENCRYPTED the same way
+ #   secrets.tar.gz.enc    the .env files (TOKEN_HMAC_KEY, ZITADEL_MASTERKEY, PhotonConsole's SECRETS_KEY, ...), provisioner and mail tokens, and the token PhotonID's sign-in
+ #                         page uses to reach its API (login-client.pat, which otherwise exists only in a Docker volume), ENCRYPTED to the backup
+ #                         certificate. Only its public half lives on this host; the private key is kept off it (password manager).
+@@ -15,6 +16,7 @@ set -euo pipefail
+ KEEP=${1:-14}
+ BASE=${PHOTON_BASE:-/opt/photon}   # holds photonboard/ (with PhotonID in deploy/zitadel), backups/ and secrets/
+ ROOT=$BASE/photonboard; OUT=$BASE/backups; SECRETS=$BASE/secrets; CON=$BASE/console   # PhotonConsole is optional: backed up when its folder exists
++VOX=$BASE/vox                                                                     # PhotonVox likewise
+ CERT=$SECRETS/backup-cert.pem
+ [ -f "$CERT" ] || { echo "no backup certificate at $CERT: secrets cannot be encrypted, so none are backed up" >&2; exit 1; }
+ umask 077
+@@ -37,12 +39,16 @@ docker compose exec -T api tar -C /data -cf - media > "$DIR/photonboard-media.ta
+ if [ -f "$CON/.env" ]; then
+   ( cd "$CON" && docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' ) | seal "$DIR/console-db.dump.enc"
+ fi
++if [ -f "$VOX/.env" ]; then
++  ( cd "$VOX" && docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' ) | seal "$DIR/vox-db.dump.enc"
++fi
+ # (pipefail stops the script if a dump fails. An empty dump would still encrypt to a few hundred bytes, so look at the size as well.)
+-for f in photonboard-db.dump.enc zitadel-db.dump.enc directory-db.dump.enc $([ -f "$DIR/console-db.dump.enc" ] && echo console-db.dump.enc); do [ "$(stat -c %s "$DIR/$f")" -gt 4096 ] || { echo "$f is too small to be a database" >&2; exit 1; }; done
++for f in photonboard-db.dump.enc zitadel-db.dump.enc directory-db.dump.enc $([ -f "$DIR/console-db.dump.enc" ] && echo console-db.dump.enc) $([ -f "$DIR/vox-db.dump.enc" ] && echo vox-db.dump.enc); do [ "$(stat -c %s "$DIR/$f")" -gt 4096 ] || { echo "$f is too small to be a database" >&2; exit 1; }; done
+ 
+ FILES=(photonboard/.env photonboard/deploy/zitadel/.env)
+ [ -f "$CON/.env" ] && FILES+=(console/.env)   # holds SECRETS_KEY: without it the stored UniFi keys and device secrets in its database are unreadable
+ [ -f "$BASE/directory/.env" ] && FILES+=(directory/.env)
++[ -f "$VOX/.env" ] && FILES+=(vox/.env)   # holds SECRETS_KEY: without it the engine logins and phones' SIP passwords in its database are unreadable
+ for s in "$SECRETS"/directory-*; do [ -f "$s" ] && FILES+=("secrets/$(basename "$s")"); done   # the directory's service token, webhook key, database login and product connections
+ for s in provisioner.pat postmark-token; do [ -f "$SECRETS/$s" ] && FILES+=("secrets/$s"); done
+ # The sign-in page's token was written into the zitadel-bootstrap volume when PhotonID first started and is never written again: a restored
+diff --git a/scripts/deploy-photon-host.sh b/scripts/deploy-photon-host.sh
+index 4cadebb..76435d6 100755
+--- a/scripts/deploy-photon-host.sh
++++ b/scripts/deploy-photon-host.sh
+@@ -15,10 +15,12 @@ rsync -az -e "$RSH" --exclude node_modules --exclude .venv --exclude android/bui
+   --exclude web/dist --exclude player/dist --include .env.example --exclude .env --exclude '.env.*' --exclude backups --exclude .coverage --exclude coverage \
+   ./ "$HOST:$DEST/"
+ rsync -az --delete -e "$RSH" web/dist/ "$HOST:$DEST/web/dist/"
+-"${SSH[@]}" "$HOST" "cd $DEST && F='-f docker-compose.yml -f docker-compose.zitadel-edge.yml' && { [ -f deploy/caddy/sites/console.caddy ] && F=\"\$F -f docker-compose.console-edge.yml\" || true; } && { [ -f deploy/caddy/sites/directory.caddy ] && F=\"\$F -f docker-compose.directory-edge.yml\" || true; } && docker compose \$F build migrate api worker proxy 2>&1 | tail -3 && docker compose \$F up -d 2>&1 | tail -6"
++"${SSH[@]}" "$HOST" "cd $DEST && F='-f docker-compose.yml -f docker-compose.zitadel-edge.yml' && { [ -f deploy/caddy/sites/console.caddy ] && F=\"\$F -f docker-compose.console-edge.yml\" || true; } && { [ -f deploy/caddy/sites/directory.caddy ] && F=\"\$F -f docker-compose.directory-edge.yml\" || true; } && { [ -f deploy/caddy/sites/vox.caddy ] && F=\"\$F -f docker-compose.vox-edge.yml\" || true; } && docker compose \$F build migrate api worker proxy 2>&1 | tail -3 && docker compose \$F up -d 2>&1 | tail -6"
+ sleep 10
+ curl -fsS https://api.board.photonind.com/healthz; echo
+ curl -s -o /dev/null -w "portal %{http_code}\n" https://board.photonind.com/
+ curl -s -o /dev/null -w "id %{http_code}\n" https://id.photonind.com/.well-known/openid-configuration
+ # The same proxy serves the PhotonID directory: without its overlay (above) a recreated proxy cannot reach it (502).
+ curl -s -o /dev/null -w "account %{http_code}\n" https://account.photonind.com/
++# ...and PhotonVox, where it runs on this host (its overlay, above).
++"${SSH[@]}" "$HOST" "[ -f $DEST/deploy/caddy/sites/vox.caddy ]" && curl -s -o /dev/null -w "vox %{http_code}\n" https://vox.photonind.com/
+diff --git a/scripts/photon-watch.sh b/scripts/photon-watch.sh
+index a19babb..2068bed 100755
+--- a/scripts/photon-watch.sh
++++ b/scripts/photon-watch.sh
+@@ -40,7 +40,9 @@ if [ "$MODE" = external ]; then
+ else
+   df_pct=$(df --output=pcent / | tail -1 | tr -dc 0-9); [ "$df_pct" -lt 85 ] || add disk "The disk is ${df_pct}% full"
+   mem=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo); [ "$mem" -gt 300 ] || add memory "Only ${mem} MB of memory is available"
+-  for c in photonboard-api-1 photonboard-db-1 photonboard-worker-1 photonboard-proxy-1 zitadel-zitadel-api-1 zitadel-zitadel-login-1 zitadel-postgres-1; do
++  # PhotonVox's containers, where it runs on this host (/opt/photon/vox).
++  VOX_C=""; [ -f /opt/photon/vox/.env ] && VOX_C="photonvox-api-1 photonvox-db-1 photonvox-worker-1 photonvox-web-1"
++  for c in photonboard-api-1 photonboard-db-1 photonboard-worker-1 photonboard-proxy-1 zitadel-zitadel-api-1 zitadel-zitadel-login-1 zitadel-postgres-1 $VOX_C; do
+     st=$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}/{{.RestartCount}}' "$c" 2>/dev/null) || { add "c-$c" "Container $c does not exist"; continue; }
+     case "$st" in running/healthy/*|running/-/*) ;; *) add "c-$c" "Container $c is $st (state/health/restarts)";; esac
+   done
+diff --git a/scripts/restore-host.sh b/scripts/restore-host.sh
+index 839b374..0108b94 100755
+--- a/scripts/restore-host.sh
++++ b/scripts/restore-host.sh
+@@ -51,6 +51,8 @@ else F=""; fi
+ [ -f "$ROOT/deploy/caddy/sites/console.caddy" ] && F="$F -f docker-compose.console-edge.yml"
+ # ...and the one that puts it in front of the PhotonID directory (account.photonind.com), likewise.
+ [ -f "$ROOT/deploy/caddy/sites/directory.caddy" ] && F="$F -f docker-compose.directory-edge.yml"
++# ...and the one that puts it in front of PhotonVox (vox.photonind.com), likewise.
++[ -f "$ROOT/deploy/caddy/sites/vox.caddy" ] && F="$F -f docker-compose.vox-edge.yml"
+ pb() { ( cd "$ROOT" && docker compose $F "$@" ); }
+ pid() { ( cd "$ID" && docker compose "$@" ); }
+ healthy() { # <pb|pid> <service>: wait for its health check

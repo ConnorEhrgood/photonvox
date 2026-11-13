@@ -18,7 +18,7 @@ location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps sti
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
 | GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
 | Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1–0.5 done 2026-11-13** (skeleton; inventory scripts, run once by the operator; API on the directory fake; web shell; compose and smoke). **Ahead of order, because it needs no resources: Step 3's document, its validation and the compiler to an engine plan** (no FusionPBX writes: those wait for the write-path spike) |
-| Staging instance, PhotonVox VPS | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1); the adapter's write role on staging (GATE 3a, staging part) and the adapter itself built (Step 3). VPS: does not exist (GATE 1a) |
+| Staging instance, production host | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1); the adapter's write role on staging (GATE 3a, staging part) and the adapter itself built (Step 3). Production: the shared Photon host (decision 18, 2026-11-13); the first deploy prepared and rehearsed, not run (docs/DEPLOY.md, GATE 1a) |
 
 **Dev ports** (they collide with no other agent): web **5183**, API **8113**.
 
@@ -95,7 +95,7 @@ photonvox/
   engine/       staging instance build notes and scripts
   deploy/       caddy/, compose overlays, backup hooks
   scripts/      test-all.sh, remote-test.sh, dev-tools.sh, inventory/ (read-only SQL for the live engine)
-  docs/         ARCHITECTURE.md, BUILD-GUIDE.md, BUILD-LOG.md, DEV.md, SPIKES.md, ENGINE.md, GDMS.md, OPERATIONS.md (from Step 1)
+  docs/         ARCHITECTURE.md, BUILD-GUIDE.md, BUILD-LOG.md, DEV.md, SPIKES.md, ENGINE.md, DEPLOY.md, GDMS.md, OPERATIONS.md (from Step 1)
   (phase A)     packages/calling/, gateway/, apps/mobile/, apps/desktop/, contract/calling/
   docker-compose.yml, docker-compose.test.yml, Makefile, .env.example
 ```
@@ -196,14 +196,19 @@ answered the decisions.
 
 ### Step 1: instances and the live engine, read-only
 
-Needs **GATE 1a** (the PhotonVox VPS, a `deploy` user, DNS for `vox.` and `api.vox.photonind.com`), **GATE 1b** (the directory in production,
-`vox` switchable, organizations for the live customers) and **GATE 1c** (a read-only database role for PhotonVox on the live engine, its
-`pg_hba` line, iptables rule and mgmtnet grant: a production change, copying the `photon_ro` pattern, columns limited to non-secret ones).
+Needs **GATE 1a** (the first deploy on the shared Photon host, docs/DEPLOY.md: DNS for `vox.` and `api.vox.photonind.com` to that host, the
+PhotonID application, the PhotonBoard change that keeps the proxy on `vox-edge`, the backup and watcher lines, and the go-ahead for the host
+steps), **GATE 1b** (the directory in production, `vox` switchable, organizations for the live customers) and **GATE 1c** (a read-only
+database role for PhotonVox on the live engine and its `pg_hba` line: a production change, copying the `photon_ro` pattern, columns limited to
+non-secret ones; the iptables rule and the mgmtnet grant already exist for the host's overlay address 10.2.1.5, so neither changes).
 
 - `pbx_instance` registry (Platform → Instances): the staging instance and the live one, with health from vox-agent (staging) or the shim
-  (live, until vox-agent is installed there in Step 2).
+  (live, until vox-agent is installed there in Step 2). The shim accepts one bearer token, PhotonConsole's: PhotonVox reading it needs that
+  token in its `.env` too, or a second token in the shim (a change on the live engine). Connor's choice.
+- The live instance is **monitored only**: Apply (upstreams, mail) and publishing are refused for it.
 - Adopt each live domain as a **monitored-only** phone system linked to its organization: extensions, numbers, registrations, call history.
-- First production deploy by `scripts/deploy.sh`; `docs/OPERATIONS.md`; the database in the nightly backup and the watch manifest.
+- First production deploy by `scripts/deploy.sh` (written and rehearsed 2026-11-13, docs/DEPLOY.md); `docs/OPERATIONS.md`; the database in
+  the nightly backup and the containers in the host's watcher (the PhotonBoard change).
 
 **Done when:** the live domains appear with data matching FusionPBX's own screens, checked line by line; nothing was written to the engine.
 **GATE 1.**
@@ -466,9 +471,9 @@ R3 adds texting and chat to the app (one conversation model with the web app).
 | 0b | ~~Running the inventory script~~ done 2026-11-13 (ARCHITECTURE §17a); a second run for the outbound-route classification | the route question |
 | 0c | A GDMS API Developer key, an API user, a staging GDMS organization | GDMS spike |
 | 0d | Two boxed Grandstream phones of the models Photon will stock | zero-touch and barcode spikes |
-| 1a | The PhotonVox VPS, a `deploy` user, DNS | first deploy |
+| 1a | The first deploy on the shared Photon host (decision 18): DNS, the PhotonID application, the PhotonBoard change (`deploy/proposals-photonboard.patch`), the go-ahead for docs/DEPLOY.md's host steps | first deploy |
 | 1b | The directory in production, `vox` switchable, the live customers' organizations | Step 1 |
-| 1c | PhotonVox's read-only role on the live engine | Step 1 adoption |
+| 1c | PhotonVox's read-only role on the live engine: `engine/live/gate-1c.sh`, the exact commands in docs/DEPLOY.md (rehearsed on staging) | Step 1 adoption |
 | 2 | Each production change of Step 2 | Step 2 |
 | 3a | The adapter's write role on the staging instance | Step 3 |
 | 3b | How HTC validates and registers emergency addresses (answered: by hand per number, decision 31); the first templates | Step 3 |

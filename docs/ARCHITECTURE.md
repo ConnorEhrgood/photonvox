@@ -45,7 +45,7 @@ the row below is the decided version. Decisions 29 (call blocking), 30 (text-to-
 | 15 | **Phone users are PhotonVox's own records** (name, extension, site, email), linked to a PhotonID person only if they will sign in. Roles for people who sign in: owner, admin, user (supervisor arrives with call queues) | Building a phone system for 30 people must not mean 30 PhotonID invitations | 6, 7 |
 | 16 | **Today's live customers stay as they are in R1** (monitored, not managed by PhotonVox) and are taken over in R2 with no downtime | R1 builds new phone systems; nothing risks the live ones until the builder is proven | 17 |
 | 17 | **Toll-fraud defaults on every organization, applied to the live engine first**: international and premium off, a daily spend limit that stops outbound calls (never 911), no outside dialing from voicemail | The largest financial risk in a phone system | 15 |
-| 18 | **PhotonVox's cloud (API, web app, worker) on its own small VPS** (Misaka, Ashburn, 2 vCPU / 4 GB). *Costs money* | Calls never depend on the app; it should not share a failure with PhotonID or PhotonGuard | 16 |
+| 18 | **PhotonVox's cloud (API, web app, worker, its own Postgres) on the shared Photon host** (Vultr, `photon-infra-a`) beside PhotonID, the directory, PhotonConsole and PhotonBoard (decided by Connor 2026-11-13, replacing "its own small VPS"): its own compose project, database and memory ceilings, behind the shared Caddy as the directory and PhotonConsole are; `vox.` and `api.vox.photonind.com` point at that host. **It moves to its own VPS when there are paying customers or the host gets tight.** The PBX engines stay in the colo | Calls never depend on the app, so sharing a host risks the screens, not calls; no new server to run or pay for before there are customers; the compose files and Caddy site move unchanged | 16 |
 | 19 | **Redundancy: a warm standby instance at Equinix DC10 in R2**, promoted by a drilled runbook (target 15 minutes). Phones point at names from day one (GDMS holds the server names, so a move is one edit and a push) | Matches the suite's Stage 3; names keep every later move invisible | 16 |
 | 20 | **Build our own branded PhotonVox app** (replaces "white-label softphone first"): one app on iOS, Android, macOS and Windows plus the browser, all on one TypeScript calling engine (React Native on mobile, Electron on desktop). Calls, voicemail, history, contacts, presence, transfer and park now; texting and chat with R3. It rings together with the user's desk phone (same extension) | Connor's direction; one engine means one set of calling bugs, not three | 18a |
 | 21 | **WebRTC with PhotonVox's own signaling**, through a small **calling gateway (`vox-gateway`, Go) beside each FreeSWITCH instance**; FreeSWITCH terminates the media (Opus to the app, G.711 to the PSTN); coturn on each instance for UDP-blocked networks; no separate SBC. Not a native SIP stack (PJSIP or liblinphone) | Same engine as the browser; no GPL or commercial SIP license; no SIP password on any device; encryption and NAT traversal always on | 18a |
@@ -628,7 +628,7 @@ procedure for lawful requests; RLS, tenant-isolation tests on every route, criti
 | **Instance A** (today's engine, then a rebuilt one) | The colo in HTC's central office (Proxmox `py`), on-net with HTC |
 | **More instances** | Added as needed: in the colo, or at Equinix DC10 (Misaka) |
 | **Standby for instance A** (R2) | DC10: FusionPBX's Postgres a streaming replica, files synced, promoted by a runbook (target 15 minutes), drilled quarterly |
-| **PhotonVox app** | Its own small VPS, Misaka Ashburn (decision 18), standalone Caddy like PhotonGuard; reaches instances over mgmtnet |
+| **PhotonVox app** | The shared Photon host (Vultr, decision 18): compose project `photonvox` in `/opt/photon/vox`, its own Postgres and memory ceilings (about 0.7 GB of ceilings, about 190 MB idle), behind the shared Caddy on network `vox-edge`, in the host's nightly encrypted backup and its watcher (docs/DEPLOY.md). Reaches instances over mgmtnet as the host's overlay address (10.2.1.5, PhotonConsole's grant). Its own VPS with paying customers or when the host gets tight |
 | **Staging instance** | A staging LXC in the colo, same versions as production, isolated from production phones. **Connor's rule (2026-11-13): it never uses or reaches the HTC trunk, has no carrier gateways at all, and its outbound SIP to the internet is blocked**; a SIPp "upstream" on LXC 800 stands in for every carrier |
 
 - **Stages** (the suite's): Stage 1 now (backups of each instance's database, configuration and voicemail; a rebuild drilled on staging;
@@ -637,6 +637,11 @@ procedure for lawful requests; RLS, tenant-isolation tests on every route, criti
 - **Before the standby exists, a colo outage stops calls** for phone systems on instance A. The only mitigation before then is at the
   upstream: per-number failover destinations, if HTC offers them (§22). The colo's own single points (one cable, one router, one HTC switch;
   suite OPERATIONS §5.5) make the standby PhotonVox's most important R2 item.
+- **PhotonVox on the shared host** (decision 18): it shares the host's failures (the host, Docker, the proxy) with PhotonID, the directory,
+  PhotonConsole and PhotonBoard, but calls do not depend on it: if the host is down, phones keep calling and integrators wait for the screens.
+  The proxy is never recreated to add PhotonVox (that dropped the directory's network for a minute on 2026-11-13): the proxy joins `vox-edge`
+  with `docker network connect`, the site file spells out its hostnames, and Caddy reloads gracefully; PhotonBoard's overlay keeps it there
+  when the proxy is recreated for other reasons.
 - **Phones point at names:** the GDMS SIP server for each phone system lists the instance's names (`sip-a.<infra>`, `sip-b.<infra>`, DNS SRV
   where the model supports it). Moving a phone system or failing over changes DNS or one GDMS SIP server entry, and GDMS pushes it.
 - **ASN plan** (suite OPERATIONS §5.6, pending ARIN): SIP and RTP stay unicast per instance with SIP's own failover; Photon's own addresses
@@ -1103,7 +1108,7 @@ since 2026-11-13, §17a.)
 **The business**
 10. Photon's regulatory standing for selling voice (§19): what it holds, what HTC covers, and who to ask.
 11. The first templates to build (which kinds of customers come first), and how many phone systems are expected in year one.
-12. Budget: the PhotonVox VPS; any upstream beyond HTC; the Google Cloud project for speech (decision 30, §8a lists what to create). (Postmark: already on the paid tier.)
+12. Budget: the PhotonVox VPS later (decision 18: with paying customers); any upstream beyond HTC; the Google Cloud project for speech (decision 30, §8a lists what to create). (Postmark: already on the paid tier.)
 
 **The PhotonVox app** (phase A, §18a)
 13. Photon's legal entity name and its **D-U-N-S number** (both stores' organization accounts need them; getting one can take weeks). Does Photon
@@ -1130,7 +1135,7 @@ since 2026-11-13, §17a.)
 - **§5 role table:** PhotonVox: owner, admin, user (supervisor later); site-limitable all but owner.
 - **§7:** PhotonVox → PhotonConsole feed, replacing "FusionPBX over mgmtnet" once PhotonConsole moves to it; PhotonVox ↔ GDMS (outbound API
   and push callbacks).
-- **§10:** the PhotonVox VPS; instances in the colo and later DC10.
+- **§10:** PhotonVox on the shared Photon host, its own VPS later (decision 18); instances in the colo and later DC10.
 - **§11 roadmap:** phase **V1** = PhotonVox R1 (BUILD-GUIDE Steps 0–6), after D1; phase **VA** = the PhotonVox app (BUILD-GUIDE phase A), in R2.
 - **§2 / release keys:** the PhotonVox app's Play upload key, App Store Connect API key, APNs key and FCM service account join the list of
   release keys kept in `~/keys`, Bitwarden and one other place.

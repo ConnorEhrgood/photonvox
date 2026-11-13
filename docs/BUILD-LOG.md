@@ -338,3 +338,23 @@ A review of the document, compiler, adapter, vox-agent and the routes (an advers
   variable's carry-through, `upgrade.php --defaults` across domains, the agent secret readable by www-data).
 - Tests: the API suite and critical modules at 100% (policy, emergency, the adapter), web 140, vox-agent 29; the staging proofs (69) and the
   build test (31) pass with the fixes.
+
+## 2026-11-13: hosting on the shared Photon host (decision 18 replaced), the first deploy prepared (not run)
+
+- **Connor's decision:** PhotonVox's cloud runs on the Vultr host beside PhotonID, the directory, PhotonConsole and PhotonBoard, its own
+  compose project, database and memory ceilings, behind the shared Caddy; its own VPS with paying customers or when the host gets tight.
+  ARCHITECTURE decision 18 and §16, BUILD-GUIDE GATE 1a updated.
+- **Prepared:** `docker-compose.prod.yml` (no host ports, `vox-edge` with the aliases `vox-api` and `vox-web`, ceilings 704 MB in all), the
+  web image (unprivileged nginx with its CSP, as the directory's), `deploy/caddy/vox.caddy` (hostnames spelled out for a graceful reload),
+  `scripts/deploy.sh`, docs/DEPLOY.md (the exact first-deploy commands and what needs Connor), and `deploy/proposals-photonboard.patch` for
+  PhotonBoard (the proxy overlay that keeps `vox-edge` when the proxy is recreated, the deploy and restore scripts including it, the nightly
+  backup's `vox-db.dump.enc` and `vox/.env`, the watcher's containers). Read-only on the host to prepare it: its containers, networks, memory,
+  the Caddy files, the backup and watcher scripts.
+- **Rehearsed on LXC 800** (`scripts/rehearse-deploy.sh`, 20 checks, everything removed afterwards): the proxy stand-in joined `vox-edge` and
+  reloaded without a restart while another site kept answering. Idle use about 190 MB.
+- **Found on the way:** the web app linked `@photon/ui` from a sibling folder, which an image built from `web/` cannot see: the stylesheets
+  and logo are now vendored (photon-ui's `sync-vendored.mjs --css --base`), as the directory does. The API now trusts `X-Forwarded-For` from
+  private addresses (`--proxy-headers`), or every request behind the proxy would share one sign-in throttle.
+- **GATE 1c** written as `engine/live/gate-1c.sh` and `gate-1c.sql` (check, apply, verify, undo; a column-limited read-only role, one
+  `pg_hba` line beside PhotonConsole's; no iptables or mgmtnet change, since the host's overlay address is already allowed). Rehearsed on
+  staging with a stand-in for photon_ro's line (13 checks; staging's `pg_hba` restored byte for byte afterwards). Not run on the live engine.

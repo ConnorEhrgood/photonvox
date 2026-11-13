@@ -1,0 +1,251 @@
+/* GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. */
+/* Generic primitives, prefixed `ph-` so they can coexist with an app's own classes
+   (PhotonConsole's legacy classes are unprefixed and migrate to these over time). Documented in ../DESIGN.md. */
+
+/* --- App frame: sidebar + content (see shell/AppShell.tsx). On phones the sidebar becomes a drawer. --- */
+.ph-app { display: grid; grid-template-columns: 15rem minmax(0, 1fr); min-height: 100vh; }
+.ph-app-body { min-width: 0; display: flex; flex-direction: column; }
+.ph-main { padding: 1.5rem; flex: 1; width: 100%; max-width: var(--content-max); margin: 0 auto; }
+.ph-main h1 { margin: 0; font-size: var(--fs-xl); }
+.ph-app-banner { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: 1.25rem 1.5rem 0; }
+.ph-app-banner .ph-banner { margin-bottom: 0; }
+
+.ph-sidebar {
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+  background: var(--surface); border-right: 1px solid var(--border);
+}
+.ph-sidebar-head { padding: 1rem 1rem 0.75rem; }
+.ph-sidebar-switcher { padding: 0 0.75rem 0.5rem; }
+.ph-sidebar-switcher .ph-input, .ph-sidebar-switcher select { width: 100%; }
+.ph-sidebar-nav { flex: 1; overflow-y: auto; padding: 0.25rem 0.5rem 0.75rem; }
+.ph-nav-group + .ph-nav-group { margin-top: 0.25rem; }
+.ph-nav-group-label {
+  padding: 0.9rem 0.75rem 0.35rem; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.ph-nav-item {
+  display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0.75rem; border-radius: var(--radius);
+  color: var(--text-dim); text-decoration: none; font-size: 0.92rem;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.ph-nav-item svg { flex: none; }
+.ph-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-nav-item:hover { color: var(--text); background: var(--surface-raised); }
+/* The page you are on: a soft accent pill. (The coloured left bar is reserved for status: see .ph-edge.) */
+.ph-nav-item.active { color: var(--text); background: var(--accent-soft); }
+.ph-nav-item.active svg { color: var(--accent); }
+
+.ph-sidebar-foot { border-top: 1px solid var(--border); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.ph-sidebar-status { padding: 0.25rem 0.5rem; }
+
+.ph-account { position: relative; }
+.ph-account-btn {
+  display: flex; align-items: center; gap: 0.65rem; width: 100%; padding: 0.5rem 0.6rem; text-align: left;
+  background: none; border: none; border-radius: var(--radius); color: var(--text-dim);
+}
+.ph-account-btn:hover, .ph-account-btn[aria-expanded="true"] { background: var(--surface-raised); color: var(--text); }
+.ph-avatar {
+  flex: none; width: 1.9rem; height: 1.9rem; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 0.85rem;
+}
+.ph-account-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.ph-account-text b { color: var(--text); font-size: 0.88rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-account-text small { font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-menu {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 0.35rem); z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-md); padding: 0.25rem; display: flex; flex-direction: column;
+}
+.ph-menu-item {
+  display: block; width: 100%; text-align: left; padding: 0.5rem 0.65rem; border: none; background: none;
+  border-radius: var(--radius-sm); color: var(--text); font-size: 0.9rem; text-decoration: none;
+}
+.ph-menu-item:hover { background: var(--surface-raised); color: var(--text); }
+
+.ph-topbar { display: none; }
+.ph-topbar .ph-btn-ghost { color: var(--text); }
+.ph-scrim { display: none; }
+@media (max-width: 900px) {
+  .ph-app { display: block; }
+  .ph-topbar {
+    display: flex; align-items: center; gap: 0.5rem; position: sticky; top: 0; z-index: 70;
+    padding: 0.5rem 0.75rem; background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .ph-sidebar {
+    position: fixed; z-index: 90; top: 0; bottom: 0; left: 0; width: min(18rem, 85vw); height: auto;
+    transform: translateX(-100%); visibility: hidden;
+    transition: transform 180ms var(--ease), visibility 0s linear 180ms;
+  }
+  .ph-sidebar[data-open] { transform: none; visibility: visible; box-shadow: var(--shadow-lg); transition: transform 180ms var(--ease); }
+  .ph-scrim { display: block; position: fixed; inset: 0; z-index: 80; background: rgba(0, 0, 0, 0.55); }
+  .ph-main { padding: 1rem; }
+  .ph-app-banner { padding: 1rem 1rem 0; }
+}
+
+/* Product mark: the Photon ring, then the product's name. The name is text, so it reads the same at any size. */
+.ph-brand {
+  display: inline-flex; align-items: center; gap: 0.5rem; color: var(--text); text-decoration: none;
+  font-size: 1.05rem; font-weight: 600; letter-spacing: 0.01em;
+}
+.ph-brand:hover { color: var(--text); }
+.ph-brand svg { display: block; }
+
+/* --- Page header: a title and its actions --- */
+.ph-page-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.ph-page-header h2 { margin: 0; font-size: var(--fs-lg); }
+.ph-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+
+/* --- Card --- */
+.ph-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.25rem;
+}
+.ph-card-link { color: inherit; text-decoration: none; display: block; }
+.ph-card-link:hover .ph-card, .ph-card-link:focus-visible .ph-card { border-color: var(--accent); }
+
+/* --- Buttons --- */
+.ph-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  background: var(--accent-strong); color: var(--on-accent); border: 1px solid transparent; border-radius: var(--radius);
+  padding: 0.55rem 1rem; font-size: 0.95rem; font-weight: 600; line-height: 1.25; text-decoration: none;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.ph-btn:hover:not(:disabled) { background: var(--accent-strong-hover); color: var(--on-accent); }
+.ph-btn:disabled, .ph-btn[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.ph-btn-secondary {
+  background: var(--surface-raised); color: var(--text); border-color: var(--border);
+}
+.ph-btn-secondary:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.ph-btn-ghost { background: transparent; color: var(--text-dim); }
+.ph-btn-ghost:hover:not(:disabled) { background: var(--surface-raised); color: var(--text); }
+.ph-btn-danger { background: var(--danger-strong); color: var(--on-danger); }
+.ph-btn-danger:hover:not(:disabled) { background: var(--danger-strong-hover); color: var(--on-danger); }
+.ph-btn-sm { padding: 0.3rem 0.65rem; font-size: 0.85rem; }
+.ph-btn-block { display: flex; width: 100%; }
+/* Text that acts like a button (Sign out, Dismiss): no box, underlined, quiet. */
+.ph-link-button { background: none; border: none; color: var(--text-dim); text-decoration: underline; padding: 0; font-size: 0.9rem; }
+.ph-link-button:hover { color: var(--text); }
+
+/* --- Form fields --- */
+.ph-field { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.75rem; }
+.ph-field > label { font-size: 0.85rem; color: var(--text-dim); }
+.ph-input {
+  background: var(--surface-raised); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  color: var(--text); padding: 0.55rem 0.65rem; font-size: 0.95rem; max-width: 100%;
+}
+.ph-input::placeholder { color: var(--text-dim); opacity: 0.8; }
+.ph-input:hover:not(:disabled) { border-color: var(--text-dim); }
+.ph-input:focus { outline: var(--focus-ring); outline-offset: -1px; border-color: var(--accent); }
+.ph-input:disabled { opacity: 0.6; cursor: not-allowed; }
+.ph-input[aria-invalid="true"] { border-color: var(--danger); }
+.ph-check { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; accent-color: var(--accent-strong); }
+.ph-error { color: var(--danger); font-size: 0.85rem; margin-top: 0.75rem; }
+.ph-hint { color: var(--text-dim); font-size: 0.85rem; }
+
+/* --- Badges: a soft tint of the status colour --- */
+.ph-badge {
+  display: inline-flex; align-items: center; gap: 0.35rem; border-radius: var(--radius-pill);
+  padding: 0.12rem 0.6rem; font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+  color: var(--text-dim); background: var(--surface-raised); border: 1px solid var(--border);
+}
+.ph-badge-info { color: var(--sev-info); background: color-mix(in srgb, var(--sev-info) 16%, transparent); border-color: color-mix(in srgb, var(--sev-info) 45%, transparent); }
+.ph-badge-warning { color: var(--sev-warning); background: color-mix(in srgb, var(--sev-warning) 16%, transparent); border-color: color-mix(in srgb, var(--sev-warning) 45%, transparent); }
+.ph-badge-error { color: var(--sev-error); background: color-mix(in srgb, var(--sev-error) 16%, transparent); border-color: color-mix(in srgb, var(--sev-error) 45%, transparent); }
+.ph-badge-ok { color: var(--sev-ok); background: color-mix(in srgb, var(--sev-ok) 14%, transparent); border-color: color-mix(in srgb, var(--sev-ok) 45%, transparent); }
+
+/* --- Banner: a message across the page about the whole page (billing, an unconfirmed address, an outage) --- */
+.ph-banner {
+  border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--radius);
+  padding: 0.65rem 0.9rem; margin-bottom: 1rem; background: var(--surface);
+}
+.ph-banner-info { border-color: var(--sev-info); }
+.ph-banner-warning { border-color: var(--sev-warning); background: color-mix(in srgb, var(--sev-warning) 8%, var(--surface)); }
+.ph-banner-error { border-color: var(--sev-error); background: color-mix(in srgb, var(--sev-error) 8%, var(--surface)); }
+.ph-banner-ok { border-color: var(--sev-ok); }
+
+/* --- Modal --- */
+.ph-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 4rem 1rem; overflow-y: auto; z-index: 100;
+  animation: ph-fade var(--dur) var(--ease);
+}
+.ph-modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); padding: 1.5rem; width: 100%; max-width: 520px;
+  animation: ph-rise 180ms var(--ease);
+}
+.ph-modal-wide { max-width: 760px; }
+.ph-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.ph-modal-header h2 { margin: 0; font-size: 1.15rem; }
+.ph-modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }
+@keyframes ph-fade { from { opacity: 0; } }
+@keyframes ph-rise { from { opacity: 0; transform: translateY(8px); } }
+
+/* --- Table --- */
+.ph-table-wrap { overflow-x: auto; }
+.ph-table { width: 100%; border-collapse: collapse; }
+.ph-table th, .ph-table td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
+.ph-table th { color: var(--text-dim); font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.ph-table tbody tr:hover { background: color-mix(in srgb, var(--surface-raised) 60%, transparent); }
+.ph-table .ph-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* --- Tabs (within a page) --- */
+.ph-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin-bottom: 1.25rem; flex-wrap: wrap; }
+.ph-tabs button, .ph-tabs a {
+  background: none; border: none; color: var(--text-dim); padding: 0.6rem 0.9rem; font-size: 0.92rem; text-decoration: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.ph-tabs button:hover, .ph-tabs a:hover { color: var(--text); }
+.ph-tabs .active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* --- Stats: a number and what it counts. Give one a status with .ph-edge-* --- */
+.ph-stat-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 1.5rem; }
+.ph-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; }
+.ph-stat b { display: block; font-size: var(--fs-2xl); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ph-stat span { color: var(--text-dim); font-size: 0.85rem; }
+a.ph-stat { display: block; color: inherit; text-decoration: none; }
+a.ph-stat:hover { border-color: var(--accent); }
+a.ph-stat.ph-edge:hover { border-color: var(--accent); }
+
+/* --- Empty state: say what goes here and how to make the first one --- */
+.ph-empty { border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 2rem; color: var(--text-dim); text-align: center; }
+.ph-empty > :first-child { margin-top: 0; }
+.ph-empty > :last-child { margin-bottom: 0; }
+
+/* --- Loading --- */
+.ph-spinner {
+  display: inline-block; width: 1em; height: 1em; vertical-align: -0.15em; border-radius: 50%;
+  border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: ph-spin 0.7s linear infinite;
+}
+.ph-skeleton { background: linear-gradient(90deg, var(--surface-raised), var(--surface-hover), var(--surface-raised)); background-size: 200% 100%; animation: ph-shimmer 1.4s linear infinite; border-radius: var(--radius-sm); }
+@keyframes ph-spin { to { transform: rotate(360deg); } }
+@keyframes ph-shimmer { to { background-position: -200% 0; } }
+
+/* --- Sign-in and other centred single-card pages --- */
+.ph-auth { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.ph-auth .ph-card { width: 100%; max-width: 380px; padding: 2rem; box-shadow: var(--shadow-md); }
+.ph-auth-logo { display: block; height: 56px; width: auto; margin: 0 0 1rem; }
+.ph-auth h1 { margin: 0 0 0.35rem; font-size: var(--fs-xl); }
+.ph-divider { display: flex; align-items: center; gap: 0.75rem; color: var(--text-dim); font-size: 0.8rem; margin: 0.9rem 0; }
+.ph-divider::before, .ph-divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+
+/* --- Key / value list --- */
+.ph-kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.25rem; margin: 0; }
+.ph-kv dt { color: var(--text-dim); }
+.ph-kv dd { margin: 0; word-break: break-word; }
+
+/* --- Small helpers --- */
+.ph-muted { color: var(--text-dim); }
+.ph-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ph-modal:focus { outline: none; }
+
+/* --- Status edge (keep this LAST: it sets border-left on things whose own rules set `border`, and a later rule wins) ---
+   The coloured bar down the left of a tile or row: the way PhotonConsole's dashboards show status at a glance. Add it to anything
+   that has a border (a card, a tile, a list row) with a status; without a status the bar is just the border colour.
+   Geometry is fixed (3px, left only) so it looks the same everywhere. */
+.ph-edge { border-left: 3px solid var(--border); }
+.ph-edge-info { border-left-color: var(--sev-info); }
+.ph-edge-warning { border-left-color: var(--sev-warning); }
+.ph-edge-error { border-left-color: var(--sev-error); }
+.ph-edge-ok { border-left-color: var(--sev-ok); }

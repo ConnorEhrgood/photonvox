@@ -13,4 +13,4 @@ COPY photonid_directory_client ./photonid_directory_client
 RUN echo 'vox:x:10001:10001:vox:/nonexistent:/usr/sbin/nologin' >> /etc/passwd && echo 'vox:x:10001:' >> /etc/group
 USER 10001:10001
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header", "--proxy-headers"]

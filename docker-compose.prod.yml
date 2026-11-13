@@ -1,0 +1,42 @@
+# PhotonVox on the shared Photon host (Vultr, `ssh prod`, /opt/photon/vox), behind the Caddy that PhotonBoard runs: that one proxy terminates TLS for
+# every Photon service on the host (decision 18, docs/DEPLOY.md). Its own compose project, database and memory ceilings; it moves to its own VPS when
+# there are paying customers or the host gets tight.
+#
+#   docker network create --label photon.product=vox vox-edge     # once; the proxy joins it with `docker network connect` (never recreated: DEPLOY.md)
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Nothing but the proxy reaches the API and the web server: they publish no host ports, and are known on vox-edge as vox-api and vox-web. The proxy
+# must address them by these aliases, never the bare service names: Compose also adds `api` and `web` as aliases on every network a service joins,
+# and another product's `api` shares the proxy's other networks (found the hard way 2026-10-28).
+#
+# Memory: the host has about 2 GB available (2026-11-13) and PhotonVox's expected use is about 300 MB; the ceilings below add up to 0.9 GB.
+services:
+  db:
+    mem_limit: 256m
+    memswap_limit: 384m
+    # Sized for a small database on a shared host: these override what the image's first-start tuning wrote for the whole host's memory.
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "effective_cache_size=160MB", "-c", "work_mem=4MB", "-c", "maintenance_work_mem=32MB", "-c", "max_connections=40"]
+  migrate:
+    mem_limit: 192m
+  api:
+    ports: !reset []
+    mem_limit: 256m
+    memswap_limit: 256m
+    networks:
+      default: {}
+      edge:
+        aliases: [vox-api]
+  worker:
+    mem_limit: 160m
+  web:
+    ports: !reset []
+    mem_limit: 32m
+    networks:
+      default: {}
+      edge:
+        aliases: [vox-web]
+
+networks:
+  edge:
+    external: true
+    name: vox-edge

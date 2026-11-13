@@ -1,5 +1,6 @@
-# PhotonVox's stack: the database, a one-shot migration, the API and the worker. Step 0 shape: images are built from this repo; the release flow
-# (images built once, pushed by digest, signed) and the web container behind Caddy come with the first deploy (BUILD-GUIDE Step 1, suite OPERATIONS §2.2).
+# PhotonVox's stack: the database, a one-shot migration, the API, the worker and the web app. Images are built from this repo; the release flow
+# (images built once, pushed by digest, signed) comes later (suite OPERATIONS §2.2). In production the shared proxy fronts the API and the web app
+# (docker-compose.prod.yml, docs/DEPLOY.md).
 #
 #   cp .env.example .env      # fill in real values
 #   docker compose up -d --build
@@ -62,6 +63,8 @@ services:
       POSTGRES_PASSWORD: ""          # the owner's password is not the API's to hold (blank here wins over env_file)
       MIGRATE_DATABASE_URL: ""
       ENVIRONMENT: ${ENVIRONMENT:-production}
+      # uvicorn trusts X-Forwarded-For only from these (the proxy, on a private Docker network), so the sign-in throttle sees the real client.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
     ports:
       - "127.0.0.1:${API_PORT:-8113}:8000"
     depends_on:
@@ -107,6 +110,32 @@ services:
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
+    logging: *logging
+
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8113}
+        VITE_OIDC_ISSUER: ${VITE_OIDC_ISSUER:-}
+        VITE_OIDC_CLIENT_ID: ${VITE_OIDC_CLIENT_ID:-}
+        VITE_OIDC_AUDIENCE_PROJECT: ${VITE_OIDC_AUDIENCE_PROJECT:-}
+        VITE_DIRECTORY_APP_URL: ${VITE_DIRECTORY_APP_URL:-}
+        BUILD_SHA: ${BUILD_SHA:-unknown}
+    image: photonvox-web:dev
+    restart: unless-stopped
+    mem_limit: 48m
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5183}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]          # nginx-unprivileged keeps its pid and temp files here
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     logging: *logging
 
 volumes:
