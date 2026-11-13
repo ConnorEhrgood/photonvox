@@ -1,8 +1,44 @@
 # PhotonVox in production: the first deploy
 
-Prepared 2026-11-13, **not run**. Nothing here has touched production; every production step below needs Connor's go-ahead. Hosting is
-decision 18 (ARCHITECTURE §16): PhotonVox's cloud runs on the shared Photon host until there are paying customers or the host gets tight; the
-PBX engines stay in the colo.
+Prepared 2026-11-13 and **deployed the same evening with Connor's go-ahead** (see "Deployed" below). Hosting is decision 18 (ARCHITECTURE
+§16): PhotonVox's cloud runs on the shared Photon host until there are paying customers or the host gets tight; the PBX engines stay in the
+colo. GATE 1c (the live engine's read-only role) is still **not run**.
+
+## Deployed (2026-11-13, commit ba15639)
+
+Done as one phase: b1 applied the PhotonBoard change (photonboard fea8028, 2ee8ad3) and put the overlay and the new deploy, restore, backup
+and watch scripts on the host without recreating the proxy; id1 registered PhotonVox in PhotonID (project "PhotonVox", project ID
+399485154214543363 = `OIDC_AUDIENCE` = `VITE_OIDC_AUDIENCE_PROJECT`; client 399485154533310467; redirect `/auth/callback`; post-logout
+`/auth/signed-out` and `/`) and connected it to the directory (production directory 9c6cad9 with `vox`), appending its seven keys to the
+host's `.env`; then the steps below, in order.
+
+| Check | Result |
+|---|---|
+| Stack | `api`, `db`, `worker`, `web` running and healthy, `migrate` exited 0; no host ports |
+| Directory | the worker's first sync answered 200 and it published the role catalog (`PUT /v1/products/vox/roles` 200) |
+| Proxy | joined `vox-edge` with `docker network connect`; `caddy validate` then `caddy reload`; **not restarted** (still started 20:43:37Z) and kept its five networks; account.photonind.com answered 24 of 24 requests during the reload |
+| Certificates | both obtained on the first attempt (DNS checked on Google's and Cloudflare's resolvers first) |
+| Public | `vox.photonind.com` 200 with its CSP, deep links 200; `api.vox.photonind.com/healthz` 200; CORS for the app's origin; the directory's notice address refuses an unsigned request (401) |
+| Other sites | PhotonID, the directory (app and API), Console (app and API), Board (portal and API): all 200 |
+| Backup | run once by hand (22:13 UTC, 21 s): `vox-db.dump.enc` 111 KB in it beside the others; `vox/.env` goes into the encrypted secrets by the script's rule (not listable here without the private key) |
+| Watcher | checks PhotonVox's four containers; all running and healthy; its only problem is the host's pending reboot (before this deploy) |
+| Memory | api 76 MB, worker 65 MB, db 62 MB, web 4 MB; host 1710 MB available afterwards |
+
+**Learned:**
+- **Create `.env` immediately before the stack starts.** The watcher keys on `/opt/photon/vox/.env`. The file existed about 15 minutes
+  before the containers did (it was waiting for id1's keys), so the 22:00 run mailed Connor "Container photonvox-… does not exist". The
+  22:15 run sent the recovery.
+- `scripts/deploy.sh` was committed without its execute bit; fixed.
+- The first `deploy.sh` run's public checks fail until the Caddy site exists (TLS alert), as the plan said.
+- An authoritative DNS query from the runner is not reliable (its UDP 53 is intercepted: even known names answer SERVFAIL). Check names
+  with DNS over HTTPS instead.
+
+**Open:**
+- **Nobody can sign in yet.** A person must be known to PhotonVox through the directory, which sends people only for organizations that
+  have `vox` switched on, and none has. Connor is choosing the first organization (Photon's own is the suggestion).
+- PhotonVox reads only `PLATFORM_ADMIN_SUBS` for staff, not the directory's `platform_admin` field. Mapping it is a follow-up.
+- Once the web app moves to the shared ph-auth module, its post-logout becomes `/auth/signed-out`, and id1 drops `/` from the PhotonID app.
+- GATE 1c and Step 1's adoption of the live domains.
 
 ## Where it runs
 

@@ -18,7 +18,7 @@ location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps sti
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
 | GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
 | Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1–0.5 done 2026-11-13** (skeleton; inventory scripts, run once by the operator; API on the directory fake; web shell; compose and smoke). **Ahead of order, because it needs no resources: Step 3's document, its validation and the compiler to an engine plan** (no FusionPBX writes: those wait for the write-path spike) |
-| Staging instance, production host | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1); the adapter's write role on staging (GATE 3a, staging part) and the adapter itself built (Step 3). Production: the shared Photon host (decision 18, 2026-11-13); the first deploy prepared and rehearsed, not run (docs/DEPLOY.md, GATE 1a) |
+| Staging instance, production host | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1); the adapter's write role on staging (GATE 3a, staging part) and the adapter itself built (Step 3). Production: the shared Photon host (decision 18), **deployed 2026-11-13** at vox.photonind.com and api.vox.photonind.com (docs/DEPLOY.md, GATE 1a done); nobody can sign in until an organization has `vox` switched on |
 
 **Dev ports** (they collide with no other agent): web **5183**, API **8113**.
 

@@ -358,3 +358,18 @@ A review of the document, compiler, adapter, vox-agent and the routes (an advers
 - **GATE 1c** written as `engine/live/gate-1c.sh` and `gate-1c.sql` (check, apply, verify, undo; a column-limited read-only role, one
   `pg_hba` line beside PhotonConsole's; no iptables or mgmtnet change, since the host's overlay address is already allowed). Rehearsed on
   staging with a stand-in for photon_ro's line (13 checks; staging's `pg_hba` restored byte for byte afterwards). Not run on the live engine.
+
+## 2026-11-13: the first production deploy (GATE 1a)
+
+- With Connor's go-ahead, as one phase: b1 put PhotonBoard's side on the host (the proxy overlay, and the deploy, restore, backup and
+  watch scripts; photonboard fea8028 and 2ee8ad3), id1 registered PhotonVox in PhotonID and connected it to the directory (its values piped
+  into the host's `.env`), then PhotonVox was deployed (commit ba15639): `scripts/deploy.sh`, the proxy joined `vox-edge` with
+  `docker network connect`, the site added, validated and reloaded gracefully. The proxy was not restarted and the directory answered
+  throughout. Both certificates were issued first time.
+- Checked: every container healthy; the worker synced with the directory and published its role catalog; the API's health, the web app
+  and CORS through the proxy; PhotonID, the directory, Console and Board still answer; a manual backup holds `vox-db.dump.enc`; the watcher
+  checks the four containers. About 210 MB in use; 1.7 GB still available on the host.
+- The watcher mailed Connor once (22:00) because `.env` existed before the containers did, and sent the recovery at 22:15. Next time,
+  create `.env` just before the stack starts (DEPLOY.md, "Learned").
+- Open: nobody can sign in until an organization has `vox` switched on (Connor is choosing; Photon's own is the suggestion); the
+  directory's `platform_admin` field is not mapped yet; GATE 1c is not run, and nothing touched the live engine.
