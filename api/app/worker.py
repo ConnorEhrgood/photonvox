@@ -1,7 +1,8 @@
 """Background jobs. `python -m app.worker` runs them; keep it a single process.
 
 Now: keep the directory copy current (a periodic pull, so a lost notice delays a change and never loses it) and publish our role catalog to the
-directory. Later steps add engine and GDMS status collection, drift checks, the fraud breaker and enrollment retries.
+directory; publish queued phone-system versions (with the post-publish check); look for hand edits on the engines; email open 911 address
+requests to carriers. Later steps add engine and GDMS status collection, the fraud breaker and enrollment retries.
 """
 from __future__ import annotations
 
@@ -11,16 +12,18 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from app import sync
+from app import emergency, sync
 from app.config import settings
 from app.db import SystemSession
 from app.deps import get_directory
+from app.engine import service
 from app.models import utcnow
 
 log = logging.getLogger("photonvox.worker")
 
 TICK_S = 15
 PUBLISH_RETRY_S = 600
+DRIFT_EVERY_S = 300
 HEARTBEAT_FILE = os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/worker.ok")   # the container healthcheck reads its age
 
 
@@ -35,10 +38,22 @@ def run_job(what: str, job: Callable[[Any], Any]) -> Any:
             return None
 
 
-def tick(state: dict, clock: Callable[[], float] = time.monotonic) -> None:
+def engine_jobs(state: dict, now: float, connect: service.Connect = service.connect) -> None:
+    """Publishing comes first and every tick (an integrator is waiting); hand edits every few minutes; carrier requests every tick."""
+    published = run_job("publish", lambda db: service.publish_queued(db, connect))
+    if published:
+        log.info("published %d version(s)", published)
+    run_job("carrier requests", emergency.send_open)
+    if now - state.get("drift", float("-inf")) >= DRIFT_EVERY_S:
+        state["drift"] = now
+        run_job("drift", lambda db: service.check_all_drift(db, connect))
+
+
+def tick(state: dict, clock: Callable[[], float] = time.monotonic, connect: service.Connect = service.connect) -> None:
     """One pass: whatever is due. `state` remembers when each job last ran."""
-    directory = get_directory()
     now = clock()
+    engine_jobs(state, now, connect)
+    directory = get_directory()
     if directory is None:
         return
     if now - state.get("pull", float("-inf")) >= settings.directory_pull_every_s:

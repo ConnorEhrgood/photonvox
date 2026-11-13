@@ -105,12 +105,12 @@ def test_the_emergency_route_needs_no_class_shows_the_emergency_caller_id_and_us
     xml = dp(built(), "photonvox.emergency")["dialplan_xml"]
     assert "toll_allow" not in xml
     assert "effective_caller_id_number=${emergency_caller_id_number}" in xml
-    assert f"sofia/gateway/{GW['htc']}/$1" in xml and GW["upstream-b"] not in xml
+    assert f"sofia/gateway/{GW['htc']}/${{photonvox_dial}}" in xml and GW["upstream-b"] not in xml
 
 
 def test_a_route_bridges_through_each_upstream_in_order():
     xml = dp(built(), "photonvox.international-44")["dialplan_xml"]
-    assert xml.index(f"sofia/gateway/{GW['upstream-b']}/+$1") < xml.index(f"sofia/gateway/{GW['htc']}/+$1")
+    assert xml.index(f"sofia/gateway/{GW['upstream-b']}/") < xml.index(f"sofia/gateway/{GW['htc']}/")
     assert "effective_caller_id_number=${outbound_caller_id_number}" in xml
 
 
@@ -228,3 +228,62 @@ def test_the_cache_list_covers_the_domain_its_users_and_is_sorted_without_repeat
     c = built().cache
     assert "dialplan.k3x9q2.sip.photoninfra.xyz" in c and "directory.100@k3x9q2.sip.photoninfra.xyz" in c
     assert c == sorted(set(c))
+
+
+# ---- the post-publish check's parts ----
+
+def test_the_synthetic_stop_is_first_in_the_domain_and_only_for_synthetic_inbound_calls():
+    r = dp(built(), "photonvox.synthetic")
+    assert r["dialplan_order"] == 1 and r["dialplan_context"] == "k3x9q2.sip.photoninfra.xyz"
+    conds = ET.fromstring(r["dialplan_xml"]).findall("condition")
+    assert (conds[0].get("field"), conds[0].get("expression")) == ("${photonvox_synthetic}", "^inbound$")
+    assert re.match(conds[1].get("expression"), "hours-number-1") is None and re.match(conds[1].get("expression"), "menu-main")
+
+
+def test_every_route_bridges_only_when_the_call_is_not_synthetic():
+    b = built()
+    for name in ("photonvox.emergency", "photonvox.national", "photonvox.international-44"):
+        gate = ET.fromstring(dp(b, name)["dialplan_xml"]).findall("condition")[-1]
+        assert (gate.get("field"), gate.get("expression")) == ("${photonvox_synthetic}", "^$")
+        assert [a.get("application") for a in gate.findall("action")] and all(a.get("application") == "bridge" for a in gate.findall("action"))
+        assert [a.get("application") for a in gate.findall("anti-action")] == ["log", "hangup"]
+    assert re.match("^$", "")          # FreeSWITCH reads an unset variable as empty: a real call always passes
+
+
+def test_detail_rows_mirror_the_gate_in_its_own_group():
+    b = built()
+    uid = dp(b, "photonvox.emergency")["dialplan_uuid"]
+    rows = [r for r in b.rows["v_dialplan_details"] if r["dialplan_uuid"] == uid]
+    assert {r["dialplan_detail_group"] for r in rows if r["dialplan_detail_tag"] == "anti-action"} == {1}
+    assert [r["dialplan_detail_type"] for r in rows if r["dialplan_detail_group"] == 1][0] == "${photonvox_synthetic}"
+
+
+def test_the_checks_cover_every_number_911_and_933_with_each_prefix_and_a_premium_number():
+    checks = fusionpbx.checks(plan(), TARGET)
+    inbound = {c["number"]: c["expect"] for c in checks if c["kind"] == "inbound"}
+    assert inbound == {"+17245550100": ["reached *999901", "reached menu-main"], "+17245550110": ["reached group-annex"],
+                       "+17245550123": ["reached 102"]}
+    routes = {c["number"]: c["expect"] for c in checks if c["kind"] == "route"}
+    assert set(routes) == {"911", "933", "9911", "9933", "19005550100"}
+    assert routes["9911"] == [f"emergency {GW['htc']} 911"] and routes["19005550100"] == ["blocked premium"]
+
+
+def test_with_premium_let_through_by_staff_the_check_does_not_expect_a_block():
+    from app.compiler.compile import Context, compile_plan
+    from app.document.model import PhoneSystem as Doc
+    from tests.unit.test_compiler import CTX
+    d = copy.deepcopy(SAMPLE)
+    d["calling"]["blocking"] = {"allow": ["premium"]}
+    p = compile_plan(Doc.model_validate(d), Context(**{**CTX.__dict__, "premium_allowed": True}))
+    assert "19005550100" not in {c["number"] for c in fusionpbx.checks(p, TARGET)}
+
+
+@pytest.mark.parametrize("name,send", [("photonvox.emergency", "$1"), ("photonvox.national", "+1$1"), ("photonvox.international-44", "+$1")])
+def test_the_number_to_send_is_captured_in_the_condition_that_matched_it(name, send):
+    """$1 is the capture of the condition an action sits in. The bridges sit in the synthetic gate (no capture), so the number to send is set in
+    the dialed number's condition and the bridges use the variable (a literal $1 reached the upstream on staging before this)."""
+    conds = ET.fromstring(dp(built(), name)["dialplan_xml"]).findall("condition")
+    matched = next(c for c in conds if c.get("field") == "destination_number")
+    assert ("set", f"photonvox_dial={send}") in [(a.get("application"), a.get("data")) for a in matched.findall("action")]
+    gate = conds[-1]
+    assert all(a.get("data").endswith("/${photonvox_dial}") and "$1" not in a.get("data") for a in gate.findall("action"))

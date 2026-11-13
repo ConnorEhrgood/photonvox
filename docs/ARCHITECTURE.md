@@ -24,7 +24,7 @@ Suite-wide topics (PhotonID and organizations, the rules for working on Photon, 
 
 **Decisions 1–28 approved as recommended ("Everything else looks quite good"), except decision 23, which Connor changed (the native handoff
 on cellular devices, automatic location elsewhere);
-the row below is the decided version. Decision 29 (call blocking) was added and approved the same day.** The BUILD-GUIDE follows them. Changing one means changing it here first, with Connor.
+the row below is the decided version. Decisions 29 (call blocking), 30 (text-to-speech) and 31 (911 addresses per number) were added the same day from Connor's answers.** The BUILD-GUIDE follows them. Changing one means changing it here first, with Connor.
 
 | # | Decision | Why | § |
 |---|---|---|---|
@@ -57,6 +57,8 @@ the row below is the decided version. Decision 29 (call blocking) was added and 
 | 27 | **Builds: Android and Windows on the runner, iOS and macOS on Xcode Cloud** (25 hours a month included; needs the photonvox repo on GitHub), Connor's Mac as the fallback. **Apple Developer Program and Google Play Console as organization accounts, Connor the Account Holder**; Play App Signing with our upload key in `~/keys`; APNs and FCM keys on the gateway hosts and in Bitwarden. *Costs money (Apple $99 a year, Google $25 once, Windows signing a small monthly fee)* | No Mac to buy or keep running; keys held the way PhotonBoard's are | 18a |
 | 28 | **Phase A sits in R2**, first after R1, with its spikes during R1; about **4–5 months** to the stores | It needs R1's instances, numbers and locked 911; nothing in R1 waits for it | 18a |
 | 29 | **Call blocking per organization** (decided 2026-11-13, as Connor asked; §15a): Photon's default list (international until switched on, premium, high-cost Caribbean and other non-US North American codes, satellite and other high-cost ranges) blocked by default; the partner or an admin allows a category or adds and removes numbers and prefixes; compiled as one locked block route right after the emergency routes; 911 and 933 never blocked; Photon keeps the list current suite-wide. The block route, the default list and the page in R1; per-extension overrides and blocked-call alerts with it if small, else R2; inbound blocking (callers, anonymous) in R2, spam scoring later | The riskiest destinations closed for everyone without depending on each extension's call class; the live engine already needed a hand-built version (§17a) | 15a |
+| 30 | **Text-to-speech greetings** (Connor, 2026-11-13: a key feature): menus and messages are spoken from their text, **generated when the phone system is published and stored as files** on the engine (no dependency on the provider when a call comes in); a recorded greeting always overrides. *Provider, recommended pending a listening test on real phones:* **Google Cloud TTS, Chirp 3 HD** (8 kHz mu-law and 16 kHz output directly, an IVR audio profile, US English and Spanish voices, SSML and custom pronunciations, first 1M characters a month free then $30 per million, no logging of the text); runner-up **Azure Neural** ($15 per million, the most phone-ready formats; its code of conduct asks that a synthetic voice be disclosed); **Telnyx** if one vendor matters more (a REST TTS API exists; its Polly and Azure voices cost more than direct). ElevenLabs: most natural, 2–5 times the price, weak SSML on its newest models, OEM terms for resale to check | §8a |
+| 31 | **911 addresses are held per number in PhotonVox and confirmed with the carrier** (Connor, 2026-11-13: Hickory tracks by hand which address each DID is at): every number the organization holds is registered at its site's validated address; a change makes a **carrier request** (for Hickory a clear email, or a ticket number staff record) tracked until Hickory confirms; until then the number shows **unconfirmed** (to the integrator, the customer's admins and Photon staff). A carrier with an API later submits and polls through the same request. *Recommended:* publishing is not held back while a number is unconfirmed (911 still routes, with the address the carrier last confirmed), but staff are alerted daily until it is | §11a |
 
 Dropped from revision 1 (no longer decisions now): Telnyx as the second carrier (replaced by 7), a login per phone (replaced by 13), and the
 R3 items (texting, chat, B2 bucket for recordings), which keep their design in §18 and come back as decisions before their release. Revision 1's
@@ -330,6 +332,24 @@ Integrators set these through screens, never as JSON; the document is what Photo
   or 911/933/988/311-style service codes.
 - **Versioned:** each publish is a version with who and when; "undo" publishes the previous one.
 
+### 8a. Greetings: text-to-speech at publish (decision 30)
+
+A menu's greeting (and any message the plan speaks) is text in the document. At publish, PhotonVox has it spoken once by the text-to-speech
+provider, at the engine's rates (8 kHz mu-law for G.711, 16 kHz for wideband), stores the files with the version and writes them to the engine
+with the rest; the engine plays files and never calls the provider. The audio is keyed by the text, voice and provider, so a republish reuses
+it, and a recorded greeting (uploaded or recorded by phone) overrides it. The staging engine has no speech module, so until this is built a
+menu answers silently (SPIKES §1f). Provider comparison (2026-11-13, list prices; a listening test on real phones decides):
+
+| Provider (voice tier) | Phone formats | Per million characters | Notes |
+|---|---|---|---|
+| Google Cloud TTS, Chirp 3 HD | 8 kHz mu-law, 16 kHz PCM; IVR audio profile | $30 (first 1M a month free); Neural2 $16, Standard $4 | SSML (say-as, phoneme), custom pronunciations; does not log the text; **recommended** |
+| Azure AI Speech, Neural | 8 kHz mu-law/PCM, 16 kHz PCM, G.722 | $15 (HD $22; 0.5M a month free) | mature SSML; code of conduct asks that synthetic voices be disclosed; **runner-up** |
+| Amazon Polly, Neural / Generative | 8 kHz mu-law, 16 kHz PCM | $16 / $30 | full SSML and lexicons; caching and replay allowed |
+| Telnyx TTS (own, Ultra, or Polly/Azure through it) | depends on the voice: Polly and Azure voices at 8/16 kHz | $3 (own) to $48; Polly Neural $24 | one vendor with other Telnyx services; Ultra's formats and output terms not documented |
+| ElevenLabs, Flash / Multilingual | 8 kHz mu-law, 16 kHz PCM | $40 / $80 (credit plans) | most natural; weak SSML on newest models; OEM terms for resale; free plan non-commercial |
+| Deepgram Aura-2; Cartesia Sonic | 8/16 kHz mu-law and PCM | about $30; $38–65 | no SSML documented (Deepgram); not compared further |
+| OpenAI TTS; PlayHT | — | — | OpenAI's speech models close 2027-01-06; PlayHT closed: not candidates |
+
 ---
 
 ## 9. Trunking
@@ -396,6 +416,23 @@ A partner may add its own VoIP trunk (credentials or IP authentication) and make
 - **Never place a real 911 test call** without the PSAP's agreement; 933 and the engine's synthetic check are the tests.
 - With HTC: how emergency records are created and changed (by hand, with what turnaround) and how 911 will be routed after HTC's softswitch
   moves to Ashburn are questions (§22).
+
+### 11a. Numbers' 911 addresses with the carrier (decision 31)
+
+Hickory keeps, by hand, which address each number is at. PhotonVox therefore holds the truth and keeps Hickory in step:
+- **Per number:** `emergency_number` holds each number's address (its site's validated emergency location), the address the carrier last
+  confirmed, and a state: **unconfirmed** (changed, not yet asked), **requested** (asked, waiting), **confirmed**.
+- **After each publish** PhotonVox compares the numbers the organization holds with what is registered: a new number, a number moved to another
+  site or address, a number given up. Any difference becomes one **carrier request** listing each number with its action (add, change, remove)
+  and the full address; an earlier request not yet sent is folded into it.
+- **For Hickory:** the request is sent as a plain email to Hickory's 911 contact (Postmark, from Photon's address, the request id in the
+  subject, one line per number with the address as Hickory needs it), or staff note a ticket number if Hickory prefers its portal. Photon staff
+  see open requests on the Platform page, record Hickory's answer (**confirmed** or **rejected** with a note) and the numbers follow. A request
+  open longer than Hickory's usual turnaround is flagged.
+- **Shown:** the number is marked unconfirmed wherever it appears (numbers list, the site, the phone system's overview) until confirmed, and
+  Photon staff get a daily summary. 911 keeps routing meanwhile (decision 31's recommendation), with the address the carrier last confirmed.
+- **Carriers with an API later:** the same request record is submitted and polled by the carrier's adapter (`app/carriers/`), so only the
+  sending and the confirmation change.
 
 ---
 
@@ -1038,7 +1075,7 @@ since 2026-11-13, §17a.)
 **The business**
 10. Photon's regulatory standing for selling voice (§19): what it holds, what HTC covers, and who to ask.
 11. The first templates to build (which kinds of customers come first), and how many phone systems are expected in year one.
-12. Budget: the PhotonVox VPS; Postmark's paid tier (voicemail to email and alerts); any upstream beyond HTC.
+12. Budget: the PhotonVox VPS; any upstream beyond HTC; the text-to-speech provider (decision 30). (Postmark: already on the paid tier.)
 
 **The PhotonVox app** (phase A, §18a)
 13. Photon's legal entity name and its **D-U-N-S number** (both stores' organization accounts need them; getting one can take weeks). Does Photon

@@ -35,7 +35,7 @@ SHARED_BOX_BASE = 9900          # shared voicemail boxes are 9901, 9902, … (ex
 HANGUP = "photonvox-hangup"     # where "unreachable: none" forwards: a one-line dial plan that hangs up
 
 # FusionPBX's route orders run 100–300 (after its standard dial plans, before call forwarding's loop guard).
-ORDER = {"emergency": 100, "block": 105, "service": 110, "national": 120, "toll_free": 130, "international": 140, "group": 101, "menu": 101,
+ORDER = {"synthetic": 1, "emergency": 100, "block": 105, "service": 110, "national": 120, "toll_free": 130, "international": 140, "group": 101, "menu": 101,
          "hangup": 102, "hours": 300, "inbound": 100}
 # Tables, parents before children: the writer inserts in this order and deletes in reverse.
 TABLES = ("v_extensions", "v_voicemails", "v_ring_groups", "v_ring_group_destinations", "v_ivr_menus", "v_ivr_menu_options", "v_dialplans",
@@ -90,6 +90,30 @@ def build(plan: Mapping[str, Any], target: Target) -> Build:
     return _Builder(plan, target).run()
 
 
+def checks(plan: Mapping[str, Any], target: Target) -> List[Dict[str, Any]]:
+    """The post-publish check (ARCHITECTURE §5): one synthetic call per inbound number (it must reach its outcome; a time condition either of
+    its two) and through the emergency route's selection for 911 and 933 (and with each outside-line prefix), plus one premium number, which
+    the block route must refuse. Each lists what the call may find, in the agent's words (app/engine/agent.py); anything else fails."""
+    b = _Builder(plan, target)
+    hours = {tc["key"]: tc for tc in plan["time_conditions"]}
+    out: List[Dict[str, Any]] = []
+    for n in plan["inbound"]:
+        kind, _, key = n["to"].partition(":")
+        dests = [hours[key]["open"], hours[key]["closed"]] if kind == "time_condition" else [n["to"]]
+        expect = sorted({"reached " + b.transfer(d)[1].split(" ")[0] for d in dests})      # a number's outcomes are never "hang up"
+        out.append({"kind": "inbound", "number": n["number"], "expect": expect})
+    emergency = next(r for r in plan["outbound_routes"] if r["key"] == "emergency")
+    gws = ",".join(target.gateways[g] for g in emergency["gateways"])
+    prefixes = [""] + list(plan["outside_prefixes"])
+    for p in prefixes:
+        for code in ("911", "933"):
+            out.append({"kind": "route", "number": p + code, "expect": [f"emergency {gws} {code}"]})    # the route, its gateways, the number sent
+    block = next(r for r in plan["outbound_routes"] if r["key"] == "block")
+    if any(c["category"] == "premium" for c in block["categories"]):
+        out.append({"kind": "route", "number": "19005550100", "expect": ["blocked premium"]})
+    return out
+
+
 class _Builder:
     def __init__(self, plan: Mapping[str, Any], target: Target) -> None:
         self.p, self.t, self.b = plan, target, Build()
@@ -123,16 +147,16 @@ class _Builder:
         return "transfer", f"{number} XML {self.domain}"
 
     def dialplan(self, key: str, name: str, order: int, app_uuid: Optional[str], body: str, number: Optional[str] = None, context: Optional[str] = None,
-                 cont: bool = False, details: Optional[List[Tuple[str, str, str, Optional[bool]]]] = None) -> str:
+                 cont: bool = False, details: Optional[List[Tuple[Any, ...]]] = None) -> str:
         dp = self.uid("dialplan:" + key)
         xml = f'<extension name={quoteattr(name)} continue="{"true" if cont else "false"}" uuid="{dp}">\n{body}</extension>'
         self.row("v_dialplans", dialplan_uuid=dp, app_uuid=app_uuid, dialplan_context=context or self.domain, dialplan_name=name,
                  dialplan_number=number, dialplan_continue=cont, dialplan_xml=xml, dialplan_order=order, dialplan_enabled=True,
                  dialplan_description="PhotonVox")
-        for i, (tag, typ, data, inline) in enumerate(details or []):
+        for i, (tag, typ, data, inline, *group) in enumerate(details or []):
             self.row("v_dialplan_details", dialplan_detail_uuid=self.uid(f"detail:{key}:{i}"), dialplan_uuid=dp, dialplan_detail_tag=tag,
-                     dialplan_detail_type=typ, dialplan_detail_data=data, dialplan_detail_inline="true" if inline else None, dialplan_detail_group=0,
-                     dialplan_detail_order=(i + 1) * 10, dialplan_detail_enabled=True)
+                     dialplan_detail_type=typ, dialplan_detail_data=data, dialplan_detail_inline="true" if inline else None,
+                     dialplan_detail_group=group[0] if group else 0, dialplan_detail_order=(i + 1) * 10, dialplan_detail_enabled=True)
         return dp
 
     # ---- the parts ----
@@ -143,6 +167,7 @@ class _Builder:
             self.voicemail(self.box_id[box["key"]], box["name"], box.get("email"), f"box:{box['key']}")
         self.direction()
         self.hangup()
+        self.synthetic()
         for r in self.p["outbound_routes"]:
             self.block(r) if r.get("reject") else self.route(r)
         for g in self.p["ring_groups"]:
@@ -184,6 +209,15 @@ class _Builder:
                 '\t<condition field="destination_number" expression="^.+$">\n' + _act("export", "call_direction=outbound", True) + "\t</condition>\n")
         self.dialplan("call-direction", "call_direction-outbound", 22, OUTBOUND_APP, body, cont=True)
 
+    def synthetic(self) -> None:
+        """First in the domain: a synthetic inbound call (the post-publish check) stops at the first place its number sends it and logs where,
+        so no phone rings. Time conditions are let through, so the check also sees them choose. Real calls never carry the variable."""
+        body = ('\t<condition field="${photonvox_synthetic}" expression="^inbound$"/>\n'
+                '\t<condition field="destination_number" expression="^(?!hours-)(.+)$">\n'
+                + _act("log", "NOTICE PhotonVox-synthetic token=${photonvox_token} reached=$1") + _act("hangup", "NORMAL_CLEARING")
+                + "\t</condition>\n")
+        self.dialplan("synthetic", "photonvox.synthetic", ORDER["synthetic"], None, body)
+
     def hangup(self) -> None:
         body = f'\t<condition field="destination_number" expression="^{HANGUP}$">\n' + _act("hangup", "NO_USER_RESPONSE") + "\t</condition>\n"
         self.dialplan("hangup", HANGUP, ORDER["hangup"], None, body)
@@ -203,10 +237,21 @@ class _Builder:
         actions = [("export", "call_direction=outbound", True), ("unset", "call_timeout", False), ("set", "hangup_after_bridge=true", False),
                    ("set", f"effective_caller_id_name=${{{cid}_name}}", False), ("set", f"effective_caller_id_number=${{{cid}_number}}", False),
                    ("set", "inherit_codec=true", False), ("set", "ignore_display_updates=true", False), ("set", "callee_id_number=$1", False),
-                   ("set", f"continue_on_fail={CONTINUE_ON_FAIL}", False)]
-        actions += [("bridge", f"sofia/gateway/{self.t.gateways[g]}/{r['send']}", False) for g in r["gateways"]]
-        body = conds + "".join(_act(a, d, i) for a, d, i in actions) + "\t</condition>\n"
+                   ("set", f"continue_on_fail={CONTINUE_ON_FAIL}", False),
+                   # The number to send is captured here: $1 means the matching condition's capture, and the bridges below sit in another one.
+                   ("set", f"photonvox_dial={r['send']}", False)]
+        bridges = [f"sofia/gateway/{self.t.gateways[g]}/${{photonvox_dial}}" for g in r["gateways"]]
+        gws = ",".join(self.t.gateways[g] for g in r["gateways"])
+        # The bridges sit behind a condition every real call passes (the variable is never set on one). The post-publish check's synthetic
+        # call sets it, and gets this route's name and gateways in the log instead of a call leaving the engine (ARCHITECTURE §5).
+        probe = [("log", f"NOTICE PhotonVox-synthetic token=${{photonvox_token}} route={key} gateways={gws} dial=${{photonvox_dial}}"),
+                 ("hangup", "NORMAL_CLEARING")]
+        body = (conds + "".join(_act(a, d, i) for a, d, i in actions) + "\t</condition>\n"
+                + '\t<condition field="${photonvox_synthetic}" expression="^$">\n' + "".join(_act("bridge", b) for b in bridges)
+                + "".join(_act(a, d, anti=True) for a, d in probe) + "\t</condition>\n")
         details += [("action", a, d, i or None) for a, d, i in actions]
+        details += ([("condition", "${photonvox_synthetic}", "^$", None, 1)] + [("action", "bridge", b, None, 1) for b in bridges]
+                    + [("anti-action", a, d, None, 1) for a, d in probe])
         self.dialplan("route:" + key, f"photonvox.{key}", order, OUTBOUND_APP, body, details=details)
 
     def block(self, r: Mapping[str, Any]) -> None:
@@ -217,7 +262,8 @@ class _Builder:
         for c in r["categories"]:
             body += (f'\t<condition field="destination_number" expression={quoteattr(c["pattern"])} break="on-true">\n'
                      + _act("export", f"photonvox_blocked={c['category']}", True)
-                     + _act("log", f"WARNING PhotonVox blocked {c['category']} call to ${{destination_number}} from ${{caller_id_number}}")
+                     + _act("log", f"WARNING PhotonVox blocked {c['category']} call to ${{destination_number}} from ${{caller_id_number}} "
+                            "token=${photonvox_token}")
                      + _act("hangup", "CALL_REJECTED") + "\t</condition>\n")
         self.dialplan("route:block", "photonvox.block", ORDER["block"], OUTBOUND_APP, body)
 
@@ -301,9 +347,10 @@ class _Builder:
         self.b.cache += [f"dialplan.public.{form}" for form in (number, number[1:], ten)]
 
 
-def _act(app: str, data: str, inline: bool = False) -> str:
+def _act(app: str, data: str, inline: bool = False, anti: bool = False) -> str:
     flag = ' inline="true"' if inline else ""
-    return f"\t\t<action application={quoteattr(app)} data={quoteattr(data)}{flag}/>\n"
+    tag = "anti-action" if anti else "action"
+    return f"\t\t<{tag} application={quoteattr(app)} data={quoteattr(data)}{flag}/>\n"
 
 
 def _before(end: str) -> str:

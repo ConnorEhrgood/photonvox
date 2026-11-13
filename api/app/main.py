@@ -8,7 +8,7 @@ from sqlalchemy.exc import DataError
 
 from app.config import settings
 from app.db import engine, system_engine
-from app.routes import directory_notify, me, platform, tenants
+from app.routes import directory_notify, me, phone_system, platform, tenants
 
 problem = settings.production_safe()
 if problem:
@@ -18,6 +18,7 @@ _prod = settings.environment == "production"
 app = FastAPI(title="PhotonVox API", docs_url=None if _prod else "/docs", redoc_url=None, openapi_url=None if _prod else "/openapi.json")
 app.include_router(me.router)
 app.include_router(tenants.router)
+app.include_router(phone_system.router)
 app.include_router(platform.router)
 app.include_router(directory_notify.router)
 

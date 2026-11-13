@@ -133,6 +133,7 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         "time_conditions": time_conditions,
         "inbound": inbound,
         "outbound_routes": routes,
+        "outside_prefixes": prefixes,
         "spend_limit_usd": doc.calling.spend_limit_usd,
         "features": {"eavesdrop": doc.features.eavesdrop, "intercept": doc.features.intercept},
     }

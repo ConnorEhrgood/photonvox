@@ -183,6 +183,9 @@
       "send": "+$1"
     }
   ],
+  "outside_prefixes": [
+    "9"
+  ],
   "ring_groups": [
     {
       "key": "annex",

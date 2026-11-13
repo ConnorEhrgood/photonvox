@@ -24,11 +24,11 @@ import uuid
 from sqlalchemy import create_engine
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from ssh_agent import HOST, KEY, SshAgent  # noqa: E402
+from ssh_agent import HOST, KEY, staging_agent  # noqa: E402
 
 from app.compiler.compile import Context, compile_plan  # noqa: E402
 from app.document.model import PhoneSystem  # noqa: E402
-from app.engine import fusionpbx, publish, upstreams  # noqa: E402
+from app.engine import fusionpbx, publish, service, upstreams  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 STATE = HERE / ".state"
@@ -62,8 +62,11 @@ def main() -> None:
     ap.add_argument("document", nargs="?")
     ap.add_argument("--name", default="adapter")
     ap.add_argument("--upstreams", action="store_true")
+    ap.add_argument("--check", action="store_true", help="after publishing, run the post-publish check's synthetic calls")
+    ap.add_argument("--only", action="store_true", help="with --check or --drift: do not publish, only look")
+    ap.add_argument("--drift", action="store_true", help="compare the engine with what this document builds (hand edits)")
     a = ap.parse_args()
-    agent = SshAgent()
+    agent = staging_agent()
     t = tunnel()
     try:
         eng = engine()
@@ -85,16 +88,30 @@ def main() -> None:
         STATE.mkdir(exist_ok=True)
         mf = STATE / f"{a.name}.manifest.json"
         previous = json.loads(mf.read_text()) if mf.exists() else []
-        res = publish.publish(eng, agent, plan, target, previous)
-        mf.write_text(json.dumps(res.manifest, indent=1))
-        if res.new_secrets:
+        if a.only:
+            res = None
+        else:
+            res = publish.publish(eng, agent, plan, target, previous)
+            mf.write_text(json.dumps(res.manifest, indent=1))
+        if res and res.new_secrets:
             old = json.loads(SECRETS.read_text()) if SECRETS.exists() else {}
             old.setdefault(meta["domain"], {}).update(res.new_secrets)
             fd = os.open(SECRETS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump(old, f, indent=1)
-        print(json.dumps({"domain": meta["domain"], "inserted": res.inserted, "updated": res.updated, "removed": res.removed,
-                          "new_secrets": len(res.new_secrets), "cache_cleared": len(res.cache)}))
+        out = {"domain": meta["domain"]}
+        if res:
+            out.update(inserted=res.inserted, updated=res.updated, removed=res.removed, new_secrets=len(res.new_secrets), cache_cleared=len(res.cache))
+        if a.drift:
+            with eng.connect() as conn:
+                out["drift"] = service.compare(conn, fusionpbx.build(plan, target), target.domain_uuid)
+        if a.check:
+            results = []
+            for c in fusionpbx.checks(plan, target):
+                got = agent.check(c["kind"], c["number"], meta["domain"], target.domain_uuid, uuid.uuid4().hex)
+                results.append({**c, "got": got, "ok": got in c["expect"]})
+            out["check"] = results
+        print(json.dumps(out))
     finally:
         t.terminate()
 

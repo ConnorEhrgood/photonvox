@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     # as PhotonGuard and the PhotonEdge hub do.
     platform_admin_subs: str = ""
 
+    # Fernet key for the secrets PhotonVox keeps: engine database logins, the SIP passwords and voicemail PINs it gave phones, agent secrets.
+    # Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Comma separated: the first
+    # encrypts, all decrypt (rotation).
+    secrets_key: str = ""
+
+    # Email (Postmark, paid tier). Empty token: nothing is sent; requests to carriers stay open for staff to send by hand.
+    postmark_token: str = ""
+    mail_from: str = "PhotonVox <vox@photonind.com>"
+    # Hickory Telephone's contact for 911 address changes (decision 31: an email per change, tracked until Hickory confirms).
+    htc_e911_email: str = ""
+
     environment: str = "development"
 
     @property
@@ -70,6 +81,8 @@ class Settings(BaseSettings):
             return "DIRECTORY_NOTICE_SECRET must be set to a long random value (without it anyone could trigger a sync)"
         if not self.system_database_url:
             return "SYSTEM_DATABASE_URL must be set (the worker and the directory sync connect as vox_system)"
+        if not self.secrets_key:
+            return "SECRETS_KEY must be set (engine credentials and phones' SIP passwords are kept encrypted with it)"
         if not self.cors_list:
             return "CORS_ORIGINS must list the web app's origin"
         if any(not o.startswith("https://") for o in self.cors_list):

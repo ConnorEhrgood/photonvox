@@ -41,6 +41,7 @@ services:
       DIRECTORY_CLIENT_ID: vox-test
       DIRECTORY_CLIENT_SECRET: directory-client-secret-for-tests-0123456789
       DIRECTORY_NOTICE_SECRET: notice-secret-for-tests-0123456789-abcdef
+      SECRETS_KEY: dGVzdC1zZWNyZXRzLWtleS1mb3ItcGhvdG9udm94LTA=
     volumes:
       - ./api:/app
       - ./contract:/contract:ro      # the phone-system schema and samples the unit tests read

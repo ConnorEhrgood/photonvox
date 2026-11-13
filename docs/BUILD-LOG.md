@@ -237,3 +237,31 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
 - `scripts/remote-test.sh` now uses `/root/vox-test/suite`, so it no longer deletes the SIPp files beside it.
 - Found (SPIKES §1f): FusionPBX's database is SQL_ASCII (the adapter connects with a UTF-8 client encoding); no text-to-speech module, so menus
   stay silent until recordings (a Step 3 decision); FreeSWITCH follows the `timezone` variable for hours, as proven.
+
+## 2026-11-13: Step 3, publishing for real (check, versions, undo, hand edits, records) and Connor's answers
+
+- **Decisions 30 and 31** recorded from Connor's answers: text-to-speech greetings generated at publish and stored, recorded greetings
+  overriding (provider comparison in ARCHITECTURE §8a: Google Chirp 3 HD recommended, Azure Neural runner-up, Telnyx if one vendor matters
+  more; a listening test decides); 911 addresses held per number with carrier requests to Hickory, numbers unconfirmed until Hickory confirms
+  (§11a). Postmark: already on the paid tier.
+- **PhotonVox's records** (migration 0002): `pbx_instance`, `phone_system` (one per organization, its draft), `phone_system_version`,
+  `engine_object` (what the running version wrote), `engine_secret` (sealed SIP passwords and PINs; no policy for the API's role),
+  `emergency_location` (validated by Photon staff in R1), `emergency_number` and `carrier_request` (decision 31). `SECRETS_KEY` (Fernet).
+- **Publishing** (`app/engine/service.py`, run by the worker): compile, write, record, then the **post-publish check**: a synthetic loopback
+  call per inbound number (stopped by a PhotonVox dial plan at its first stop in the domain, so no phone rings) and through the route
+  selection of 911 and 933 with and without the outside prefix, plus a premium number that must be blocked. A route's bridges sit behind a
+  condition every real call passes; a synthetic call logs the route, its gateways and the number it would send instead. A failed write or
+  check fails the version and publishes the previous ready version again (or removes what a first publish wrote).
+- **Versions and undo** (restore is a new version with an earlier document), **hand edits** (the engine compared with the running version:
+  changed columns, missing rows, switched-on features, objects added by hand listed and left alone; the next publish puts PhotonVox's back).
+- **The API:** the phone system and its draft (saved with problems, published only without), publish, versions, restore, **templates**
+  (small office, front-desk menu; Connor names Photon's first ones), **bulk import** (pasted rows, header or not, each row's problems in
+  words, into a ring group), sites' emergency addresses; Platform: instances (logins sealed), the address queue, carrier requests (emailed by
+  the worker through Postmark when Hickory's address is set; staff record ticket numbers and Hickory's answer).
+- **A serious bug caught on staging, before anything left it:** moving the bridges into the synthetic gate's own condition made FreeSWITCH
+  send a literal `$1` (a capture belongs to the condition it sits in), for every outbound call, 911 included. The 911 call proofs had checked
+  the caller ID but not the dialed number. Fixed (the number to send is set in the matching condition), and both the call proofs and the
+  post-publish check now verify the number sent.
+- Proven: 66 checks on staging (`engine/staging/prove-publish.sh`: calls, the check passing, a number broken by hand making its check fail and
+  a republish repairing it, hand edits found and put back); the API suite on LXC 800 at 100% line and branch coverage with `emergency.py`
+  added to the critical modules.

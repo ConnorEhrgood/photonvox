@@ -241,7 +241,9 @@ queue in PhotonVox with HTC's turnaround is the R1 path).
   only from held numbers; the **locked 911 route** per site; the **locked block route** right after it (ARCHITECTURE §15a, decision 29): Photon's default list on the Platform page, the organization's **Call blocking** page (allow a category, add or remove numbers and
   prefixes), blocked attempts reported by vox-agent to the audit and the partner. Per-extension overrides here if small, else R2; inbound
   blocking in R2.
-- Voicemail to email through Postmark (its own stream; paid tier: Connor).
+- Voicemail to email through Postmark (its own stream; Photon is on the paid tier).
+- Text-to-speech greetings generated at publish and stored (decision 30, ARCHITECTURE §8a): the provider after a listening test.
+- Numbers' 911 addresses with the carrier (decision 31, ARCHITECTURE §11a): per-number registration, carrier requests, the staff queue.
 
 **Done when:** on staging, a phone system built from a template with 30 pasted users, two sites and four numbers is published in under 10
 minutes of the tester's time; SIPp proves every outcome (each number by schedule, menus, groups, unreachable forwarding), caller ID per site and
@@ -460,7 +462,7 @@ R3 adds texting and chat to the app (one conversation model with the web app).
 | 1c | PhotonVox's read-only role on the live engine | Step 1 adoption |
 | 2 | Each production change of Step 2 | Step 2 |
 | 3a | The adapter's write role on the staging instance | Step 3 |
-| 3b | How HTC validates and registers emergency addresses; the first templates; Postmark's paid tier | Step 3 |
+| 3b | How HTC validates and registers emergency addresses (answered: by hand per number, decision 31); the first templates | Step 3 |
 | 4a | The production GDMS organization and API user | Step 4 in production |
 | 5 | The PhotonConsole code change and its deploy | Step 5 |
 | 6a | The pilot customer, its instance, the production write role | Step 6 |

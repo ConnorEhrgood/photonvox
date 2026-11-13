@@ -1,0 +1,268 @@
+"""An organization's phone system: the draft the integrator builds, publishing it (queued for the worker, which writes it and runs the check),
+versions and undo, templates and bulk import, and the sites' emergency addresses with their numbers' state at the carrier (ARCHITECTURE §3,
+§8, §11a). One phone system per organization (decision 4)."""
+from __future__ import annotations
+
+import secrets
+import string
+import uuid
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app import audit
+from app.compiler.compile import CompileError, compile_plan
+from app.db import SystemSession, get_db
+from app.deps import Ctx, require
+from app.document import importer, templates
+from app.document.model import PhoneSystem as Document
+from app.document.validate import problems
+from app.engine import service
+from app.models import (CarrierRequest, EmergencyLocation, EmergencyNumber, PbxInstance, PhoneSystem, PhoneSystemVersion, Tenant, utcnow)
+from app.routes.tenants import visible_sites
+
+router = APIRouter(prefix="/tenants/{tenant_id}")
+VIEW, BUILD, EMERGENCY = "vox.phone_system.view", "vox.phone_system.build", "vox.site.emergency"
+
+
+def _ps(db: Session, ctx: Ctx) -> PhoneSystem:
+    ps = db.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == ctx.tenant_id)).scalar_one_or_none()
+    if ps is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_phone_system", "detail": "This organization has no phone system yet."})
+    return ps
+
+
+def _instance(ps: PhoneSystem) -> PbxInstance:
+    """The phone system's engine, read as the system: instances are Photon staff's, but compiling a draft needs its upstreams' names."""
+    with SystemSession() as s:
+        i = s.get(PbxInstance, ps.instance_id)
+        s.expunge(i)
+        return i
+
+
+def _who(ctx: Ctx) -> Dict[str, Any]:
+    return {"actor_id": ctx.who.id, "actor_label": ctx.who.label, "actor_source": ctx.grant.source, "tenant_id": ctx.tenant_id}
+
+
+def _problems(db: Session, ps: PhoneSystem, doc: Document) -> List[Dict[str, str]]:
+    found = problems(doc, service.context(db, ps, _instance(ps)).validated_locations)
+    return [{"path": p.path, "code": p.code, "message": p.message} for p in found]
+
+
+def _version(v: PhoneSystemVersion) -> Dict[str, Any]:
+    results = (v.check or {}).get("results", [])
+    return {"number": v.number, "state": v.state, "note": v.note, "error": v.error, "created_by": v.created_by_label,
+            "created_at": v.created_at.isoformat(), "published_at": v.published_at.isoformat() if v.published_at else None,
+            "checks": {"passed": sum(1 for r in results if r["ok"]), "total": len(results),
+                       "failed": [{"kind": r["kind"], "number": r["number"], "expected": r["expect"], "got": r["got"]} for r in results if not r["ok"]]}}
+
+
+def _summary(db: Session, ps: PhoneSystem) -> Dict[str, Any]:
+    doc = Document.model_validate(ps.draft)
+    drift = ps.drift or {}
+    return {"id": str(ps.id), "status": ps.status, "domain": ps.domain_name, "instance": _instance(ps).name,
+            "published_version": ps.published_version, "draft": ps.draft, "draft_updated_at": ps.draft_updated_at.isoformat(),
+            "problems": _problems(db, ps, doc),
+            "drift": {"checked_at": drift.get("checked_at"), "changed": len(drift.get("changed", [])), "missing": len(drift.get("missing", [])),
+                      "extra": drift.get("extra", [])}}
+
+
+@router.get("/phone-system")
+def get_phone_system(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    return _summary(db, _ps(db, ctx))
+
+
+@router.post("/phone-system", status_code=201)
+def create_phone_system(ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Start the organization's phone system, empty, on an active engine in its home region (placement is PhotonVox's, never the integrator's)."""
+    if db.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == ctx.tenant_id)).scalar_one_or_none():
+        raise HTTPException(status.HTTP_409_CONFLICT, {"code": "exists", "detail": "This organization already has a phone system."})
+    tenant = db.get(Tenant, ctx.tenant_id)
+    with SystemSession() as s:        # instances are Photon's: the integrator may not read them, only be placed on one
+        rows = s.execute(select(PbxInstance).where(PbxInstance.role == "active").order_by(PbxInstance.created_at)).scalars().all()
+        chosen = next((i for i in rows if i.region == tenant.home_region), rows[0] if rows else None)
+        instance_id = chosen.id if chosen else None
+    if instance_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, {"code": "no_instance", "detail": "No engine is available yet. Photon staff have been told."})
+    name = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6)) + ".sip.photoninfra.xyz"
+    ps = PhoneSystem(tenant_id=ctx.tenant_id, instance_id=instance_id, domain_name=name, domain_uuid=uuid.uuid4(), draft={"version": 1})
+    db.add(ps)
+    audit.record(db, **_who(ctx), action="phone_system.created", target_type="phone_system", target_id=ps.id, domain=name)
+    db.commit()
+    return _summary(db, ps)
+
+
+class DraftIn(BaseModel):
+    document: Dict[str, Any]
+
+
+def _document(raw: Dict[str, Any]) -> Document:
+    try:
+        return Document.model_validate(raw)
+    except ValidationError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "invalid_document", "detail": "The phone system has fields that are not valid.",
+                            "errors": [{"path": ".".join(str(x) for x in err["loc"]), "message": err["msg"]} for err in e.errors()]})
+
+
+@router.put("/phone-system/draft")
+def save_draft(body: DraftIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Save the draft. Problems (an unvalidated address, a dangling reference) do not stop saving; they stop publishing."""
+    ps = _ps(db, ctx)
+    doc = _document(body.document)
+    ps.draft, ps.draft_updated_at = doc.model_dump(mode="json", exclude_defaults=False), utcnow()
+    audit.record(db, **_who(ctx), action="phone_system.draft_saved", target_type="phone_system", target_id=ps.id)
+    db.commit()
+    return _summary(db, ps)
+
+
+@router.post("/phone-system/publish", status_code=202)
+def publish_draft(ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Queue the draft for publishing. Refused while it has problems or another version is still being published."""
+    ps = _ps(db, ctx)
+    return _queue(db, ctx, ps, ps.draft, "")
+
+
+def _queue(db: Session, ctx: Ctx, ps: PhoneSystem, document: Dict[str, Any], note: str) -> Dict[str, Any]:
+    busy = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id,
+                                                       PhoneSystemVersion.state.in_(("queued", "publishing")))).scalars().first()
+    if busy:
+        raise HTTPException(status.HTTP_409_CONFLICT, {"code": "busy", "detail": f"Version {busy.number} is still being published."})
+    doc = _document(document)
+    try:
+        compile_plan(doc, service.context(db, ps, _instance(ps)))
+    except CompileError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "not_publishable", "detail": str(e),
+                            "problems": [{"path": p.path, "code": p.code, "message": p.message} for p in e.problems]})
+    v = service.queue(db, ps, document, ctx.who.id, ctx.who.label, note)
+    db.flush()
+    audit.record(db, **_who(ctx), action="phone_system.publish_requested", target_type="phone_system", target_id=ps.id, version=v.number, note=note)
+    db.commit()
+    return _version(v)
+
+
+@router.get("/phone-system/versions")
+def versions(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    ps = _ps(db, ctx)
+    rows = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id).order_by(PhoneSystemVersion.number.desc())).scalars()
+    return [_version(v) for v in rows]
+
+
+@router.post("/phone-system/versions/{number}/restore", status_code=202)
+def restore(number: int, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Undo: publish an earlier version's document again, as a new version. The draft becomes that document too, so the builder shows it."""
+    ps = _ps(db, ctx)
+    old = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id, PhoneSystemVersion.number == number)).scalar_one_or_none()
+    if old is None or old.state not in ("ready", "superseded"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_version", "detail": f"There is no published version {number}."})
+    out = _queue(db, ctx, ps, old.document, f"restored from version {number}")
+    ps.draft, ps.draft_updated_at = old.document, utcnow()
+    db.commit()
+    return out
+
+
+# ---- templates and bulk import ----
+
+@router.get("/phone-system/templates")
+def list_templates(ctx: Ctx = Depends(require(VIEW))) -> List[Dict[str, str]]:
+    return templates.catalog()
+
+
+class TemplateIn(BaseModel):
+    template: str
+    site_id: str
+    location: str = Field(min_length=1, max_length=40)
+    main_number: str
+    users: str = ""             # pasted rows (bulk import), optional
+
+
+@router.post("/phone-system/draft/template")
+def apply_template(body: TemplateIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Replace the draft with a template built from the answers (and the pasted users). Only rows without problems are taken; the rest come back."""
+    ps = _ps(db, ctx)
+    if body.template not in templates.TEMPLATES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_template", "detail": "There is no such template."})
+    sites = {str(s.id): s.name for s in visible_sites(db, ctx)}
+    if body.site_id not in sites:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_site", "detail": "There is no such site."})
+    number = importer._number(body.main_number)
+    rows = importer.preview(body.users, {"users": {}, "numbers": {number: {}}}, body.site_id, sites)
+    users = {r["id"]: r["user"] for r in rows if not r["problems"]}
+    if not users:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "no_users", "detail": "Add at least one user (one per line).", "rows": rows})
+    doc = _document(templates.build(body.template, body.site_id, body.location, number, users))
+    ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
+    audit.record(db, **_who(ctx), action="phone_system.template_applied", target_type="phone_system", target_id=ps.id, template=body.template,
+                 users=len(users))
+    db.commit()
+    return {**_summary(db, ps), "rows": rows}
+
+
+class ImportIn(BaseModel):
+    text: str = Field(max_length=200_000)
+    site_id: str
+    group: Optional[str] = None
+    apply: bool = False
+
+
+@router.post("/phone-system/import")
+def import_users(body: ImportIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Bulk import into the draft: with `apply` false, the review (each row with its problems); with `apply` true, the rows without problems
+    are added (and to `group`, if named)."""
+    ps = _ps(db, ctx)
+    sites = {str(s.id): s.name for s in visible_sites(db, ctx)}
+    if body.site_id not in sites:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_site", "detail": "There is no such site."})
+    rows = importer.preview(body.text, ps.draft, body.site_id, sites)
+    out: Dict[str, Any] = {"rows": rows, "ready": sum(1 for r in rows if not r["problems"])}
+    if body.apply:
+        doc = _document(importer.apply(ps.draft, rows, body.group))
+        ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
+        audit.record(db, **_who(ctx), action="phone_system.users_imported", target_type="phone_system", target_id=ps.id, users=out["ready"])
+        db.commit()
+        out["phone_system"] = _summary(db, ps)
+    return out
+
+
+# ---- emergency addresses and numbers' state with the carrier ----
+
+class LocationIn(BaseModel):
+    key: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,39}$")
+    street: str = Field(min_length=3, max_length=200)
+    unit: str = Field("", max_length=60)
+    city: str = Field(min_length=2, max_length=100)
+    state: str = Field(pattern=r"^[A-Z]{2}$")
+    zip: str = Field(pattern=r"^[0-9]{5}(-[0-9]{4})?$")
+
+
+@router.post("/sites/{site_id}/emergency-locations", status_code=201)
+def add_location(site_id: uuid.UUID, body: LocationIn, ctx: Ctx = Depends(require(EMERGENCY)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """An emergency address for a site, pending until Photon staff validate it (the R1 staff queue, ARCHITECTURE §11)."""
+    if not ctx.can(EMERGENCY, site_id) or str(site_id) not in {str(s.id) for s in visible_sites(db, ctx)}:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    loc = EmergencyLocation(tenant_id=ctx.tenant_id, site_id=site_id, key=body.key,
+                            address=body.model_dump(include={"street", "unit", "city", "state", "zip"}))
+    db.add(loc)
+    db.flush()
+    audit.record(db, **_who(ctx), action="emergency_location.added", target_type="site", target_id=site_id, key=body.key)
+    db.commit()
+    return _location(loc)
+
+
+def _location(loc: EmergencyLocation) -> Dict[str, Any]:
+    return {"id": str(loc.id), "site_id": str(loc.site_id), "key": loc.key, "address": loc.address, "status": loc.status, "note": loc.note}
+
+
+@router.get("/emergency")
+def emergency(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Sites' emergency addresses, each number's 911 registration with the carrier, and the requests in flight (decision 31)."""
+    locs = db.execute(select(EmergencyLocation).where(EmergencyLocation.tenant_id == ctx.tenant_id).order_by(EmergencyLocation.created_at)).scalars()
+    nums = db.execute(select(EmergencyNumber).where(EmergencyNumber.tenant_id == ctx.tenant_id).order_by(EmergencyNumber.number)).scalars()
+    reqs = db.execute(select(CarrierRequest).where(CarrierRequest.tenant_id == ctx.tenant_id).order_by(CarrierRequest.created_at.desc()).limit(20)).scalars()
+    return {"locations": [_location(x) for x in locs],
+            "numbers": [{"number": n.number, "status": n.status, "location_id": str(n.location_id) if n.location_id else None,
+                         "confirmed_at": n.confirmed_at.isoformat() if n.confirmed_at else None} for n in nums],
+            "requests": [{"id": str(r.id), "status": r.status, "items": r.items, "reference": r.reference, "sent_at": r.sent_at.isoformat() if r.sent_at else None}
+                         for r in reqs]}
