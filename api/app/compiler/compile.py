@@ -2,7 +2,7 @@
 
 The engine plan is everything the phone system needs, in engine terms but not yet in FusionPBX's tables: extensions with their caller IDs and
 call classes, voicemail boxes, ring groups, menus, time conditions, inbound numbers, outbound routes per call class with Photon's upstream order,
-and the locked emergency route. The FusionPBX adapter (Step 3, after the write-path spike) turns the plan into rows; nothing in it is FusionPBX's
+the locked emergency route, then the locked block route (decision 29). The FusionPBX adapter (app/engine) turns the plan into rows; nothing in it is FusionPBX's
 own vocabulary beyond what any FreeSWITCH system has.
 
 Deterministic: the same document and context always give the same plan, byte for byte (keys sorted, lists ordered), which is what makes golden
@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import AbstractSet, Any, Dict, List, Mapping, Optional
 
-from app.compiler import classes
+from app.compiler import blocking, classes
 from app.document.model import PhoneSystem, Target, ToGroup, ToMenu, ToUser
 from app.document.validate import Problem, problems
 
@@ -28,6 +28,7 @@ class Context:
     upstreams: Mapping[str, List[str]]          # class -> gateway keys, cheapest healthy first: "national", "toll_free", "international", "service"
     emergency_gateway: str
     validated_locations: Mapping[str, AbstractSet[str]] = field(default_factory=dict)
+    premium_allowed: bool = False               # Photon staff have let premium numbers through for this organization (§15a)
 
 
 class CompileError(Exception):
@@ -57,6 +58,8 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
     found = problems(doc, ctx.validated_locations)
     if found:
         raise CompileError(found)
+    if "premium" in doc.calling.blocking.allow and not ctx.premium_allowed:
+        raise CompileError([Problem("calling.blocking.allow", "premium_staff_only", "Only Photon staff can let premium numbers through.")])
     if not ctx.emergency_gateway or not ctx.upstreams.get("national"):
         raise CompileError([Problem("instance", "no_upstream", "This instance has no upstream for 911 or national calls; nothing can be published to it.")])
 
@@ -106,6 +109,9 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         # number. No call class, spend limit or restriction applies to it (§11).
         {"key": "emergency", "locked": True, "pattern": _prefixed(r"^(" + "|".join(classes.EMERGENCY) + r")$", prefixes),
          "requires": None, "gateways": [ctx.emergency_gateway], "caller_id": "emergency_caller_id_number", "send": "$1"},
+        # Second and locked: the blocked destinations, rejected and recorded (decision 29). The emergency routes come first, so 911 never reaches it.
+        blocking.block_route(list(doc.calling.blocking.allow), list(doc.calling.blocking.block), list(doc.calling.blocking.allow_numbers),
+                             countries, prefixes, ctx.premium_allowed),
         {"key": "service", "locked": True, "pattern": _prefixed(r"^(" + "|".join(classes.SERVICES) + r")$", prefixes),
          "requires": "service", "gateways": list(ctx.upstreams.get("service") or ctx.upstreams["national"]), "caller_id": "caller_id_number", "send": "$1"},
     ]
@@ -128,4 +134,5 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         "inbound": inbound,
         "outbound_routes": routes,
         "spend_limit_usd": doc.calling.spend_limit_usd,
+        "features": {"eavesdrop": doc.features.eavesdrop, "intercept": doc.features.intercept},
     }

@@ -1,9 +1,53 @@
 {
   "$defs": {
+    "Blocking": {
+      "additionalProperties": false,
+      "description": "The organization's Call blocking page (\u00a715a, decision 29). Photon's default list blocks international (except the countries switched on\nin `Calling.international`), premium, the high-cost North American codes and satellite ranges; this says what the organization changes.",
+      "properties": {
+        "allow": {
+          "items": {
+            "enum": [
+              "high_cost_nanp",
+              "satellite",
+              "premium"
+            ],
+            "type": "string"
+          },
+          "title": "Allow",
+          "type": "array"
+        },
+        "block": {
+          "items": {
+            "pattern": "^\\+[1-9][0-9]{0,14}$",
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Block",
+          "type": "array"
+        },
+        "allow_numbers": {
+          "items": {
+            "pattern": "^\\+1[2-9][0-9]{0,9}$",
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Allow Numbers",
+          "type": "array"
+        }
+      },
+      "title": "Blocking",
+      "type": "object"
+    },
     "Box": {
       "additionalProperties": false,
       "description": "A shared voicemail box (\"general\"), separate from users' own.",
       "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
         "email": {
           "anyOf": [
             {
@@ -16,12 +60,6 @@
           ],
           "default": null,
           "title": "Email"
-        },
-        "name": {
-          "maxLength": 100,
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
         }
       },
       "required": [
@@ -34,17 +72,22 @@
       "additionalProperties": false,
       "description": "What outside calls the organization may make (\u00a715). Emergency, 988 and relay services are always allowed and are not listed here.",
       "properties": {
+        "national": {
+          "default": true,
+          "title": "National",
+          "type": "boolean"
+        },
+        "toll_free": {
+          "default": true,
+          "title": "Toll Free",
+          "type": "boolean"
+        },
         "international": {
           "items": {
             "type": "string"
           },
           "title": "International",
           "type": "array"
-        },
-        "national": {
-          "default": true,
-          "title": "National",
-          "type": "boolean"
         },
         "spend_limit_usd": {
           "default": 50,
@@ -53,13 +96,29 @@
           "title": "Spend Limit Usd",
           "type": "integer"
         },
-        "toll_free": {
-          "default": true,
-          "title": "Toll Free",
-          "type": "boolean"
+        "blocking": {
+          "$ref": "#/$defs/Blocking"
         }
       },
       "title": "Calling",
+      "type": "object"
+    },
+    "Features": {
+      "additionalProperties": false,
+      "description": "Engine features that let one phone reach into another's calls. Off unless an admin switches them on (the spike found FusionPBX enables\nthem in every new domain).",
+      "properties": {
+        "eavesdrop": {
+          "default": false,
+          "title": "Eavesdrop",
+          "type": "boolean"
+        },
+        "intercept": {
+          "default": false,
+          "title": "Intercept",
+          "type": "boolean"
+        }
+      },
+      "title": "Features",
       "type": "object"
     },
     "Group": {
@@ -73,13 +132,6 @@
           "title": "Members",
           "type": "array"
         },
-        "ring_seconds": {
-          "default": 25,
-          "maximum": 120,
-          "minimum": 10,
-          "title": "Ring Seconds",
-          "type": "integer"
-        },
         "strategy": {
           "default": "simultaneous",
           "enum": [
@@ -88,6 +140,13 @@
           ],
           "title": "Strategy",
           "type": "string"
+        },
+        "ring_seconds": {
+          "default": 25,
+          "maximum": 120,
+          "minimum": 10,
+          "title": "Ring Seconds",
+          "type": "integer"
         },
         "then": {
           "anyOf": [
@@ -121,15 +180,6 @@
       "additionalProperties": false,
       "description": "Open hours per weekday, in the site's time zone, as \"HH:MM-HH:MM\" spans (24:00 allowed as an end); days not listed are closed.",
       "properties": {
-        "holidays": {
-          "default": "none",
-          "enum": [
-            "none",
-            "us-federal"
-          ],
-          "title": "Holidays",
-          "type": "string"
-        },
         "week": {
           "additionalProperties": {
             "items": {
@@ -150,6 +200,15 @@
           },
           "title": "Week",
           "type": "object"
+        },
+        "holidays": {
+          "default": "none",
+          "enum": [
+            "none",
+            "us-federal"
+          ],
+          "title": "Holidays",
+          "type": "string"
         }
       },
       "title": "Hours",
@@ -227,6 +286,27 @@
       "additionalProperties": false,
       "description": "A number the organization holds and what it rings. Without `closed`, it rings `open` at all hours.",
       "properties": {
+        "site": {
+          "title": "Site",
+          "type": "string"
+        },
+        "open": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToUser"
+            },
+            {
+              "$ref": "#/$defs/ToGroup"
+            },
+            {
+              "$ref": "#/$defs/ToMenu"
+            },
+            {
+              "$ref": "#/$defs/ToVoicemail"
+            }
+          ],
+          "title": "Open"
+        },
         "closed": {
           "anyOf": [
             {
@@ -260,27 +340,6 @@
           ],
           "default": null,
           "title": "Hours"
-        },
-        "open": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ToUser"
-            },
-            {
-              "$ref": "#/$defs/ToGroup"
-            },
-            {
-              "$ref": "#/$defs/ToMenu"
-            },
-            {
-              "$ref": "#/$defs/ToVoicemail"
-            }
-          ],
-          "title": "Open"
-        },
-        "site": {
-          "title": "Site",
-          "type": "string"
         }
       },
       "required": [
@@ -294,11 +353,6 @@
       "additionalProperties": false,
       "description": "Per site: its 911 (the emergency location and the number registered at it, both locked: \u00a711), what its calls show, its hours.",
       "properties": {
-        "caller_id": {
-          "pattern": "^\\+1[2-9][0-9]{2}[2-9][0-9]{6}$",
-          "title": "Caller Id",
-          "type": "string"
-        },
         "emergency_location": {
           "title": "Emergency Location",
           "type": "string"
@@ -306,6 +360,11 @@
         "emergency_number": {
           "pattern": "^\\+1[2-9][0-9]{2}[2-9][0-9]{6}$",
           "title": "Emergency Number",
+          "type": "string"
+        },
+        "caller_id": {
+          "pattern": "^\\+1[2-9][0-9]{2}[2-9][0-9]{6}$",
+          "title": "Caller Id",
           "type": "string"
         },
         "hours": {
@@ -320,6 +379,15 @@
           ],
           "default": null,
           "title": "Hours"
+        },
+        "unreachable": {
+          "default": "voicemail",
+          "enum": [
+            "voicemail",
+            "none"
+          ],
+          "title": "Unreachable",
+          "type": "string"
         },
         "outside_prefix": {
           "anyOf": [
@@ -336,15 +404,6 @@
           ],
           "default": null,
           "title": "Outside Prefix"
-        },
-        "unreachable": {
-          "default": "voicemail",
-          "enum": [
-            "voicemail",
-            "none"
-          ],
-          "title": "Unreachable",
-          "type": "string"
         }
       },
       "required": [
@@ -416,6 +475,21 @@
     "User": {
       "additionalProperties": false,
       "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "site": {
+          "title": "Site",
+          "type": "string"
+        },
+        "extension": {
+          "pattern": "^[1-8][0-9]{1,4}$",
+          "title": "Extension",
+          "type": "string"
+        },
         "direct_number": {
           "anyOf": [
             {
@@ -429,6 +503,15 @@
           "default": null,
           "title": "Direct Number"
         },
+        "show": {
+          "default": "site",
+          "enum": [
+            "site",
+            "direct"
+          ],
+          "title": "Show",
+          "type": "string"
+        },
         "email": {
           "anyOf": [
             {
@@ -441,30 +524,6 @@
           ],
           "default": null,
           "title": "Email"
-        },
-        "extension": {
-          "pattern": "^[1-8][0-9]{1,4}$",
-          "title": "Extension",
-          "type": "string"
-        },
-        "name": {
-          "maxLength": 100,
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "show": {
-          "default": "site",
-          "enum": [
-            "site",
-            "direct"
-          ],
-          "title": "Show",
-          "type": "string"
-        },
-        "site": {
-          "title": "Site",
-          "type": "string"
         }
       },
       "required": [
@@ -476,9 +535,56 @@
       "type": "object"
     }
   },
-  "$id": "https://vox.photonind.com/contract/phone-system/v1.schema.json",
   "additionalProperties": false,
   "properties": {
+    "version": {
+      "const": 1,
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "sites": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Site"
+      },
+      "title": "Sites",
+      "type": "object"
+    },
+    "hours": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Hours"
+      },
+      "title": "Hours",
+      "type": "object"
+    },
+    "numbers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Number"
+      },
+      "title": "Numbers",
+      "type": "object"
+    },
+    "menus": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Menu"
+      },
+      "title": "Menus",
+      "type": "object"
+    },
+    "groups": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Group"
+      },
+      "title": "Groups",
+      "type": "object"
+    },
+    "users": {
+      "additionalProperties": {
+        "$ref": "#/$defs/User"
+      },
+      "title": "Users",
+      "type": "object"
+    },
     "boxes": {
       "additionalProperties": {
         "$ref": "#/$defs/Box"
@@ -489,55 +595,11 @@
     "calling": {
       "$ref": "#/$defs/Calling"
     },
-    "groups": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Group"
-      },
-      "title": "Groups",
-      "type": "object"
-    },
-    "hours": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Hours"
-      },
-      "title": "Hours",
-      "type": "object"
-    },
-    "menus": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Menu"
-      },
-      "title": "Menus",
-      "type": "object"
-    },
-    "numbers": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Number"
-      },
-      "title": "Numbers",
-      "type": "object"
-    },
-    "sites": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Site"
-      },
-      "title": "Sites",
-      "type": "object"
-    },
-    "users": {
-      "additionalProperties": {
-        "$ref": "#/$defs/User"
-      },
-      "title": "Users",
-      "type": "object"
-    },
-    "version": {
-      "const": 1,
-      "default": 1,
-      "title": "Version",
-      "type": "integer"
+    "features": {
+      "$ref": "#/$defs/Features"
     }
   },
   "title": "PhotonVox phone-system document, version 1",
-  "type": "object"
+  "type": "object",
+  "$id": "https://vox.photonind.com/contract/phone-system/v1.schema.json"
 }

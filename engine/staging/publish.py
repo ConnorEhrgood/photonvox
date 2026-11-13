@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Publish a phone-system document to the staging engine with PhotonVox's adapter (BUILD-GUIDE Step 3), as the API will, except that vox-agent
+is played over SSH (ssh_agent.py) and the records PhotonVox would keep are files:
+  - the manifest of what was written: engine/staging/.state/<name>.manifest.json (not in git), so the next publish can remove what left;
+  - new SIP passwords and PINs: ~/.config/photonvox/staging-secrets.json (mode 600; staging test values, never printed).
+
+    PYTHONPATH=api ~/.venvs/photonvox/bin/python engine/staging/publish.py <document.json> [--name adapter]
+    ... publish.py --upstreams            only the instance's upstreams (gateways, providers entries)
+
+The engine's database is reached through an SSH tunnel, as the role photonvox_adapter (password in ~/.config/photonvox/staging-adapter.pass).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import socket
+import subprocess
+import sys
+import time
+import uuid
+
+from sqlalchemy import create_engine
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from ssh_agent import HOST, KEY, SshAgent  # noqa: E402
+
+from app.compiler.compile import Context, compile_plan  # noqa: E402
+from app.document.model import PhoneSystem  # noqa: E402
+from app.engine import fusionpbx, publish, upstreams  # noqa: E402
+
+HERE = pathlib.Path(__file__).resolve().parent
+STATE = HERE / ".state"
+SECRETS = pathlib.Path("~/.config/photonvox/staging-secrets.json").expanduser()
+INSTANCE = "7a6b0000-0000-4000-8000-000000000001"           # the staging instance (PhotonVox's pbx_instance id, later)
+HOSTNAME = "vox-staging"
+# The SIPp upstream on LXC 800 plays every carrier (Step 0.6); it answers on 5071 and calls in from LXC 800's address.
+UPSTREAMS = [upstreams.Upstream("sipp-upstream", "10.10.0.80:5071", ("10.10.0.80/32",))]
+
+
+def tunnel(port: int = 15432) -> subprocess.Popen:
+    p = subprocess.Popen(["ssh", "-i", KEY, "-N", "-o", "ExitOnForwardFailure=yes", "-L", f"{port}:127.0.0.1:5432", HOST])
+    for _ in range(50):
+        try:
+            socket.create_connection(("127.0.0.1", port), 0.2).close()
+            return p
+        except OSError:
+            time.sleep(0.2)
+    p.terminate()
+    raise SystemExit("no tunnel to the staging database")
+
+
+def engine(port: int = 15432):
+    pw = pathlib.Path("~/.config/photonvox/staging-adapter.pass").expanduser().read_text().strip()
+    # FusionPBX creates its database as SQL_ASCII: without a client encoding, psycopg returns bytes. UTF-8 is what its PHP reads and writes.
+    return create_engine(f"postgresql+psycopg://photonvox_adapter:{pw}@127.0.0.1:{port}/fusionpbx", connect_args={"client_encoding": "utf8"})
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("document", nargs="?")
+    ap.add_argument("--name", default="adapter")
+    ap.add_argument("--upstreams", action="store_true")
+    a = ap.parse_args()
+    agent = SshAgent()
+    t = tunnel()
+    try:
+        eng = engine()
+        with eng.begin() as conn:
+            up = upstreams.write_upstreams(conn, INSTANCE, HOSTNAME, UPSTREAMS)
+        agent.clear_cache(up["cache"])
+        agent.reload_acl()
+        agent.rescan(up["rescan"], up["kill"])
+        if a.upstreams:
+            print(json.dumps({"upstreams": sorted(up["gateways"])}))
+            return
+        doc = PhoneSystem.model_validate(json.loads(pathlib.Path(a.document).read_text()))
+        meta = json.loads(pathlib.Path(a.document).with_suffix(".context.json").read_text())
+        ctx = Context(domain=meta["domain"], timezones=meta["timezones"], upstreams={"national": ["sipp-upstream"]}, emergency_gateway="sipp-upstream",
+                      validated_locations={k: set(v) for k, v in meta["validated_locations"].items()})
+        plan = compile_plan(doc, ctx)
+        ps = meta["phone_system_id"]
+        target = fusionpbx.Target(ps, str(uuid.uuid5(uuid.UUID(ps), "domain")), up["gateways"])
+        STATE.mkdir(exist_ok=True)
+        mf = STATE / f"{a.name}.manifest.json"
+        previous = json.loads(mf.read_text()) if mf.exists() else []
+        res = publish.publish(eng, agent, plan, target, previous)
+        mf.write_text(json.dumps(res.manifest, indent=1))
+        if res.new_secrets:
+            old = json.loads(SECRETS.read_text()) if SECRETS.exists() else {}
+            old.setdefault(meta["domain"], {}).update(res.new_secrets)
+            fd = os.open(SECRETS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump(old, f, indent=1)
+        print(json.dumps({"domain": meta["domain"], "inserted": res.inserted, "updated": res.updated, "removed": res.removed,
+                          "new_secrets": len(res.new_secrets), "cache_cleared": len(res.cache)}))
+    finally:
+        t.terminate()
+
+
+if __name__ == "__main__":
+    main()

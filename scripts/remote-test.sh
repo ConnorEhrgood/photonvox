@@ -2,13 +2,13 @@
 # Run the backend suite on LXC 800 (Docker lives there, not on the runner).
 #   scripts/remote-test.sh [pytest args]            e.g. scripts/remote-test.sh tests/api/test_rls.py -x
 #   COVERAGE=1 scripts/remote-test.sh               with a branch-coverage report and the critical-module check
-# Uses its own folder (/root/vox-test) and its own Compose project (photonvox-test), and takes everything down afterwards (containers, the
+# Uses its own folder (/root/vox-test/suite) and its own Compose project (photonvox-test), and takes everything down afterwards (containers, the
 # throwaway database, the network). LXC 800 is shared and short of disk: this never prunes Docker globally; the test image is kept so the next
 # run is quick (remove it with `docker image rm photonvox-test-tests` when done for a while).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOST=${VOX_TEST_SSH:-lxc800}
-DIR=${VOX_TEST_DIR:-/root/vox-test}
+DIR=${VOX_TEST_DIR:-/root/vox-test/suite}     # its own subfolder: /root/vox-test/sipp (scripts/sipp.sh) lives beside it
 PROJECT=photonvox-test
 ARGS="$(printf '%q ' "$@")"       # keeps quoting intact (-k "a or b") through the remote shell
 if [ "${COVERAGE:-}" = 1 ]; then PYTEST="sh -c 'pytest --cov=app --cov-branch --cov-report=term-missing:skip-covered --cov-report=json:/tmp/cov.json $ARGS && python tests/check_critical.py /tmp/cov.json'"; else PYTEST="pytest $ARGS"; fi

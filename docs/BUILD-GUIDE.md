@@ -18,7 +18,7 @@ location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps sti
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
 | GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
 | Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1–0.5 done 2026-11-13** (skeleton; inventory scripts, run once by the operator; API on the directory fake; web shell; compose and smoke). **Ahead of order, because it needs no resources: Step 3's document, its validation and the compiler to an engine plan** (no FusionPBX writes: those wait for the write-path spike) |
-| Staging instance, PhotonVox VPS | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1). VPS: does not exist (GATE 1a) |
+| Staging instance, PhotonVox VPS | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1); the adapter's write role on staging (GATE 3a, staging part) and the adapter itself built (Step 3). VPS: does not exist (GATE 1a) |
 
 **Dev ports** (they collide with no other agent): web **5183**, API **8113**.
 
@@ -234,9 +234,11 @@ queue in PhotonVox with HTC's turnaround is the R1 path).
   the per-site emergency number); hours and holidays; numbers from **stock** and port requests (tracked by hand in R1).
 - The **compiler** and the **adapter**: every object of ARCHITECTURE §8 generated and written to the staging instance; publish with the
   synthetic check; undo; drift detection.
+  *Done 2026-11-13: the adapter (`app/engine/`) and its staging proof `engine/staging/prove-publish.sh` (55 checks, calls included), with the
+  block route and anchored call classes. Still to do here: the synthetic check, versions and undo, drift detection, `engine_object` in
+  PhotonVox's database, and vox-agent in place of the SSH stand-in.*
 - **Photon trunking:** upstream gateways per instance generated from `upstream`; outbound routes per call class in Photon's order; caller ID
-  only from held numbers; the **locked 911 route** per site; the **locked block route** right after it (ARCHITECTURE §15a, if decision 29 is
-  taken): Photon's default list on the Platform page, the organization's **Call blocking** page (allow a category, add or remove numbers and
+  only from held numbers; the **locked 911 route** per site; the **locked block route** right after it (ARCHITECTURE §15a, decision 29): Photon's default list on the Platform page, the organization's **Call blocking** page (allow a category, add or remove numbers and
   prefixes), blocked attempts reported by vox-agent to the audit and the partner. Per-extension overrides here if small, else R2; inbound
   blocking in R2.
 - Voicemail to email through Postmark (its own stream; paid tier: Connor).

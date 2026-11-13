@@ -83,3 +83,12 @@ and not reproducible; the script is fixed (only the password file is made privat
 Known differences from production, both minor releases the package repositories no longer serve at production's level: Debian 12.15 (production
 12.14) and PostgreSQL 18.7 (production 18.4). Production gets the same on its next `apt upgrade`; matching them exactly would need old packages
 from the archives, which is not worth it for staging.
+
+### What is on it now
+
+- Domains: the install's own (`10.10.0.60`), `spike.vox.test` (written by FusionPBX's pages in the write-path spike, kept as the reference) and
+  `adapter.vox.test` (written by PhotonVox's adapter: `engine/staging/prove-publish.sh`). The spike's direct-write domain was removed.
+- Gateways: two SIPp upstreams on LXC 800, `sipp-upstream` on 5070 (the spike's, by page) and on 5071 (the adapter's, PhotonVox-owned).
+- The database role `photonvox_adapter`: select/insert/update/delete on the tables the adapter writes, insert on `v_domains`, select on
+  `v_access_controls`; nothing else. Its password is on the runner in `~/.config/photonvox/staging-adapter.pass` (mode 600); the test phones'
+  SIP passwords and PINs in `~/.config/photonvox/staging-secrets.json` (mode 600).

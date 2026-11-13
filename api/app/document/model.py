@@ -7,7 +7,7 @@ nothing else does. Ids are PhotonVox's own: sites are the directory's site ids, 
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Literal, Optional, Union
+from typing import Annotated, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -106,12 +106,32 @@ class Box(Strict):
     email: Optional[str] = Field(None, max_length=320)
 
 
+PLUS_PREFIX = Annotated[str, Field(pattern=r"^\+[1-9][0-9]{0,14}$")]        # a number or prefix in + form ("+1212555", "+44")
+NANP_PREFIX = Annotated[str, Field(pattern=r"^\+1[2-9][0-9]{0,9}$")]        # a North American number or prefix in +1 form
+
+
+class Blocking(Strict):
+    """The organization's Call blocking page (§15a, decision 29). Photon's default list blocks international (except the countries switched on
+    in `Calling.international`), premium, the high-cost North American codes and satellite ranges; this says what the organization changes."""
+    allow: List[Literal["high_cost_nanp", "satellite", "premium"]] = Field(default_factory=list)   # categories let through (premium: staff only)
+    block: List[PLUS_PREFIX] = Field(default_factory=list, max_length=500)           # extra numbers or prefixes to block
+    allow_numbers: List[NANP_PREFIX] = Field(default_factory=list, max_length=500)   # let through a blocked category
+
+
 class Calling(Strict):
     """What outside calls the organization may make (§15). Emergency, 988 and relay services are always allowed and are not listed here."""
     national: bool = True
     toll_free: bool = True
     international: List[str] = Field(default_factory=list)       # country calling codes switched on by an owner ("44", "52"); empty = none
     spend_limit_usd: int = Field(50, ge=0, le=100_000)
+    blocking: Blocking = Field(default_factory=Blocking)
+
+
+class Features(Strict):
+    """Engine features that let one phone reach into another's calls. Off unless an admin switches them on (the spike found FusionPBX enables
+    them in every new domain)."""
+    eavesdrop: bool = False
+    intercept: bool = False
 
 
 class PhoneSystem(Strict):
@@ -124,6 +144,7 @@ class PhoneSystem(Strict):
     users: Dict[str, User] = Field(default_factory=dict)
     boxes: Dict[str, Box] = Field(default_factory=dict)
     calling: Calling = Field(default_factory=Calling)
+    features: Features = Field(default_factory=Features)
 
     @field_validator("numbers")
     @classmethod

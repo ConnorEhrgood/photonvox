@@ -212,3 +212,28 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
 - LXC 800: no containers or logs left; the image stays (121 MB, about 30 MB unique) for the engine tests; 12.9 GB free.
 - From Connor: the live engine's new block route (premium, NXX 976, 21 high-cost Caribbean area codes) recorded in ARCHITECTURE §17a; the
   **Call blocking** design added as ARCHITECTURE §15a with **proposed decision 29**, and in BUILD-GUIDE Steps 2 and 3 and the R2 table.
+
+## 2026-11-13: Step 3, the adapter (and decision 29 decided)
+
+- Decision 29 (call blocking) marked decided by Connor, 2026-11-13.
+- **The compiler:** the document gains `calling.blocking` (categories let through, numbers and prefixes to block, North American numbers let
+  through) and `features` (eavesdrop, intercept: off by default). Photon's default list is `app/compiler/blocking.py` (version 2026-11-13); the
+  plan's second route, right after 911, is the locked block route (premium, high-cost North American codes, satellite, international not
+  switched on, and the organization's own list). High-cost codes moved out of the national pattern into the block route, so a number can be
+  let through; premium stays out of national as a second line and can only be let through by Photon staff. The contract schema was
+  regenerated; the golden plan reviewed and refrozen.
+- **The adapter** (`app/engine/`): `fusionpbx.py` builds every row and dial plan (critical module, 100% branch coverage), `writer.py` upserts
+  and removes in one transaction, scoped to the domain, `upstreams.py` writes the instance's gateways and providers entries, `publish.py` puts
+  the steps in order, `agent.py` is what vox-agent will offer. Spike fixes in it: **call classes matched anchored**, **eavesdrop and intercept
+  switched off** in each domain, one `call_direction-outbound` per domain, the emergency route showing the emergency caller ID.
+- **Proven:** the writer against a FusionPBX-shaped database on LXC 800 (11 tests: first publish, republish keeping secrets and what phone
+  users set, removal, scoping, features, upstreams); on staging, `engine/staging/prove-publish.sh` passes 55 checks with SIPp: national calls
+  with the direct number, the outside-line prefix, 911/9911/933 with the site's emergency number, 988; premium, high-cost, listed,
+  international and satellite numbers refused with nothing reaching the upstream, a let-through number allowed; the main number in all three
+  carrier forms, the menu and its key, the group, open and closed hours in the site's time zone, unreachable users hung up or sent to voicemail;
+  an unchanged republish writes nothing new and keeps passwords; a reduced publish removes what left; the spike's domain untouched.
+- Staging: the adapter's database role created (GATE 3a's staging part); the spike's direct-write domain removed. The full suite: 337 API tests
+  at 100% coverage, the critical-module check including the new modules, web and parsers green.
+- `scripts/remote-test.sh` now uses `/root/vox-test/suite`, so it no longer deletes the SIPp files beside it.
+- Found (SPIKES §1f): FusionPBX's database is SQL_ASCII (the adapter connects with a UTF-8 client encoding); no text-to-speech module, so menus
+  stay silent until recordings (a Step 3 decision); FreeSWITCH follows the `timezone` variable for hours, as proven.

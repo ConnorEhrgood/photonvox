@@ -1,9 +1,10 @@
 """Call classes: which outside numbers belong to which class, as FreeSWITCH (PCRE) patterns (ARCHITECTURE §15). Data, kept in one place.
 
 The patterns see the digits as dialed after an optional outside-line prefix (the compiler adds it) and capture the number to send to the
-upstream in +1 / +cc form. Premium numbers (900, and 976 exchanges) match no class: no route is ever generated for them. The high-cost
-North American area codes (the Caribbean and other places billed as international, where one-ring scams send calls) are left out of
-"national"; an owner may switch one on as if it were a country ("1876" for Jamaica).
+upstream in +1 / +cc form. What is blocked is the block route's job (app/compiler/blocking.py, decision 29), which comes before every class
+route: the high-cost North American area codes (the Caribbean and other places billed as international, where one-ring scams send calls) are
+blocked there, so an organization can let one through. Premium numbers (900, and 976 exchanges) are also left out of "national" itself, a
+second line in case the block route were ever missing.
 """
 from __future__ import annotations
 
@@ -19,19 +20,19 @@ PREMIUM_NPA = ("900",)
 TOLL_FREE_NPA = ("800", "833", "844", "855", "866", "877", "888")
 PREMIUM_NXX = ("976",)
 
-_NOT = "|".join(HIGH_COST_NANP + PREMIUM_NPA + TOLL_FREE_NPA)
+_NOT = "|".join(PREMIUM_NPA + TOLL_FREE_NPA)
 PATTERNS: Dict[str, str] = {
-    # 10 digits, or 11 with a leading 1; area code and exchange start 2-9; not premium, not high-cost, not toll-free (its own class).
-    "national": rf"^1?((?!{_NOT})[2-9]\d{{2}}(?!{'|'.join(PREMIUM_NXX)})[2-9]\d{{6}})$",
-    "toll_free": rf"^1?((?:{'|'.join(TOLL_FREE_NPA)})[2-9]\d{{6}})$",
+    # 10 digits, or 11 with a leading 1 (or +1); area code and exchange start 2-9; not premium, not toll-free (its own class).
+    "national": rf"^(?:\+1|1)?((?!{_NOT})[2-9]\d{{2}}(?!{'|'.join(PREMIUM_NXX)})[2-9]\d{{6}})$",
+    "toll_free": rf"^(?:\+1|1)?((?:{'|'.join(TOLL_FREE_NPA)})[2-9]\d{{6}})$",
 }
 
 
 def international_pattern(code: str) -> str:
     """A country calling code ("44"), or a high-cost North American area code switched on as if it were one ("1876")."""
     if len(code) == 4 and code.startswith("1"):
-        return rf"^1?({code[1:]}[2-9]\d{{6}})$"
-    return rf"^011({code}\d{{4,13}})$"
+        return rf"^(?:\+1|1)?({code[1:]}[2-9]\d{{6}})$"
+    return rf"^(?:011|\+)({code}\d{{4,13}})$"
 
 
 def is_valid_international(code: str) -> bool:

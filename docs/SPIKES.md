@@ -105,3 +105,17 @@ assume a logged-in session. **Decision taken by the spike: write the database di
   `python3 engine/spike/direct.py` is applied on staging (§1c). Containers are named `vox-sipp-*`, labeled `com.photonvox.owner=photonvox-tests`,
   removed when they exit; `scripts/sipp.sh clean` removes the logs, `clean --image` the image too.
 - `scripts/staging-check.sh` was also proven to fail on a gateway that is not the SIPp upstream (one added to the database, then removed).
+
+### 1f. Found while building the adapter (Step 3, 2026-11-13)
+
+- **FusionPBX's database is SQL_ASCII** (as created by its install script): without a client encoding, psycopg returns text as bytes. The
+  adapter connects with `client_encoding=utf8`, which is what FusionPBX's PHP reads and writes.
+- **No foreign keys** in FusionPBX's tables: the adapter orders its own inserts (parents first) and deletes (children first).
+- **Time conditions follow the `timezone` channel variable**, set inline as the dial plan's first action: proven by two numbers with the same
+  hours, one written for Los Angeles time and one in UTC (open and closed at the same moment).
+- **No text-to-speech module is built** (`mod_flite` is not loaded): a menu's greeting cannot be spoken from the document's text. Menus answer
+  and take keys silently until recorded greetings arrive (or `mod_flite` or a TTS service is added: a decision for Step 3's recordings work).
+- **Not-registered forwarding** (FusionPBX's `forward_user_not_registered_*`) transfers in the domain's context, so "unreachable: none"
+  forwards to a one-line PhotonVox dial plan that hangs up; "voicemail" is FusionPBX's default.
+- **A carrier's number forms:** one destination row with `destination_prefix = 1` and the 10-digit number matches `+1N`, `1N` and `N` in single
+  mode; all three were called on staging.

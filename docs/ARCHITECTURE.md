@@ -22,9 +22,9 @@ Suite-wide topics (PhotonID and organizations, the rules for working on Photon, 
 
 ## Decisions (decided by Connor, 2026-11-13)
 
-**All 28 approved as recommended ("Everything else looks quite good"), except decision 23, which Connor changed (the native handoff
+**Decisions 1–28 approved as recommended ("Everything else looks quite good"), except decision 23, which Connor changed (the native handoff
 on cellular devices, automatic location elsewhere);
-the row below is the decided version.** The BUILD-GUIDE follows them. Changing one means changing it here first, with Connor.
+the row below is the decided version. Decision 29 (call blocking) was added and approved the same day.** The BUILD-GUIDE follows them. Changing one means changing it here first, with Connor.
 
 | # | Decision | Why | § |
 |---|---|---|---|
@@ -56,7 +56,7 @@ the row below is the decided version.** The BUILD-GUIDE follows them. Changing o
 | 26 | **A key per device in the Secure Enclave or Keystore, no SIP credentials on devices**; signing out a device or removing the user cuts it off at the gateway at once and wipes the app's data on its next run | A stolen phone carries nothing that works elsewhere | 18a |
 | 27 | **Builds: Android and Windows on the runner, iOS and macOS on Xcode Cloud** (25 hours a month included; needs the photonvox repo on GitHub), Connor's Mac as the fallback. **Apple Developer Program and Google Play Console as organization accounts, Connor the Account Holder**; Play App Signing with our upload key in `~/keys`; APNs and FCM keys on the gateway hosts and in Bitwarden. *Costs money (Apple $99 a year, Google $25 once, Windows signing a small monthly fee)* | No Mac to buy or keep running; keys held the way PhotonBoard's are | 18a |
 | 28 | **Phase A sits in R2**, first after R1, with its spikes during R1; about **4–5 months** to the stores | It needs R1's instances, numbers and locked 911; nothing in R1 waits for it | 18a |
-| 29 | *Proposed, for Connor:* **Call blocking per organization** (§15a): Photon's default list (international until switched on, premium, high-cost Caribbean and other non-US North American codes, satellite and other high-cost ranges) blocked by default; the partner or an admin allows a category or adds and removes numbers and prefixes; compiled as one locked block route right after the emergency routes; 911 and 933 never blocked; Photon keeps the list current suite-wide. The block route, the default list and the page in R1; per-extension overrides and blocked-call alerts with it if small, else R2; inbound blocking (callers, anonymous) in R2, spam scoring later | The riskiest destinations closed for everyone without depending on each extension's call class; the live engine already needed a hand-built version (§17a) | 15a |
+| 29 | **Call blocking per organization** (decided 2026-11-13, as Connor asked; §15a): Photon's default list (international until switched on, premium, high-cost Caribbean and other non-US North American codes, satellite and other high-cost ranges) blocked by default; the partner or an admin allows a category or adds and removes numbers and prefixes; compiled as one locked block route right after the emergency routes; 911 and 933 never blocked; Photon keeps the list current suite-wide. The block route, the default list and the page in R1; per-extension overrides and blocked-call alerts with it if small, else R2; inbound blocking (callers, anonymous) in R2, spam scoring later | The riskiest destinations closed for everyone without depending on each extension's call class; the live engine already needed a hand-built version (§17a) | 15a |
 
 Dropped from revision 1 (no longer decisions now): Telnyx as the second carrier (replaced by 7), a login per phone (replaced by 13), and the
 R3 items (texting, chat, B2 bucket for recordings), which keep their design in §18 and come back as decisions before their release. Revision 1's
@@ -213,9 +213,13 @@ active/active is needed (§16).
   domain, extensions and voicemail boxes, ring groups, menus (IVR), time conditions, inbound destinations with their dial plans, outbound
   routes, gateways, caller-ID settings, the 911 route. Every object it writes is recorded in PhotonVox (`engine_object`: kind, FusionPBX uuid,
   the hash of what was written), which is how drift is found and how a phone system is removed cleanly.
-- **Writes go to FusionPBX's database** with a role limited to the tables the adapter writes, in one transaction per publish, followed by the
-  engine's cache flush and XML reload through vox-agent. Whether some objects are better written through FusionPBX's own API (versions differ)
-  is settled in Step 0.
+- **Writes go to FusionPBX's database** with a role limited to the tables the adapter writes, in one transaction per publish, followed by
+  vox-agent deleting exactly the cache entries the publish touched (FusionPBX 5.5.12 has no write API: SPIKES §1d). Built and proven on
+  staging in Step 3 (`app/engine/`): a pure builder makes every row and dial plan from the plan, each in the phone system's domain with ids
+  derived from the phone system's id; the writer **upserts** PhotonVox's columns only (what phone users set, such as call forwarding, survives),
+  removes what the previous publish wrote and this one does not, generates a SIP password or PIN only for a new row, and returns the manifest
+  that becomes `engine_object`. A new domain is seeded by FusionPBX's own `upgrade.php --defaults` through vox-agent. The connection uses a
+  UTF-8 client encoding (FusionPBX's database is SQL_ASCII).
 - **Each object is written exactly as FusionPBX's own page would** (the known trap: an inbound number needs a destination row consistent with its
   dial plan, or calls drop silently). Every kind of write has a test on a staging instance of the same version, ending in a real SIP call.
 - **Publish is checked**: after writing, vox-agent places a synthetic call through each new inbound route and the 911 route's selection
@@ -530,7 +534,7 @@ Defaults for every organization, applied to the live engine first (decision 17):
 | **GDMS** | The API user and secret encrypted; the GDMS web login for staff with MFA; phones' admin passwords set by Photon's template; the phones' web interface limited |
 | **Caller ID** | Only held numbers; signed by the upstream |
 
-### 15a. Call blocking (proposed: decision 29)
+### 15a. Call blocking (decision 29, 2026-11-13)
 
 A **Call blocking** page in each organization's settings, for the partner (all its organizations) and the organization's admins.
 - **Blocked by default**, from **Photon's default list**: international (until switched on per country, §15), premium (900, NXX 976, premium

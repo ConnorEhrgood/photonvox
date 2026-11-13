@@ -16,6 +16,8 @@ CRITICAL = [
     "app/document/validate.py", # whether a phone system may be published (911 first)
     "app/compiler/compile.py",  # the phone system as the engine runs it: routes, caller IDs, the locked 911 route
     "app/compiler/classes.py",  # which numbers each call class allows
+    "app/compiler/blocking.py", # which numbers are blocked (decision 29), and that 911 never is
+    "app/engine/fusionpbx.py",  # the engine rows: every one in its own domain, call classes anchored, 911 and the block route as built
 ]
 
 data = json.load(open(sys.argv[1]))["files"]
