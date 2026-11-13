@@ -43,3 +43,31 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   callbacks show no signature** (treated as notices and confirmed by a pull). Nothing was called: there is no API account.
 - No Step 0 code had been written when the direction arrived (the session was still reading PhotonGuard's templates), so the pause point is
   the plan commit itself.
+
+## 2026-11-13: Step 0.1, 0.3, 0.4, 0.5 (the parts that hold under any answer)
+
+- **API** (`api/`): PhotonGuard's shape, adapted. The directory copy (organizations, sites, people, access) kept by notify-then-pull with the
+  reference client vendored from photonid at `bae1afd` (the client files are unchanged since `585bf6d`; checksums pinned by a test). The role
+  catalog is ARCHITECTURE §7 (owner, admin, user) in one table (`app/roles.py`): decision 15 is not answered yet, and if Connor changes the roles
+  only that table and its tests change. Authorization by role and site scope with the directory's "strongest entry at a site" rule; row-level
+  security with the owner / `vox_app` / `vox_system` split from the first migration; audit log; `/me`, an organization's sites and members
+  (partner staff shown as "Partner support"), platform views of organizations and the directory copy; the worker (pull, publish roles,
+  heartbeat). `/healthz` has no dependencies and `/readyz` checks the database (suite OPERATIONS §2.5).
+- **Tests:** 204 on LXC 800 (`scripts/remote-test.sh`, project `photonvox-test`), 100% line and branch coverage, every critical module at
+  100%. The directory's World has an integrator (partner technician, admin of two customers through the partner grant) from the start.
+  Found while doing it: FastAPI 0.143 nests included routers in `app.routes`, so the "every tenant route is isolated" test lists routes from the
+  OpenAPI schema instead.
+- **Web** (`web/`, dev port 5183): the photon-ui shell vendored by its own sync script; PhotonID sign-in (copied from PhotonGuard); the
+  integrator's navigation (Customers first when someone works on several customers or through a partner; Overview, Users, Phones, Numbers, Call
+  flows, Sites, Monitor; "My phone" for a user); Settings (Team, Templates, Alerts, PhotonConsole connection, Audit log) and Platform
+  (Organizations, Instances, Upstreams, GDMS, Number stock) hubs. Pages not built say so and name their step. 109 tests; coverage above
+  PhotonGuard's ratchet. Every page screenshotted at the three sizes and looked at; one fix from that review (a person invited without a name
+  showed a blank title on the Team page). photon-ui has no phone icon: Phones uses the "screens" icon until one is added there.
+- **Compose and smoke** (`docker-compose.yml`, `scripts/smoke-stack.sh`): db, one-shot migrate, api (read-only root, all capabilities dropped,
+  unprivileged), worker. Smoke on LXC 800 as project `photonvox-smoke`: migration exited 0, all services healthy, `/me` without a token 401.
+  The first run failed because the database is addressed by container name and the smoke project's name differs; `DB_HOST` now sets it.
+  Everything the smoke run makes is removed by it.
+- **LXC 800 left clean:** no PhotonVox containers, volumes, networks or folders; the test image was removed at the end of the session (the next
+  `remote-test.sh` rebuilds it, a few minutes).
+- **Next, and what blocks it:** 0.2 (the inventory script) can be written without anyone; 0.6 (the staging instance) needs GATE 0a, and the GDMS,
+  zero-touch and barcode spikes need GATES 0c and 0d (BUILD-GUIDE §9). Everything after Step 0 waits for Connor's answers to the decisions.

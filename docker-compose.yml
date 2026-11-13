@@ -1,0 +1,113 @@
+# PhotonVox's stack: the database, a one-shot migration, the API and the worker. Step 0 shape: images are built from this repo; the release flow
+# (images built once, pushed by digest, signed) and the web container behind Caddy come with the first deploy (BUILD-GUIDE Step 1, suite OPERATIONS §2.2).
+#
+#   cp .env.example .env      # fill in real values
+#   docker compose up -d --build
+#
+# The database is addressed by container name (suite §2: never a bare service name on a shared network); DB_HOST changes it for another project name.
+# Every service has a memory ceiling; nothing but the API is published, and only on the host's loopback (Caddy fronts it in production).
+name: photonvox
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "5" }
+
+# The owner: migrations only. The API and worker never get its password.
+x-owner-db-url: &owner-db-url postgresql+psycopg://${POSTGRES_USER:-photonvox}:${POSTGRES_PASSWORD}@${DB_HOST:-photonvox-db-1}:5432/${POSTGRES_DB:-photonvox}
+# The API logs in as vox_app and the worker as vox_system: neither owns the tables, so row-level security applies.
+x-app-db-url: &app-db-url postgresql+psycopg://vox_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@${DB_HOST:-photonvox-db-1}:5432/${POSTGRES_DB:-photonvox}
+x-system-db-url: &system-db-url postgresql+psycopg://vox_system:${SYSTEM_DB_PASSWORD:?set SYSTEM_DB_PASSWORD in .env}@${DB_HOST:-photonvox-db-1}:5432/${POSTGRES_DB:-photonvox}
+
+services:
+  db:
+    image: timescale/timescaledb:2.30.1-pg16@sha256:f495f2bc25ca7596ca8e1606c6241ca250ccc56a0c082b9f2ec0d290e0126cd9
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-photonvox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-photonvox}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photonvox} -d ${POSTGRES_DB:-photonvox}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  migrate:
+    build: ./api
+    image: photonvox-api:dev
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    env_file: .env
+    environment:
+      MIGRATE_DATABASE_URL: *owner-db-url
+      DATABASE_URL: *owner-db-url
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+
+  api:
+    image: photonvox-api:dev
+    restart: unless-stopped
+    mem_limit: 384m
+    memswap_limit: 384m
+    env_file: .env
+    environment:
+      DATABASE_URL: *app-db-url
+      SYSTEM_DATABASE_URL: *system-db-url
+      POSTGRES_PASSWORD: ""          # the owner's password is not the API's to hold (blank here wins over env_file)
+      MIGRATE_DATABASE_URL: ""
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    ports:
+      - "127.0.0.1:${API_PORT:-8113}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    logging: *logging
+
+  worker:
+    image: photonvox-api:dev
+    restart: unless-stopped
+    mem_limit: 192m
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: *app-db-url
+      SYSTEM_DATABASE_URL: *system-db-url
+      POSTGRES_PASSWORD: ""
+      MIGRATE_DATABASE_URL: ""
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # The worker touches /tmp/worker.ok on every pass; a hung or crashed loop goes stale.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/worker.ok') < 120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    logging: *logging
+
+volumes:
+  db_data:
