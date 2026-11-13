@@ -11,6 +11,7 @@ API=1; SMOKE=0
 for a in "$@"; do case "$a" in --no-api) API=0;; --smoke) SMOKE=1;; *) echo "unknown option $a" >&2; exit 2;; esac; done
 PY=${PHOTONVOX_VENV:-$HOME/.venvs/photonvox}/bin/python
 
+step "inventory: parsers"; scripts/inventory/tests/test_parsers.sh
 step "api: pure-logic tests (no database)"; (cd api && "$PY" -m pytest tests/unit -p no:warnings -p no:cacheprovider -q 2>&1 | tail -3)
 step "web: types"; (cd web && npx tsc --noEmit -p tsconfig.app.json)
 step "web: tests, with the coverage ratchet"; (cd web && npx vitest run --coverage 2>&1 | grep -E "Tests |All files|ERROR" )

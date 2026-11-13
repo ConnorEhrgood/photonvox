@@ -1,0 +1,46 @@
+Registrations:
+=================================================================================================
+Call-ID:    	aaaa1111@192.0.2.10
+User:       	100@acme.sip.example.net
+Contact:    	"Front Desk" <sip:100@192.0.2.10:5060;transport=udp>
+Agent:      	Grandstream GRP2602G 1.0.13.21
+Status:     	Registered(UDP)(unknown) EXP(2026-11-13 12:00:00) EXPSECS(3540)
+Ping-Status:	Reachable
+Ping-Time:	12.30
+Host:       	fusionpbx
+IP:         	192.0.2.10
+Port:       	5060
+Auth-User:  	100
+Auth-Realm: 	acme.sip.example.net
+MWI-Account:	100@acme.sip.example.net
+
+Call-ID:    	bbbb2222@10.168.1.21
+User:       	101@acme.sip.example.net
+Contact:    	"Pastor" <sip:101@10.168.1.21:5061;transport=tls>
+Agent:      	Grandstream GRP2650 1.0.5.67
+Status:     	Registered(TLS)(unknown) EXP(2026-11-13 12:00:00) EXPSECS(3540)
+Ping-Status:	Reachable
+Ping-Time:	9.80
+Host:       	fusionpbx
+IP:         	10.168.1.21
+Port:       	5061
+Auth-User:  	101
+Auth-Realm: 	acme.sip.example.net
+MWI-Account:	101@acme.sip.example.net
+
+Call-ID:    	cccc3333@198.51.100.7
+User:       	200@other.example.org
+Contact:    	<sip:200@198.51.100.7:5060>
+Agent:      	Zoiper rv2.10
+Status:     	Registered(UDP)(unknown) EXP(2026-11-13 12:00:00) EXPSECS(60)
+Ping-Status:	Unreachable
+Ping-Time:	0.00
+Host:       	fusionpbx
+IP:         	198.51.100.7
+Port:       	5060
+Auth-User:  	200
+Auth-Realm: 	other.example.org
+MWI-Account:	200@other.example.org
+
+Total items returned: 3
+=================================================================================================
