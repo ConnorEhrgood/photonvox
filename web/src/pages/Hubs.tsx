@@ -41,6 +41,7 @@ export const PlatformHub = () => (
   <Hub title="Platform" tabs={[
     { to: '/platform', label: 'Organizations', end: true },
     { to: '/platform/instances', label: 'Instances' },
+    { to: '/platform/911', label: '911' },
     { to: '/platform/upstreams', label: 'Upstreams' },
     { to: '/platform/gdms', label: 'GDMS' },
     { to: '/platform/numbers', label: 'Number stock' },

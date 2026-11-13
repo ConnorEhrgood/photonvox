@@ -19,3 +19,12 @@
   .pv-table td:empty { display: none; }
 }
 
+
+/* A list without bullets (numbers with their 911 state). */
+.pv-plain { list-style: none; padding: 0; margin: 0.25rem 0 1rem; display: grid; gap: 0.35rem; }
+
+/* The setup wizard: its steps as a short numbered line, fields side by side where there is room. */
+.pv-steps { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0 0 0.75rem; padding: 0; list-style: none; font-size: 0.85rem; color: var(--text-dim); }
+.pv-steps [aria-current="step"] { color: var(--text); font-weight: 600; }
+.pv-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0 0.75rem; }
+.pv-paste { width: 100%; min-height: 8rem; font-family: var(--font-mono, monospace); }

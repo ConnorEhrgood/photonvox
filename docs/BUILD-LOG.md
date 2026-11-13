@@ -265,3 +265,8 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
 - Proven: 66 checks on staging (`engine/staging/prove-publish.sh`: calls, the check passing, a number broken by hand making its check fail and
   a republish repairing it, hand edits found and put back); the API suite on LXC 800 at 100% line and branch coverage with `emergency.py`
   added to the critical modules.
+- **The web app:** the Overview shows the phone system's state, its problems, hand edits, the numbers' 911 state with the carrier, and its
+  versions with each check's result (failed test calls in words) and "go back to version N"; the setup wizard (site and 911 address, main
+  number and template, people pasted and reviewed row by row); Users with bulk import into a ring group; Platform → 911 for staff (addresses
+  to check, requests to carriers with the email text, "sent by hand" with a ticket number, the carrier's answer). 121 web tests; screenshots
+  of the new pages at the three sizes, no sideways scrolling.

@@ -42,6 +42,24 @@ const ORGS = [
   { id: 'o1', name: 'Cedar Works', status: 'active', plan_key: 'standard', home_region: 'us-east', partner_id: null, products: ['console', 'vox'] },
   { id: 'o2', name: 'Birch Co', status: 'suspended', plan_key: 'standard', home_region: 'us-east', partner_id: null, products: ['vox'] },
 ]
+const ADDR = { street: '1 Mill Road', unit: 'Suite 200', city: 'Asheville', state: 'NC', zip: '28801' }
+const user = (name, ext, site = 's1', o = {}) => ({ name, site, extension: ext, ...o })
+const PHONE_SYSTEM = {
+  id: 'ps1', status: 'ready', domain: 'k3x9q2.sip.photoninfra.xyz', instance: 'colo-a', published_version: 3, draft_updated_at: '2026-11-13T12:00:00Z',
+  draft: { version: 1, users: { 'u-ada': user('Ada Front', '100', 's1', { email: 'ada@example.com' }), 'u-ben': user('Ben Office', '101'),
+    'u-pat': user('Pat Pastor', '102', 's1', { direct_number: '+17245550123', show: 'direct' }), 'u-cy': user('Cy Annex', '200', 's2') },
+  numbers: { '+17245550100': {}, '+17245550110': {}, '+17245550123': {} }, groups: { everyone: { members: ['u-ada', 'u-ben'] } } },
+  problems: [], drift: { checked_at: new Date().toISOString(), changed: 0, missing: 0, extra: [] },
+}
+const ver = (number, state, o = {}) => ({ number, state, note: '', error: '', created_by: 'Tom Tech', created_at: '2026-11-13T12:00:00Z',
+  published_at: '2026-11-13T12:01:00Z', checks: { passed: 6, total: 6, failed: [] }, ...o })
+const VERSIONS = [ver(3, 'ready', { note: 'restored from version 1' }),
+  ver(2, 'failed', { error: '1 of 6 checks failed; the first: inbound +17245550110; version 1 restored',
+    checks: { passed: 5, total: 6, failed: [{ kind: 'inbound', number: '+17245550110', expected: ['reached group-annex'], got: null }] } }), ver(1, 'superseded')]
+const E911 = { locations: [], requests: [], numbers: [{ number: '+17245550100', status: 'confirmed', location_id: 'l1', confirmed_at: null },
+  { number: '+17245550110', status: 'requested', location_id: 'l2', confirmed_at: null }, { number: '+17245550123', status: 'unconfirmed', location_id: 'l1', confirmed_at: null }] }
+const TEMPLATES = [{ key: 'ring-everyone', name: 'Small office', description: 'The main number rings everyone in office hours, then the mailbox.' },
+  { key: 'front-desk-menu', name: 'Front desk menu', description: 'A short menu in office hours: front desk or a message.' }]
 const answers = (who) => ({
   '/me': who === 'pending' ? [503, { detail: { code: 'access_pending', detail: 'x' } }] : who === 'noaccess' ? [403, { detail: { code: 'no_access', detail: 'x' } }]
     : [200, who === 'user' ? me([tenant({ role: 'user', capabilities: ['vox.self.manage'] })], { name: 'Bo User' })
@@ -50,6 +68,12 @@ const answers = (who) => ({
       : me([tenant()])],
   '/tenants/t1/sites': [200, SITES], '/tenants/t1/members': [200, MEMBERS],
   '/platform/organizations': [200, ORGS],
+  '/tenants/t1/phone-system': [200, PHONE_SYSTEM], '/tenants/t1/phone-system/versions': [200, VERSIONS],
+  '/tenants/t1/emergency': [200, E911], '/tenants/t1/phone-system/templates': [200, TEMPLATES],
+  '/platform/emergency-locations': [200, [{ id: 'l1', organization: 'Elm Street Dental', site_id: 's9', key: 'main', address: ADDR }]],
+  '/platform/carrier-requests': [200, [{ id: 'r1', organization: 'Cedar Works', carrier: 'htc', method: 'email', status: 'sent', reference: 'pm-3f2a', created_at: '2026-11-13T12:00:00Z',
+    sent_at: new Date(Date.now() - 3 * 3600e3).toISOString(), items: [{ number: '+17245550100', action: 'add', address: ADDR }, { number: '+17245550111', action: 'remove', address: null }],
+    email: { subject: '911 address update 1a2b3c4d: Cedar Works (2 numbers)', body: 'Hello,\n\nPlease update the 911 address records for these numbers (Cedar Works):\n\n  Add     +17245550100  at  100 Main St, Asheville, NC 28801\n  Remove  +17245550111  (no longer in service with us)\n' } }]],
   '/platform/directory': [200, { cursor: 12, last_pull_at: null, last_ok_at: new Date().toISOString(), last_error: null }],
 })
 
@@ -58,6 +82,7 @@ const PAGES = [
   ['login', '/login', 'signedout'], ['pending', '/', 'pending'], ['noaccess', '/', 'noaccess'],
   ['customers-tech', '/', 'tech'], ['overview-owner', '/overview', 'owner'], ['phones-owner', '/phones', 'owner'], ['sites', '/sites', 'owner'],
   ['team', '/settings/team', 'owner'], ['myphone-user', '/', 'user'], ['platform-orgs', '/platform', 'staff'], ['platform-gdms', '/platform/gdms', 'staff'],
+  ['users', '/users', 'owner'], ['setup-wizard', '/overview', 'owner', 'Start again from a template'], ['platform-911', '/platform/911', 'staff'],
 ].filter(([name]) => !only || name.includes(only))
 
 mkdirSync('screenshots', { recursive: true })
@@ -69,7 +94,7 @@ process.on('exit', stop)
 for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 200)) }
 const browser = await chromium.launch({ executablePath })
 try {
-  for (const [name, route, who] of PAGES) {
+  for (const [name, route, who, click] of PAGES) {
     for (const [size, viewport] of Object.entries(SIZES)) {
       const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1 })
       if (who !== 'signedout') await ctx.addInitScript(() => sessionStorage.setItem('pv-dev-token', 'screenshot'))
@@ -84,6 +109,7 @@ try {
       const page = await ctx.newPage()
       await page.goto(`http://localhost:${PORT}${route}`)
       await page.waitForTimeout(700)
+      if (click) { await page.getByRole('button', { name: click }).click(); await page.waitForTimeout(400) }   // a dialog opened from the page
       await page.screenshot({ path: `screenshots/${name}-${size}.png`, fullPage: true })
       // A page must not scroll sideways at any size (the layout rule); report it rather than hide it.
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)

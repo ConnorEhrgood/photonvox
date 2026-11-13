@@ -63,3 +63,71 @@ export const ROLE_LABEL: Record<Role, string> = { user: 'User', admin: 'Admin', 
 
 export const scopeText = (s: Scope, siteNames: Record<string, string> = {}): string =>
   'all' in s ? 'Whole organization' : s.sites.map((id) => siteNames[id] ?? 'a site').join(', ')
+
+// ---- the phone system (api/app/routes/phone_system.py) ----
+
+export interface Problem { path: string; code: string; message: string }
+
+export type PhoneSystemStatus = 'new' | 'publishing' | 'ready' | 'failed' | 'changed'
+
+export interface DraftUser { name: string; site: string; extension: string; email?: string; direct_number?: string; show?: 'site' | 'direct' }
+
+/** The document being built (api/app/document/model.py). Only the parts the web app reads are typed; the rest passes through. */
+export interface Draft {
+  version: 1
+  sites?: Record<string, { emergency_location: string; emergency_number: string; caller_id: string; hours?: string }>
+  numbers?: Record<string, { site: string; open: Record<string, string>; closed?: Record<string, string> }>
+  users?: Record<string, DraftUser>
+  groups?: Record<string, { members: string[] }>
+  [key: string]: unknown
+}
+
+export interface PhoneSystemSummary {
+  id: string
+  status: PhoneSystemStatus
+  domain: string
+  instance: string
+  published_version: number | null
+  draft: Draft
+  draft_updated_at: string
+  problems: Problem[]
+  drift: { checked_at: string | null; changed: number; missing: number; extra: { table: string; uuid: string; label: string }[] }
+}
+
+export interface Version {
+  number: number
+  state: 'queued' | 'publishing' | 'ready' | 'failed' | 'superseded'
+  note: string
+  error: string
+  created_by: string
+  created_at: string
+  published_at: string | null
+  checks: { passed: number; total: number; failed: { kind: string; number: string; expected: string[]; got: string | null }[] }
+}
+
+export interface Template { key: string; name: string; description: string }
+
+export interface ImportRow { line: number; id: string; user: DraftUser; problems: string[] }
+
+export interface EmergencyAddress { street: string; unit: string; city: string; state: string; zip: string }
+
+export interface EmergencyState {
+  locations: { id: string; site_id: string; key: string; address: EmergencyAddress; status: 'pending' | 'validated' | 'rejected'; note: string }[]
+  numbers: { number: string; status: 'unconfirmed' | 'requested' | 'confirmed'; location_id: string | null; confirmed_at: string | null }[]
+  requests: { id: string; status: string; items: { number: string; action: string }[]; reference: string; sent_at: string | null }[]
+}
+
+export interface CarrierRequestRow {
+  id: string
+  organization: string
+  carrier: string
+  method: string
+  status: 'open' | 'sent'
+  items: { number: string; action: 'add' | 'change' | 'remove'; address: EmergencyAddress | null }[]
+  reference: string
+  created_at: string
+  sent_at: string | null
+  email: { subject: string; body: string }
+}
+
+export interface PendingLocation { id: string; organization: string; site_id: string; key: string; address: EmergencyAddress }

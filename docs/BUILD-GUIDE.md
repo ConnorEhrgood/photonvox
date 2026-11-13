@@ -234,9 +234,14 @@ queue in PhotonVox with HTC's turnaround is the R1 path).
   the per-site emergency number); hours and holidays; numbers from **stock** and port requests (tracked by hand in R1).
 - The **compiler** and the **adapter**: every object of ARCHITECTURE §8 generated and written to the staging instance; publish with the
   synthetic check; undo; drift detection.
-  *Done 2026-11-13: the adapter (`app/engine/`) and its staging proof `engine/staging/prove-publish.sh` (55 checks, calls included), with the
-  block route and anchored call classes. Still to do here: the synthetic check, versions and undo, drift detection, `engine_object` in
-  PhotonVox's database, and vox-agent in place of the SSH stand-in.*
+  *Done 2026-11-13: the adapter (`app/engine/`) with the block route and anchored call classes; publishing by the worker with the
+  post-publish check (synthetic calls), versions and undo, hand-edit detection, the publish records (`engine_object`, sealed `engine_secret`);
+  templates and bulk import; sites' emergency addresses with Photon staff's queue and numbers' 911 registrations with carrier requests
+  (decision 31); the web app's Overview (state, problems, hand edits, publish, versions, undo, numbers' 911 state), setup wizard, Users with
+  import, and Platform → 911. Proven: `engine/staging/prove-publish.sh` (66 checks on staging), the API suite at 100%. Still to do here:
+  vox-agent in place of the SSH stand-in; the call-flow, numbers and hours screens (the draft is edited through templates and import so
+  far); clone; text-to-speech at publish (decision 30, after the listening test); voicemail to email; numbers from stock and port requests;
+  Hickory's 911 contact and turnaround (ARCHITECTURE §22); the done-when timing and the security review.*
 - **Photon trunking:** upstream gateways per instance generated from `upstream`; outbound routes per call class in Photon's order; caller ID
   only from held numbers; the **locked 911 route** per site; the **locked block route** right after it (ARCHITECTURE §15a, decision 29): Photon's default list on the Platform page, the organization's **Call blocking** page (allow a category, add or remove numbers and
   prefixes), blocked attempts reported by vox-agent to the audit and the partner. Per-extension overrides here if small, else R2; inbound

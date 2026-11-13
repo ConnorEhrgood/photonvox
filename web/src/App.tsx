@@ -6,14 +6,16 @@ import { Loading } from './components/ui'
 import { CustomersPage } from './pages/Customers'
 import { NotForYou, PlatformHub, SettingsHub, SettingsIndex } from './pages/Hubs'
 import { CallbackPage, LoginPage } from './pages/Login'
+import { Emergency911Page } from './pages/Emergency911'
 import { OverviewPage } from './pages/Overview'
 import { PlatformOrganizationsPage } from './pages/Platform'
 import { SitesPage } from './pages/Sites'
 import {
   AlertsPage, AuditPage, CallFlowsPage, ConsolePage, GdmsPage, InstancesPage, MonitorPage, MyPhonePage, NumberStockPage, NumbersPage, PhonesPage,
-  TemplatesPage, UpstreamsPage, UsersPage,
+  TemplatesPage, UpstreamsPage,
 } from './pages/Soon'
 import { TeamPage } from './pages/Team'
+import { UsersPage } from './pages/Users'
 
 function Protected() {
   const { status, error, me, signOut } = useAuth()
@@ -91,6 +93,7 @@ export function App() {
             <Route path="platform" element={<PlatformHub />}>
               <Route index element={<PlatformOrganizationsPage />} />
               <Route path="instances" element={<InstancesPage />} />
+              <Route path="911" element={<Emergency911Page />} />
               <Route path="upstreams" element={<UpstreamsPage />} />
               <Route path="gdms" element={<GdmsPage />} />
               <Route path="numbers" element={<NumberStockPage />} />

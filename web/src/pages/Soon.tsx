@@ -3,12 +3,6 @@ import { NotYet } from '../components/ui'
 // Pages whose features come in later steps (docs/BUILD-GUIDE.md §6). Each says plainly that it is not built and what it will hold, so nobody
 // mistakes an empty page for a phone system that is failing.
 
-export const UsersPage = () => (
-  <NotYet title="Users" arrives="Step 3: the builder">
-    <p>Everyone who has a phone or an extension: one at a time, or a paste of spreadsheet rows (name, email, site, extension, direct number, phone MAC) with a review before anything is made.</p>
-  </NotYet>
-)
-
 export const PhonesPage = () => (
   <NotYet title="Phones" arrives="Step 4: GDMS and barcode enrollment">
     <p>Scan the barcode on a phone’s box with this device’s camera, pick the user, and the phone sets itself up when it is plugged in. Status, reboot and reassignment live here too.</p>

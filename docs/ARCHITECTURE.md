@@ -1063,8 +1063,9 @@ and application ids under Photon's reverse domain (`com.photonind.vox`). Repo `p
 4. Numbers: can Photon hold a stock of HTC numbers? How are numbers ordered (API or by hand, how fast)? Numbers outside HTC's area, and
    toll-free?
 5. Porting in to HTC: process and timing.
-6. E911: how are emergency records created and changed, how fast, and can addresses be validated before use? 933 support? How will 911 be
-   routed after HTC's softswitch moves to Ashburn?
+6. E911: answered in part (decision 31: Hickory keeps each number's address by hand; PhotonVox sends a request per change). Still open: the
+   address (email or portal) Hickory wants requests sent to, its usual turnaround, whether it can check an address against the 911 database
+   before use (MSAG), 933 support, and how 911 will be routed after HTC's softswitch moves to Ashburn.
 7. CNAM (caller-ID name) updates; per-number failover destinations; delivering to two addresses (an instance and its standby).
 8. Texting (R3): does HTC offer SMS/MMS and 10DLC registration?
 
