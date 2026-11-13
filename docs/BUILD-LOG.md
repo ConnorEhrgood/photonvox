@@ -484,3 +484,9 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   placed by FreeSWITCH (`engine/live/test_calls.sh`: extension to extension, the menu, one carrier loop to the main number; never 911, 933 or
   9911, refused by the script), the 911 route read; the rollback (R0 PhotonVox only, R1 the domain's rows from the dump, R2 the vzdump with
   Connor) written in the file before anything runs.
+- **Step 4 (about 00:05 UTC 2026-11-14):** 4.0 the export again (the operator's Emergency-911 route in it: order 5, enabled, 12 details) and the
+  offline compare again: IDENTICAL, 15 objects, 47 rows, 72 hand-built rows (59 + the 911 route and its details), only extension 701 differs
+  if regenerated. 4.1 Hickory Church (organization 1fe5a7d9…) has one site, "Hickory Church" (dca2b67a…): id1 not needed. 4.2 the live engine
+  registered in PhotonVox as `live-a` (its own HTC gateway by id, no vox-agent, the write role's login sealed). 4.3 HUEPC adopted for Hickory
+  Church through `app.manage adopt`, which read the engine as photonvox_rw and proved the no-op: objects 15, rows 47, extras 72, one item to
+  decide (extension 701). PhotonVox shows it as new, adopted, no version yet. Nothing was written to the engine.
