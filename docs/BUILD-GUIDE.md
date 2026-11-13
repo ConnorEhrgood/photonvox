@@ -5,15 +5,14 @@ provisioned through GDMS and enrolled by a barcode scan, and one monitoring pane
 `OPERATIONS.md` first, then this repo's [ARCHITECTURE.md](ARCHITECTURE.md) **in full** (revision 2). This guide turns the first release (R1) into
 ordered steps. Work through them in order. Stop at every **GATE** and wait for Connor.
 
-**This guide assumes the recommended answers to the "Decisions for Connor" at the top of ARCHITECTURE.md.** Until Connor has answered them, only
-work that holds under any answer may proceed (Step 0.1–0.5: the skeleton, the API, the web shell, compose, the inventory script; no production
-contact, no money). If an answer is "no", change ARCHITECTURE.md and this guide together before going on.
+**Connor decided the "Decisions" at the top of ARCHITECTURE.md on 2026-11-13: all as recommended, except decision 23 (the app's 911
+location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps still stop at their gates for the resources only Connor can give.
 
 ## Start here (status as of 2026-11-13)
 
 | Item | State |
 |---|---|
-| Design | `docs/ARCHITECTURE.md` revision 2 (Connor's product direction, 2026-11-13); decisions awaiting Connor |
+| Design | `docs/ARCHITECTURE.md` revision 2 with §18a (the app); **decisions 1–28 decided 2026-11-13** (23 as Connor revised it) |
 | The live engine | FusionPBX in LXC 600 (`10.10.0.21`) on Proxmox `py`, in HTC's central office. **Production with real customers' phones and 911 on it.** Facts unknown (ARCHITECTURE §22) |
 | PhotonConsole | Polls the engine today (`photon_pbx`: read-only Postgres `photon_ro` + `photon-fpbx-shim`, over mgmtnet). Its code is the reference for every read query |
 | PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
@@ -290,8 +289,7 @@ PhotonConsole. **GATE 6: R1 done.**
 
 ### Phase A: the PhotonVox app (R2; ARCHITECTURE §18a)
 
-One app on iOS, Android, macOS and Windows, and the browser softphone, on one calling engine. **Design only until Connor answers decisions
-20–28.** A0 may run during R1's Steps 3–5; A1 starts after GATE 6 (R1 done). Each step ends at its gate. Rough lengths are in ARCHITECTURE §18a
+One app on iOS, Android, macOS and Windows, and the browser softphone, on one calling engine. Decisions 20–28 are decided (2026-11-13; 23 revised). A0 may run during R1's Steps 3–5; A1 starts after GATE 6 (R1 done). Each step ends at its gate. Rough lengths are in ARCHITECTURE §18a
 (about 4–5 months in all).
 
 Repo additions: `packages/calling/` (the TypeScript engine), `gateway/` (vox-gateway, Go), `apps/mobile/` (React Native), `apps/desktop/`
@@ -308,6 +306,12 @@ A0b**: the staging instance from Step 0.6). Findings with numbers in `docs/SPIKE
   INVITE to the ringing screen measured, 20 tries each.
 - `react-native-webrtc` with CallKit's audio session on iOS (the known hard part): two-way audio after answering from the lock screen.
 - TURN: a call from a network that blocks UDP, through coturn on 443.
+- 911 on real devices (decision 23): the handoff on an iPhone (`tel:911` and the system's confirmation) and an Android phone (`ACTION_DIAL`),
+  **stopped before the call is placed** (never a real 911 call); a PhotonVox call in progress when the handoff happens; dual SIM; whether an
+  iPhone in airplane mode with Wi-Fi turns its radio on for an emergency call (Android's dialer does); how the app tells "has cellular service"
+  on each OS; what iOS's call observer reports after a handoff. For devices without cellular: a fresh location at call time from the app's
+  dialer and from the system's Recents list (possibly in the background with "while using" permission); the Wi-Fi BSSID and network name
+  (iOS needs Apple's Wi-Fi information entitlement); what "approximate location" gives.
 
 **Done when:** each spike works on real devices or says plainly why not, with measurements. **GATE A0:** Connor reviews them and confirms
 decisions 21–22 (or picks the native SIP stack instead).
@@ -349,16 +353,25 @@ tries on each platform, together with the user's desk phone; answering from the 
 between Wi-Fi and cellular (the app reconnects and ICE restarts) or fails clearly; battery use with the app idle for 24 hours is measured and
 negligible; removing the user wipes the app. **GATE A3.**
 
-**A4: 911 in the app** (needs **GATE A4a**: HTC's answers on per-call location, home addresses and national emergency call center routing,
-question 14).
-- Location confirmation at sign-in and on network change; site matching by the site's public addresses, Wi-Fi networks and LAN; off-site
-  addresses validated with the upstream; handing 911 to the cellular dialer on phones with service; VoIP 911 elsewhere with the confirmed
-  location; Kari's Law notification in every case; the never-blocked fallbacks.
-- Tests: the location state machine as a CRITICAL module; 933 calls from the app at a site and off site (where the upstream supports it);
-  **never a real 911 call**.
+**A4: 911 in the app** (the handoff needs nothing from Connor; part 2 needs **GATE A4a**: HTC's answer, or a contracted 911 provider, on per-call
+location and an ECRC, question 14).
+- **The handoff (primary, ARCHITECTURE §18a part 1):** emergency-number detection before anything else (Android's emergency-number list, the
+  app's own list on iOS; 911 always; 933 never handed off); the dial intent on each OS; the same check for calls started from the system's
+  Recents list, contacts or Siri; a PhotonVox call in progress held or ended; "has cellular service" per OS; the Kari's Law notification sent as
+  the app hands off, queued when offline, never delaying it. No location permission needed on phones for this.
+- **Devices without cellular (part 2):** site matching by Wi-Fi access point, network name, public IP and geofence, with the integrator's tool
+  for mapping a site's access points to its emergency locations; the best OS location elsewhere, sent in the form the 911 provider accepts;
+  asking the user only when automatic location fails or is too coarse, once per new place; the ECRC as the last fallback; location read only at
+  sign-in, on network change and at call time; only the current emergency location kept on the server.
+- Tests: the choice between handoff and VoIP 911, and the location choice, as CRITICAL modules with a table of cases (cellular / no service /
+  airplane mode / no SIM / desktop / tablet; site match / coordinates / confirmed place / nothing); a 24-hour battery run showing no location use
+  on phones and none outside the three moments elsewhere; 933 from a desktop at a site and at a confirmed place; **never a real 911 call**
+  (handoff tests stop at the system's dialer).
 
-**Done when:** every path of ARCHITECTURE §18a's 911 rules is tested, 933 reads back the right address at a site and at a confirmed home
-address (or the upstream's limit is documented), and the notification arrives in every path. **GATE A4.**
+**Done when:** on real phones, 911 dialed in the app (from its dialer and from the system's Recents) always opens the system dialer with 911, a
+PhotonVox call in progress is held, and the notification arrives; on a desktop and a Wi-Fi-only tablet, a user moving between two mapped areas
+of a site gets the right emergency location without being asked, a user at a new place is asked once and not again there, and 933 reads back
+the right address (or the provider's limit is documented); every path of §18a's 911 rules is tested. **GATE A4.**
 
 **A5: release** (needs **GATE A5a**: Connor's approval of the store listings, privacy labels and the demo organization for Apple's review;
 the trademark answer, question 18).
@@ -422,7 +435,7 @@ R3 adds texting and chat to the app (one conversation model with the web app).
 | A1a | The gateway's names, ports, coturn and mgmtnet grants on each instance | phase A1 in production |
 | A2a | macOS Developer ID; a Windows signing service if Windows is in scope | desktop releases |
 | A3a | Apple and Google organization accounts (D-U-N-S), APNs key, FCM project, the GitHub remote | mobile builds and push |
-| A4a | HTC's answers on off-site 911 | app 911 off site |
+| A4a | Whether HTC handles 911 with a per-call location and an ECRC, or which 911 provider to contract (question 14) | app 911 on devices without cellular |
 | A5a | Store listings, privacy labels, the review demo organization, the trademark answer | store release |
 | any | Changes to other repos or any production host; spending money; pushing to GitHub | — |
 

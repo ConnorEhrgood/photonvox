@@ -20,11 +20,13 @@ Suite-wide topics (PhotonID and organizations, the rules for working on Photon, 
 
 ---
 
-## Decisions for Connor
+## Decisions (decided by Connor, 2026-11-13)
 
-Each line is a yes/no; the recommendation is **yes** for every line. BUILD-GUIDE.md assumes these answers; a "no" changes the section named.
+**All 28 approved as recommended ("Everything else looks quite good"), except decision 23, which Connor changed (the native handoff
+on cellular devices, automatic location elsewhere);
+the row below is the decided version.** The BUILD-GUIDE follows them. Changing one means changing it here first, with Connor.
 
-| # | Decision | Why yes | § |
+| # | Decision | Why | § |
 |---|---|---|---|
 | 1 | **The first release (R1) is: fast deployment (wizard, templates, bulk import), several FusionPBX instances, routing abstracted, Photon trunking with locked 911, GDMS, barcode enrollment, the monitoring pane and the PhotonConsole feed, toll-fraud defaults.** R2: partner trunks, taking over today's hand-built customers, the standby engine at DC10, number automation, the PhotonVox app (phase A: browser, desktop and mobile softphone, §18a), voicemail and recordings in the app, metering. R3: texting and chat | It is Connor's product, and the smallest release that delivers it | 1 |
 | 2 | **Keep FreeSWITCH + FusionPBX as the engine, driven entirely by PhotonVox.** Integrators never use FusionPBX's screens; Photon staff keep them for emergencies, off the internet | Live customers run on it; it already has the call features; PhotonVox adds the speed and the abstraction | 5 |
@@ -48,7 +50,7 @@ Each line is a yes/no; the recommendation is **yes** for every line. BUILD-GUIDE
 | 20 | **Build our own branded PhotonVox app** (replaces "white-label softphone first"): one app on iOS, Android, macOS and Windows plus the browser, all on one TypeScript calling engine (React Native on mobile, Electron on desktop). Calls, voicemail, history, contacts, presence, transfer and park now; texting and chat with R3. It rings together with the user's desk phone (same extension) | Connor's direction; one engine means one set of calling bugs, not three | 18a |
 | 21 | **WebRTC with PhotonVox's own signaling**, through a small **calling gateway (`vox-gateway`, Go) beside each FreeSWITCH instance**; FreeSWITCH terminates the media (Opus to the app, G.711 to the PSTN); coturn on each instance for UDP-blocked networks; no separate SBC. Not a native SIP stack (PJSIP or liblinphone) | Same engine as the browser; no GPL or commercial SIP license; no SIP password on any device; encryption and NAT traversal always on | 18a |
 | 22 | **Incoming calls wake the app through the gateway**: APNs VoIP push + CallKit on iOS, FCM high-priority + Telecom (ConnectionService) on Android; the gateway rings the caller back at once and holds the call until the device connects. Not RFC 8599 through Kamailio. Devices keep no standing connection in the background | The app is not a SIP client, and the gateway already stands where Kamailio would; near-zero battery at rest | 18a |
-| 23 | **911 in the app**: the user confirms their location at sign-in and on every network change (matched to a site automatically where possible, else an address validated with the upstream); on phones with cellular service 911 is handed to the phone's own dialer; elsewhere it goes through PhotonVox with the confirmed location; notification always; never blocked | RAY BAUM'S Act for non-fixed devices, Kari's Law, and the locked 911 design (§11) | 18a |
+| 23 | **911 in the app** (decided by Connor): **on any device with cellular service, 911 dialed in the app is always handed to the phone's own dialer and the cellular network**, which locates the handset; no location work there. Devices without cellular (desktops, Wi-Fi-only tablets, phones with no service) place 911 over PhotonVox with an **automatic** location: the matched site's validated address (Wi-Fi access point or network, public IP, geofence), else the OS location sent through a 911 provider that accepts it, the user asked only when that fails (once per new place), a national emergency call relay center (ECRC) last. Location read only at sign-in, on network change and at call time, never tracked. Kari's Law notification also when the app hands off | "We cannot constantly ask the user where they are", and the cellular network locates a phone best (Connor); RAY BAUM'S Act for non-fixed devices; the locked 911 design (§11) | 18a |
 | 24 | **One app in the stores ("PhotonVox"), the partner's branding inside after sign-in**; per-partner store listings later as a paid option, published from the partner's own developer accounts | Apple's 4.2.6/4.3 make per-partner apps a partner-account job; one listing is one build and one review per release | 18a |
 | 25 | **Sign in with PhotonID, or pair by a one-time QR code** an admin shows, for phone users without a PhotonID account | Keeps "a 30-person office in minutes" true; still revocable per device | 18a |
 | 26 | **A key per device in the Secure Enclave or Keystore, no SIP credentials on devices**; signing out a device or removing the user cuts it off at the gateway at once and wipes the app's data on its next run | A stolen phone carries nothing that works elsewhere | 18a |
@@ -383,7 +385,7 @@ A partner may add its own VoIP trunk (credentials or IP authentication) and make
 - **Notification (Kari's Law):** every 911 call notifies the organization's designated contacts at once (email, and on screen in PhotonVox),
   with the phone, user and location; it never delays the call. Photon staff are told too (a record that one happened).
 - **Moved phones:** a phone that registers from a public address that is not its site's known address is flagged on the pane ("this phone may
-  have moved: its 911 address may be wrong"). The PhotonVox app asks the user to confirm their location and hands 911 to the cellular dialer where it can (§18a).
+  have moved: its 911 address may be wrong"). The PhotonVox app hands 911 to the cellular network on phones, and locates devices without cellular automatically (§18a).
 - **Customer notice of VoIP 911 limits**, accepted and recorded when a phone system is created (§19).
 - **Never place a real 911 test call** without the PSAP's agreement; 933 and the engine's synthetic check are the tests.
 - With HTC: how emergency records are created and changed (by hand, with what turnaround) and how 911 will be routed after HTC's softswitch
@@ -665,28 +667,90 @@ open socket. The gateway keeps the device's registration to FreeSWITCH alive for
 the app at rest is close to nothing. A device that has not been seen for 30 days is unregistered at FreeSWITCH (so it is not rung) until it
 opens the app again. Push credentials (the APNs key, the FCM service account) live only on the gateway hosts.
 
-### 911 from the app (decision 23)
+### 911 from the app (decision 23, as Connor decided it on 2026-11-13)
 
-The rules (§11, §19): Kari's Law (911 without a prefix, and notification) applies to every PhotonVox extension; RAY BAUM'S Act needs a
-**dispatchable location** with each 911 call, and for **non-fixed devices** (softphones) an automatic one where technically feasible,
-otherwise one the user gives or confirms. The app fits the locked 911 design like this:
+**Connor:** "The remote softphone location resolution will likely need to be GPS based. We cannot constantly ask the user where they are."
+And: he prefers the native handoff. **On any device with cellular service, 911 dialed in the app is always handed to the phone's own dialer and
+the cellular network, which carries the handset's location. It never goes over VoIP, so no location work happens on those devices.**
 
-- **Where am I?** At sign-in, and whenever the network changes (another Wi-Fi network, another public address, or the OS location moving
-  by more than a few hundred meters), the app asks the user to confirm their location:
-  - **At a site** of their organization: matched automatically where possible (the site's public address, its Wi-Fi networks, its LAN),
-    so the user taps **Confirm** ("You're at Main office, 2nd floor"); this is the "automatic where feasible" case. The site's emergency
-    location and emergency number are used, exactly as for a desk phone at that site.
-  - **Somewhere else** (home, a hotel): the user enters or picks a street address; PhotonVox validates it with the upstream (MSAG) and keeps it
-    as that user's own emergency location (with a number registered there, where the upstream supports it, §22).
-- **On a phone with cellular service, 911 dialed in the app is handed to the phone's own dialer** (cellular 911 carries the handset's location
-  from the network and works without data). On Wi-Fi-only tablets, on desktops, and on phones without service, 911 goes through PhotonVox with
-  the confirmed location. The app explains this once, plainly.
-- **Notification** (Kari's Law) is sent in every case, including a call handed to the cellular dialer (the app reports it as it hands over).
-- **Never blocked:** an unconfirmed location still lets 911 through, with the user's last confirmed location, or the organization's main site,
-  flagged as unconfirmed in the notification. Where the upstream offers it, a call with no usable location goes to a national emergency call
-  center instead (a question for HTC, §22).
-- **Consent:** the app uses location only for this, asks the OS for "while using" location (never "always"), and keeps only the confirmed
-  emergency location, not a trail.
+The rules (§11, §19): Kari's Law (911 without a prefix, and notification) applies to every PhotonVox extension. RAY BAUM'S Act needs a
+dispatchable location with each 911 call placed over PhotonVox; for **non-fixed devices** it asks for an automated dispatchable location where
+technically feasible, and otherwise allows the user's registered location, alternative location information (such as coordinates with their
+accuracy), or routing to a national emergency call relay center (to be confirmed with counsel, §19). A call handed to the cellular network is a
+cellular 911 call, located by the carrier, not by PhotonVox.
+
+#### 1. Primary: hand 911 to the phone's own dialer
+
+**Which numbers.** The app treats a dialed number as an emergency number before anything else happens: **911** always, plus the numbers the
+phone itself knows as emergency numbers (Android's `TelephonyManager.isEmergencyNumber`, which reads the SIM's and the network's lists; on iOS,
+which has no such interface, a list kept in the app: 911, 112 and the other common ones). **933** (the address read-back test) is not an
+emergency number and is never handed off: on a handoff device the app explains that 911 on this phone uses the mobile network, and that 933
+tests only desk phones and computers.
+
+**How the handoff is done:**
+
+| | iOS | Android |
+|---|---|---|
+| The handoff | Open `tel:911` (`UIApplication.open`); the system's phone app takes over. iOS shows its own "Call 911?" confirmation for numbers opened from apps, so it is one more tap | Start `Intent.ACTION_DIAL` with `tel:911`: the system dialer opens with the number filled in, one tap to call. (`ACTION_CALL` cannot place emergency calls; Android's documentation says to use `ACTION_DIAL`) |
+| Calls started outside the app's dialer | A call from the iOS Recents list, a contact or Siri that belongs to PhotonVox arrives as a start-call request (`INStartCallIntent`); the app checks the number first and hands an emergency number off the same way, never through CallKit as VoIP | The same check for calls started from contacts or the call log through Telecom |
+| A PhotonVox call already in progress | The cellular emergency call takes priority; the app puts its call on hold or ends it when the system starts the emergency call | Telecom holds or disconnects self-managed calls when an emergency call starts |
+| Dual SIM | The system chooses the line; emergency calls may use any available network, even another carrier's. The app does not pick a SIM | The same: the dialer and Telecom choose |
+| Airplane mode, Wi-Fi only | To verify in spike A0. If the phone turns its radio on for an emergency call (Android's dialer does so as standard behavior), the handoff stays; if it cannot, the device counts as "no cellular service" (part 2) | Android's dialer turns the radio back on for emergency calls: handoff |
+
+**"Has cellular service"** means: the device has a phone radio (an iPhone or an Android phone; iPads and Android tablets cannot place
+cellular voice calls) **and** it is registered on some network right now (iOS: a current radio access technology; Android: the service
+state), or it is an Android phone in airplane mode (above). A phone with no SIM can still reach 911 on any network where one is in range, so
+"no SIM" alone does not stop the handoff. Only a phone with no network at all goes to part 2.
+
+**No location permission is needed for this.** On phones the app asks for location only as an optional permission at sign-in, explained as
+"used only if you call 911 when your phone has no mobile service" (part 2); declining it changes nothing for normal 911 calls.
+
+#### 2. Devices without cellular service: desktops, Wi-Fi-only tablets, phones with no service
+
+These place 911 over PhotonVox, with the best location available, **automatically**:
+
+1. **At a known site: the site's validated dispatchable address.** The device is matched to one of its organization's sites by, strongest
+   first: the **Wi-Fi access point** (BSSID), which an admin can map to a building, floor or room where a site has several emergency
+   locations; the **Wi-Fi network name** or the **public IP address** of the site's network; or a **geofence** (the OS location inside the
+   site's radius with an accuracy better than that radius). A match uses that site's emergency location and emergency number, exactly as a desk
+   phone at the site does (§11).
+2. **Elsewhere: the best location the device has**: the OS location services (Wi-Fi positioning, GPS where the device has it; on desktops the
+   OS location where it has one, else only the network match) give coordinates and their accuracy. They go with the call **in the form the 911
+   provider accepts**: coordinates with their uncertainty in a location object carried with the call, or a civic address reverse-geocoded from
+   them, through a provider that routes calls by such a location to the right PSAP.
+3. **Ask the user only when automatic location fails or is too coarse** (no permission, "approximate" only, worse than about 100 m, no fix),
+   and then **once per new place**; the confirmed place is validated and remembered, and used without asking whenever the device is there again.
+   Never on every network change.
+4. **Last fallback: a national emergency call relay center (ECRC)**, where a trained operator asks the caller where they are and passes the
+   call to the right PSAP. Used when there is no usable location at all. **911 is never blocked.**
+
+**Who carries these calls.** Desk phones keep HTC's native 911 (§11). Part 2 needs a 911 provider that takes a location with each call and
+offers an ECRC. **Candidates, as research to confirm** (none verified for this plan; prices, contracts and interfaces unknown): Bandwidth (its
+911 services for VoIP providers), Intrado (911 services for carriers and VoIP providers), RedSky (enterprise E911 for nomadic users), and
+others the research turns up (for example Comtech's 911 services). The first question is whether **HTC handles any of it** (§22, question 14).
+
+**When location is read, and what is kept** (part 2 devices only; privacy and battery): at sign-in, when the app sees a network change (while
+it runs, or when it starts or returns to the foreground on another network), and at the moment a 911 call is placed. Never continuously: no
+background tracking, no OS geofence monitoring; a few reads a day. Kept: on the device, the last location and the user's confirmed places; on
+the server, only the device's current emergency location (a site, a confirmed place, or the last coordinates with their accuracy), overwritten
+each time; and the location sent with a 911 call, with that call's record (retention to confirm, §19). No history of where anyone has been;
+users can see and delete their confirmed places. Permissions: "while using the app" only, never "always", with the purpose text saying it is for
+911; reading the Wi-Fi network on iOS needs location permission and Apple's Wi-Fi information entitlement, on Android location permission.
+**The call-time read** (to verify in spike A0): a call from the app's own dialer starts in the foreground, where "while using" allows a fresh
+read; a call started from the system's Recents list may start the app in the background, where it might not. The call never waits for a fix
+(about 2 seconds, then the best known location goes).
+
+#### 3. Notification (Kari's Law) in every case
+
+- **Over PhotonVox (part 2):** PhotonVox sees the call, so the organization's contacts are notified as for a desk phone (§11).
+- **Handed to the cellular network (part 1):** the app knows the user dialed 911 in it, and sends the notification **as it hands off**
+  ("911 dialed from the PhotonVox app on Ada's phone at 14:03; the call went to the mobile network, which locates the phone"), queued if the
+  device is offline, never delaying the handoff. Whether the call then connected the app cannot know reliably: iOS's call observer
+  (`CXCallObserver`) reports that a call started on the device but not its number, and only while the app runs; Android would need phone-state
+  and call-log permissions the app should not ask for. So the notification says "dialed", not "connected". A 911 call the user places from the
+  phone's own dialer, outside the app, is invisible to PhotonVox and is not notified.
+- Kari's Law strictly covers calls placed through the phone system; a cellular call is arguably outside it. The notification is sent anyway
+  (Connor's wish), and counsel confirms the wording (§19).
 
 ### Branding (decision 24)
 
@@ -775,7 +839,9 @@ Selling phone service makes Photon an **interconnected VoIP provider** unless it
 accountant's confirmation before customers are added beyond today's (not legal advice; some may be covered by the arrangement with HTC):
 FCC registration and Universal Service reporting (Form 499); the Robocall Mitigation Database and STIR/SHAKEN through the upstream; 911 rules
 for interconnected VoIP, Kari's Law and RAY BAUM'S Act (§11); CPNI protection and annual certification; CALEA; telecom taxes and 911 fees per
-line; state registrations; call-recording consent (R2); 10DLC and TCPA for texting (R3).
+line; state registrations; call-recording consent (R2); 10DLC and TCPA for texting (R3); for the app (§18a): the RAY BAUM'S Act options for
+non-fixed devices (automated location, coordinates, ECRC), whether Kari's Law notification applies to a 911 call handed to the cellular
+network, and how long a 911 call's location is kept.
 
 ---
 
@@ -831,8 +897,10 @@ and application ids under Photon's reverse domain (`com.photonind.vox`). Repo `p
 **The PhotonVox app** (phase A, §18a)
 13. Photon's legal entity name and its **D-U-N-S number** (both stores' organization accounts need them; getting one can take weeks). Does Photon
     already have an Apple Developer or Google Play account?
-14. **911 for people away from a site:** can HTC (or another upstream) take a per-call location, register numbers at a user's home address, or
-    route calls with no usable location to a national emergency call center?
+14. **911 from devices without cellular** (decision 23, part 2): does **HTC** handle any of it: 911 calls carrying a per-call location (coordinates
+    with uncertainty, or a civic address), numbers registered at users' home addresses, or routing to a national emergency call relay center
+    (ECRC)? If not, may Photon contract a 911 provider for these calls (Bandwidth, Intrado, RedSky or another, after research), and is there one
+    Photon already deals with?
 15. **Test devices:** an iPhone and an Android phone for development, and Connor's Mac with Xcode for tethered debugging when needed.
 16. **Windows** in the first app release, or iOS, Android and macOS first? (Windows needs a code-signing service, a small monthly fee.)
 17. A **GitHub remote for photonvox** (Xcode Cloud builds from it).

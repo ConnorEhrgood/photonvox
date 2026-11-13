@@ -86,3 +86,15 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   "to confirm" in §18a).
 - Replaced: revision 1's "white-label softphone first", R2's separate browser softphone and R3's mobile softphone. Six new questions for
   Connor (§22, 13–18).
+
+## 2026-11-13: decisions answered; decision 23 revised
+
+- Connor approved decisions 1–28 as recommended ("Everything else looks quite good"), except 23. ARCHITECTURE's decision table is now marked
+  decided; the BUILD-GUIDE no longer waits on them, only on its resource gates.
+- Decision 23 as decided: on any device with cellular service, 911 dialed in the app is always handed to the phone's own dialer (Connor prefers
+  the native handoff: the cellular network locates the handset). Devices without cellular (desktops, Wi-Fi-only tablets, phones with no
+  service) place 911 over PhotonVox with an automatic location (site match by Wi-Fi access point, network, public IP or geofence; else OS
+  location through a 911 provider; ask only when that fails, once per place; an ECRC last). "We cannot constantly ask the user where they are."
+- Designed but not verified (spike A0, real devices): iOS's confirmation for `tel:911` from an app, an iPhone's behavior in airplane mode, the
+  call-time location read from the background, what the call observer reports. Android's `ACTION_DIAL` for emergency numbers is from Android's
+  documentation. 911 provider candidates (Bandwidth, Intrado, RedSky, Comtech) are named for research, not checked.
