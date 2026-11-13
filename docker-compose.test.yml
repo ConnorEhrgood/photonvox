@@ -1,0 +1,46 @@
+# Throwaway Postgres + the API test image. Nothing here touches a real database.
+#   docker compose -f docker-compose.test.yml run --rm --build tests pytest [args]     (scripts/remote-test.sh runs it on LXC 800)
+# The database image is PhotonGuard's (TimescaleDB on Postgres 16), already on LXC 800: no extra download on a host with little disk, and the
+# extension is there if call history becomes a hypertable.
+name: photonvox-test
+
+services:
+  db-test:
+    image: timescale/timescaledb:2.30.1-pg16
+    environment:
+      POSTGRES_USER: pg
+      POSTGRES_PASSWORD: test-password
+      POSTGRES_DB: pg_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pg -d pg_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  tests:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.test
+    depends_on:
+      db-test:
+        condition: service_healthy
+    mem_limit: 768m
+    environment:
+      DATABASE_URL: postgresql+psycopg://vox_app:apptestpassword0123456789@db-test:5432/pg_test
+      SYSTEM_DATABASE_URL: postgresql+psycopg://vox_system:systemtestpassword0123456789@db-test:5432/pg_test
+      MIGRATE_DATABASE_URL: postgresql+psycopg://pg:test-password@db-test:5432/pg_test
+      APP_DB_PASSWORD: apptestpassword0123456789
+      SYSTEM_DB_PASSWORD: systemtestpassword0123456789
+      OIDC_ISSUER: https://idp.test
+      OIDC_AUDIENCE: photonvox
+      DIRECTORY_URL: https://directory.test
+      DIRECTORY_CLIENT_ID: vox-test
+      DIRECTORY_CLIENT_SECRET: directory-client-secret-for-tests-0123456789
+      DIRECTORY_NOTICE_SECRET: notice-secret-for-tests-0123456789-abcdef
+    volumes:
+      - ./api:/app
+    command: ["pytest"]

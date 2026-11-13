@@ -10,3 +10,5 @@ build/
 coverage/
 # inventory results from the live engine stay out of git
 scripts/inventory/out/
+.pytest_cache/
+.coverage
