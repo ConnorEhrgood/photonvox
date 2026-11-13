@@ -6,6 +6,7 @@ import { rename, slug, targetText, targetValue, toTarget } from '../components/d
 import { meWith, OWNER, renderApp, TECH_A, TECH_B } from '../test/helpers'
 import { CallFlowsPage } from './CallFlows'
 import { NumbersPage, toE164 } from './Numbers'
+import { SitesPage } from './Sites'
 
 const B = '/tenants/t1'
 const SITES = [{ id: 's1', slug: 'cw-main', name: 'Main office', address: '', timezone: 'America/New_York' }]
@@ -265,5 +266,64 @@ describe('clone', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Copy from another customer' }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('sites set up for phones', () => {
+  const TWO = [...SITES, { id: 's2', slug: 'cw-annex', name: 'Annex', address: '', timezone: 'America/New_York' }]
+  const E = { locations: [{ id: 'l1', site_id: 's1', key: 'main', address: {}, status: 'validated', note: '' },
+    { id: 'l9', site_id: 's9', key: 'x', address: {}, status: 'rejected', note: 'No such street' }], numbers: [], requests: [] }
+
+  it('a second site gets its 911 address, the numbers it shows and its hours', async () => {
+    let current = DRAFT
+    const saved: Draft[] = []
+    const { calls } = renderApp(<SitesPage />, { routes: {
+      [`GET ${B}/sites`]: TWO, [`GET ${B}/phone-system`]: () => PS(current), [`GET ${B}/emergency`]: E,
+      [`POST ${B}/sites/s2/emergency-locations`]: { id: 'l2', key: 'main', status: 'pending' },
+      [`PUT ${B}/phone-system/draft`]: (body) => { current = (body as { document: Draft }).document; saved.push(current); return PS(current) },
+    } })
+    expect(await screen.findByText('Validated')).toBeInTheDocument()
+    expect(screen.getByText('911 shows +17245550100')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Set up Annex for phones' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Annex: phones' })
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+    await userEvent.type(within(dialog).getByLabelText('Street'), '2 Mill Road')
+    await userEvent.type(within(dialog).getByLabelText('City'), 'Asheville')
+    await userEvent.type(within(dialog).getByLabelText('State'), 'nc')
+    await userEvent.type(within(dialog).getByLabelText('ZIP code'), '28801')
+    await userEvent.selectOptions(within(dialog).getByLabelText('A 911 call from here shows'), '+17245550123')
+    await userEvent.selectOptions(within(dialog).getByLabelText('Other calls show'), '+17245550123')
+    await userEvent.selectOptions(within(dialog).getByLabelText('Office hours'), 'office')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('911 shows +17245550123')).toBeInTheDocument()
+    expect(calls.find((c) => c.path.endsWith('/s2/emergency-locations'))!.body).toEqual({ key: 'main', street: '2 Mill Road', unit: '', city: 'Asheville', state: 'NC', zip: '28801' })
+    expect(saved[0].sites!.s2).toEqual({ emergency_location: 'main', emergency_number: '+17245550123', caller_id: '+17245550123', hours: 'office' })
+  })
+
+  it('a site with an address already keeps it; a site with no numbers yet is told; a failure is shown', async () => {
+    renderApp(<SitesPage />, { routes: {
+      [`GET ${B}/sites`]: TWO, [`GET ${B}/phone-system`]: PS({ ...DRAFT, numbers: {} }), [`GET ${B}/emergency`]: E,
+      [`PUT ${B}/phone-system/draft`]: new Response(JSON.stringify({ detail: 'refused' }), { status: 500 }),
+    } })
+    await userEvent.click(await screen.findByRole('button', { name: 'Set up Main office for phones' }))
+    let dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Its emergency address is set/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Add the site’s numbers first/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Set up Annex for phones' }))
+    dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  it('an address that cannot be added says why', async () => {
+    renderApp(<SitesPage />, { routes: {
+      [`GET ${B}/sites`]: TWO, [`GET ${B}/phone-system`]: PS(), [`GET ${B}/emergency`]: { ...E, locations: [] },
+      [`POST ${B}/sites/s1/emergency-locations`]: new Response(JSON.stringify({ detail: 'zip: invalid' }), { status: 422 }),
+    } })
+    await userEvent.click(await screen.findByRole('button', { name: 'Set up Main office for phones' }))
+    const dialog = await screen.findByRole('dialog')
+    for (const [label, v] of [['Street', '1 A St'], ['City', 'X'], ['State', 'PA'], ['ZIP code', '15222']]) await userEvent.type(within(dialog).getByLabelText(label), v)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('zip: invalid')
   })
 })
