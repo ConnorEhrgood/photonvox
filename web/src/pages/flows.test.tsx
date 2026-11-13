@@ -327,3 +327,12 @@ describe('sites set up for phones', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('zip: invalid')
   })
 })
+
+describe('the greetings’ voice', () => {
+  it('is chosen for the whole phone system and saved with the draft', async () => {
+    const { saved } = withServer(<CallFlowsPage />)
+    expect(await screen.findByLabelText('Greetings are spoken in')).toHaveDisplayValue('Kore (US English, female)')
+    await userEvent.selectOptions(screen.getByLabelText('Greetings are spoken in'), 'es-US-Chirp3-HD-Kore')
+    expect(saved[0].voice).toBe('es-US-Chirp3-HD-Kore')
+  })
+})

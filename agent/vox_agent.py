@@ -8,11 +8,12 @@ Operations (JSON over HTTP, on the management network only):
     POST /v1/rescan          {"profiles": [...], "kill": [gateway uuids]}: stop removed gateways, rescan the profiles
     POST /v1/reloadacl       {}
     POST /v1/seed-domain     {}: FusionPBX's own `upgrade.php --defaults` (a new domain's standard dial plans)
+    POST /v1/sound           {"domain_name", "name": "photonvox-<hash>.wav", "data": base64 WAV}: a spoken greeting into the domain's recordings
     POST /v1/check           {"kind": "inbound"|"route", "number", "domain_name", "domain_uuid", "token"}: one synthetic call of the
                              post-publish check; answers {"found": "reached 301" | "<route> <gateways> <number sent>" | "blocked <category>" | null}
 
-Every request carries `X-PhotonVox-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<METHOD>.<path>.<body>")>`. A signature older
-or newer than five minutes, or seen before, is refused. Nothing the caller sends reaches a shell: values are checked against fixed patterns and
+Every request carries `X-PhotonVox-Signature: t=<unix seconds>,n=<random hex nonce>,v1=<hex HMAC-SHA256(secret,
+"<t>.<n>.<METHOD>.<path>.<body>")>`. A signature older or newer than five minutes, or whose nonce was seen before, is refused. Nothing the caller sends reaches a shell: values are checked against fixed patterns and
 passed to FreeSWITCH or to programs as arguments.
 
 Configuration (environment, from /etc/vox-agent.env): VOX_AGENT_SECRET (required, 32+ characters), VOX_AGENT_BIND (default 127.0.0.1:8780),
@@ -21,6 +22,7 @@ VOX_AGENT_LOG, VOX_AGENT_FUSIONPBX, VOX_AGENT_PHP.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -36,13 +38,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 VERSION = "0.1.0"
 SKEW_S = 300
-MAX_BODY = 64 * 1024
+MAX_BODY = 8 * 1024 * 1024        # a greeting's audio; everything else is a few hundred bytes
+MAX_SOUND = 6 * 1024 * 1024
 SAFE = re.compile(r"^[A-Za-z0-9@.+_:-]{1,200}$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PROFILE = re.compile(r"^[a-z0-9_-]{1,40}$")
 NUMBER = re.compile(r"^\+?[0-9*#]{1,20}$")
 DOMAIN = re.compile(r"^[a-z0-9.-]{1,200}$")
 TOKEN = re.compile(r"^[0-9a-f]{16,64}$")
+SOUND = re.compile(r"^photonvox-[0-9a-f]{32}\.wav$")
 FOUND = re.compile(r"PhotonVox-synthetic token=(\w+) (?:reached=([^\s)]+)|route=([^\s)]+) gateways=([^\s)]+) dial=([^\s)]*))"
                    r"|PhotonVox blocked (\w+) .* token=(\w+)")
 
@@ -68,6 +72,7 @@ class Config:
         self.log = e.get("VOX_AGENT_LOG", "/var/log/freeswitch/freeswitch.log")
         self.fusionpbx = e.get("VOX_AGENT_FUSIONPBX", "/var/www/fusionpbx")
         self.php = e.get("VOX_AGENT_PHP", "/usr/bin/php")
+        self.recordings = e.get("VOX_AGENT_RECORDINGS", "/var/lib/freeswitch/recordings")
 
 
 def esl_password(path: str) -> str:
@@ -178,6 +183,26 @@ def seed_domain(cfg: Config, _body: Dict[str, Any]) -> Dict[str, Any]:
     return {"seeded": True}
 
 
+def sound(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
+    """A greeting spoken at publish (PhotonVox's text-to-speech), written whole or not at all into the domain's recordings."""
+    domain, name = _str(body, "domain_name", DOMAIN), _str(body, "name", SOUND)
+    data = body.get("data")
+    try:
+        audio = base64.b64decode(data, validate=True) if isinstance(data, str) else b""
+    except ValueError:
+        audio = b""
+    if not (0 < len(audio) <= MAX_SOUND) or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        raise Refused("data: a base64 WAV file of up to 6 MB")
+    folder = os.path.join(cfg.recordings, domain)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, name)
+    tmp = path + ".part"
+    with open(tmp, "wb") as f:
+        f.write(audio)
+    os.replace(tmp, path)
+    return {"written": name, "bytes": len(audio)}
+
+
 def parse(log: str, token: str) -> Optional[str]:
     for m in FOUND.finditer(log):
         if m.group(1) == token:
@@ -213,16 +238,18 @@ def check(cfg: Config, body: Dict[str, Any], wait_s: float = 3.0) -> Dict[str, A
 
 ROUTES: Dict[Tuple[str, str], Callable[[Config, Dict[str, Any]], Dict[str, Any]]] = {
     ("GET", "/v1/status"): status, ("POST", "/v1/cache/delete"): cache_delete, ("POST", "/v1/rescan"): rescan,
-    ("POST", "/v1/reloadacl"): reloadacl, ("POST", "/v1/seed-domain"): seed_domain, ("POST", "/v1/check"): check,
+    ("POST", "/v1/reloadacl"): reloadacl, ("POST", "/v1/seed-domain"): seed_domain, ("POST", "/v1/check"): check, ("POST", "/v1/sound"): sound,
 }
 
 
 # ---- signatures ----
 
-def sign(secret: str, method: str, path: str, body: bytes, t: Optional[int] = None) -> str:
+def sign(secret: str, method: str, path: str, body: bytes, t: Optional[int] = None, nonce: Optional[str] = None) -> str:
+    """A fresh nonce in every signature: two identical requests in the same second (a republish's cache deletes) are not a replay."""
     t = int(time.time()) if t is None else t
-    mac = hmac.new(secret.encode(), f"{t}.{method}.{path}.".encode() + body, hashlib.sha256).hexdigest()
-    return f"t={t},v1={mac}"
+    nonce = nonce or os.urandom(12).hex()
+    mac = hmac.new(secret.encode(), f"{t}.{nonce}.{method}.{path}.".encode() + body, hashlib.sha256).hexdigest()
+    return f"t={t},n={nonce},v1={mac}"
 
 
 class Replay:
@@ -246,13 +273,13 @@ def verify(secret: str, header: str, method: str, path: str, body: bytes, replay
     now = time.time() if now is None else now
     try:
         parts = dict(p.split("=", 1) for p in header.split(","))
-        t, given = int(parts["t"]), parts["v1"]
+        t, nonce, given = int(parts["t"]), parts["n"], parts["v1"]
     except (ValueError, KeyError):
         return False
-    if abs(now - t) > SKEW_S:
+    if abs(now - t) > SKEW_S or not re.match(r"^[0-9a-f]{16,64}$", nonce):
         return False
-    want = sign(secret, method, path, body, t).split("v1=", 1)[1]
-    return hmac.compare_digest(want, given) and replay.first(given, now)
+    want = sign(secret, method, path, body, t, nonce).split("v1=", 1)[1]
+    return hmac.compare_digest(want, given) and replay.first(nonce, now)
 
 
 # ---- the HTTP side ----

@@ -16,10 +16,16 @@ if [ "${COVERAGE:-}" = 1 ]; then PYTEST="sh -c 'pytest --cov=app --cov-branch --
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 tar --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.coverage' --exclude='.env' -czf "$TMP/vox-test.tgz" api contract docker-compose.test.yml
+# The staging build test's connection details travel in a file only root can read, removed after the run (never on a command line).
+if [ "${VOX_STAGING_E2E:-}" = 1 ]; then
+  (umask 077; { echo "VOX_STAGING_E2E=1"; echo "VOX_STAGING_DB_URL=$VOX_STAGING_DB_URL"; echo "VOX_STAGING_AGENT_URL=$VOX_STAGING_AGENT_URL";
+                echo "VOX_STAGING_AGENT_SECRET=$VOX_STAGING_AGENT_SECRET"; } > "$TMP/staging.env")
+fi
 cat > "$TMP/run.sh" <<RUN
 #!/bin/bash
 cd $DIR
 rm -f run.done run.out
+if [ -f staging.env ]; then set -a; . ./staging.env; set +a; rm -f staging.env; fi
 if docker compose -p $PROJECT -f docker-compose.test.yml build --quiet tests > build.out 2>&1; then
   docker compose -p $PROJECT -f docker-compose.test.yml run --rm tests $PYTEST > run.out 2>&1
 else
@@ -30,7 +36,8 @@ docker compose -p $PROJECT -f docker-compose.test.yml down -v --remove-orphans >
 RUN
 scp -q "$TMP/vox-test.tgz" "$HOST":/tmp/$PROJECT.tgz
 scp -q "$TMP/run.sh" "$HOST":/tmp/$PROJECT-run.sh
-ssh "$HOST" "rm -rf $DIR && mkdir -p $DIR && tar -xzf /tmp/$PROJECT.tgz -C $DIR && rm -f /tmp/$PROJECT.tgz && mv /tmp/$PROJECT-run.sh $DIR/run.sh && systemd-run --unit=$PROJECT-\$(date +%s) --collect bash $DIR/run.sh" > /dev/null
+[ -f "$TMP/staging.env" ] && scp -q -p "$TMP/staging.env" "$HOST":/tmp/$PROJECT-staging.env
+ssh "$HOST" "rm -rf $DIR && mkdir -p $DIR && tar -xzf /tmp/$PROJECT.tgz -C $DIR && rm -f /tmp/$PROJECT.tgz && mv /tmp/$PROJECT-run.sh $DIR/run.sh && { [ ! -f /tmp/$PROJECT-staging.env ] || mv /tmp/$PROJECT-staging.env $DIR/staging.env; } && systemd-run --unit=$PROJECT-\$(date +%s) --collect bash $DIR/run.sh" > /dev/null
 for _ in $(seq 1 240); do
   sleep 5
   if ssh "$HOST" test -f $DIR/run.done 2>/dev/null; then

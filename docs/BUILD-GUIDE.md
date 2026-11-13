@@ -240,16 +240,18 @@ queue in PhotonVox with HTC's turnaround is the R1 path).
   (decision 31); the web app's Overview (state, problems, hand edits, publish, versions, undo, numbers' 911 state), setup wizard, Users with
   import, and Platform → 911; vox-agent (`agent/`); the numbers and call-flow screens (ring groups, menus, mailboxes, office hours); clone;
   voicemail to email (each instance's outgoing mail written to FusionPBX's email settings; Postmark's SMTP in production). Proven:
-  `engine/staging/prove-publish.sh` (68 checks on staging), the API suite at 100%. Still to do here: text-to-speech at publish (decision
-  30, after the listening test); numbers from stock and port requests; Hickory's 911 contact and turnaround (ARCHITECTURE §22); the
-  done-when build test and the security review; Postmark's voicemail server token and sender domain for production (Connor).*
+  `engine/staging/prove-publish.sh` (69 checks on staging), the build test `engine/staging/build-test.sh` (31 checks: 30 people, two sites,
+  four numbers built through the API in 15 requests, published, called), the API suite at 100%. Still to do here: Google's key for speech (decision 30) and the listening
+  test; numbers from stock and port requests; Hickory's 911 contact and turnaround (ARCHITECTURE §22); the
+  security review; the done-when's "10 minutes of the tester's time", which a person must time; Postmark's voicemail server token and sender domain for production (Connor).*
 - **Photon trunking:** upstream gateways per instance generated from `upstream`; outbound routes per call class in Photon's order; caller ID
   only from held numbers; the **locked 911 route** per site; the **locked block route** right after it (ARCHITECTURE §15a, decision 29): Photon's default list on the Platform page, the organization's **Call blocking** page (allow a category, add or remove numbers and
   prefixes), blocked attempts reported by vox-agent to the audit and the partner. Per-extension overrides here if small, else R2; inbound
   blocking in R2.
 - Voicemail to email through Postmark (its own stream; Photon is on the paid tier). *Built: FusionPBX's email queue sends it; PhotonVox
   writes each instance's SMTP settings (a Postmark server of its own for voicemail) and each mailbox's address.*
-- Text-to-speech greetings generated at publish and stored (decision 30, ARCHITECTURE §8a): the provider after a listening test.
+- Text-to-speech greetings generated at publish and stored (decision 30, ARCHITECTURE §8a: Google Chirp 3 HD). *Built and proven on staging
+  with a stand-in provider; Google waits for Connor's project and key, then the listening test (`scripts/tts-samples.py`).*
 - Numbers' 911 addresses with the carrier (decision 31, ARCHITECTURE §11a): per-number registration, carrier requests, the staff queue.
 
 **Done when:** on staging, a phone system built from a template with 30 pasted users, two sites and four numbers is published in under 10

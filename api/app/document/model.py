@@ -136,6 +136,7 @@ class Features(Strict):
 
 class PhoneSystem(Strict):
     version: Literal[1] = 1
+    voice: str = "en-US-Chirp3-HD-Kore"         # the voice greetings are spoken in (app/speech VOICES; decision 30)
     sites: Dict[str, Site] = Field(default_factory=dict)
     hours: Dict[str, Hours] = Field(default_factory=dict)
     numbers: Dict[str, Number] = Field(default_factory=dict)
@@ -145,6 +146,14 @@ class PhoneSystem(Strict):
     boxes: Dict[str, Box] = Field(default_factory=dict)
     calling: Calling = Field(default_factory=Calling)
     features: Features = Field(default_factory=Features)
+
+    @field_validator("voice")
+    @classmethod
+    def _known_voice(cls, voice: str) -> str:
+        from app.speech import VOICES
+        if voice not in VOICES:
+            raise ValueError(f"not one of the voices: {', '.join(VOICES)}")
+        return voice
 
     @field_validator("numbers")
     @classmethod

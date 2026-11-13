@@ -42,6 +42,11 @@ services:
       DIRECTORY_CLIENT_SECRET: directory-client-secret-for-tests-0123456789
       DIRECTORY_NOTICE_SECRET: notice-secret-for-tests-0123456789-abcdef
       SECRETS_KEY: dGVzdC1zZWNyZXRzLWtleS1mb3ItcGhvdG9udm94LTA=
+      # The staging build test only (engine/staging/build-test.sh): empty otherwise, and that test skips itself.
+      VOX_STAGING_E2E: ${VOX_STAGING_E2E:-}
+      VOX_STAGING_DB_URL: ${VOX_STAGING_DB_URL:-}
+      VOX_STAGING_AGENT_URL: ${VOX_STAGING_AGENT_URL:-}
+      VOX_STAGING_AGENT_SECRET: ${VOX_STAGING_AGENT_SECRET:-}
     volumes:
       - ./api:/app
       - ./contract:/contract:ro      # the phone-system schema and samples the unit tests read

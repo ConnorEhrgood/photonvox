@@ -21,11 +21,14 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app import audit, crypto
+from app.config import settings
 from app.compiler.compile import CompileError, Context, compile_plan
 from app.document.model import PhoneSystem as Document
 from app.engine import fusionpbx, instance as instance_settings, publish, upstreams, writer
 from app.engine.agent import Agent, HttpAgent
-from app.models import (EmergencyLocation, EngineObject, EngineSecret, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, utcnow)
+from app.speech import DEFAULT_VOICE, Speech, audio_key, file_name
+from app.speech.google import GoogleSpeech
+from app.models import (EmergencyLocation, EngineObject, EngineSecret, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, SpeechAudio, utcnow)
 
 Connect = Callable[[PbxInstance], Tuple[Engine, Agent]]
 
@@ -68,8 +71,29 @@ def context(db: Session, ps: PhoneSystem, instance: PbxInstance) -> Context:
                    emergency_gateway=instance.emergency_upstream, validated_locations=validated)
 
 
-def target(ps: PhoneSystem, instance: PbxInstance) -> fusionpbx.Target:
-    return fusionpbx.Target(str(ps.id), str(ps.domain_uuid), {u["key"]: upstreams.gateway_uuid(str(instance.id), u["key"]) for u in instance.upstreams})
+def get_speech() -> Optional[Speech]:
+    """The text-to-speech provider (decision 30), or None when none is configured (menus then answer without a spoken greeting)."""
+    return GoogleSpeech(settings.google_tts_api_key) if settings.google_tts_api_key else None
+
+
+def target(ps: PhoneSystem, instance: PbxInstance, speech_on: bool = False) -> fusionpbx.Target:
+    return fusionpbx.Target(str(ps.id), str(ps.domain_uuid), {u["key"]: upstreams.gateway_uuid(str(instance.id), u["key"]) for u in instance.upstreams},
+                            speech_on)
+
+
+def speak(db: Session, provider: Speech, agent: Agent, plan: Mapping[str, Any]) -> int:
+    """Every greeting of the plan spoken (from the cache when the same words were spoken in the same voice before) and written to the engine.
+    Returns how many were new (paid for)."""
+    voice, new = plan.get("voice", DEFAULT_VOICE), 0
+    for m in plan["ivr_menus"]:
+        key = audio_key(m["greeting"], voice)
+        cached = db.get(SpeechAudio, key)
+        if cached is None:
+            cached = SpeechAudio(key=key, voice=voice, characters=len(m["greeting"]), audio=provider.synthesize(m["greeting"], voice))
+            db.add(cached)
+            new += 1
+        agent.put_sound(plan["domain"], file_name(m["greeting"], voice), cached.audio)
+    return new
 
 
 def manifest(db: Session, ps: PhoneSystem) -> List[Dict[str, str]]:
@@ -94,8 +118,12 @@ def run_checks(agent: Agent, plan: Mapping[str, Any], t: fusionpbx.Target) -> Li
 
 
 def _write(db: Session, ps: PhoneSystem, instance: PbxInstance, plan: Optional[Mapping[str, Any]], eng: Engine, agent: Agent) -> writer.Result:
-    """Write a plan (or, with None, remove everything this phone system wrote) and record what is now on the engine."""
-    t = target(ps, instance)
+    """Write a plan (or, with None, remove everything this phone system wrote) and record what is now on the engine. Greetings are spoken and
+    put on the engine first, so no menu ever names a file that is not there."""
+    provider = get_speech()
+    if plan is not None and provider is not None and plan["ivr_menus"]:
+        speak(db, provider, agent, plan)
+    t = target(ps, instance, provider is not None)
     if plan is None:
         with eng.begin() as conn:
             res = writer.write(conn, fusionpbx.Build(), t.domain_uuid, manifest(db, ps))
@@ -121,7 +149,7 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
     try:
         _write(db, ps, instance, plan, eng, agent)
         db.commit()
-        results = run_checks(agent, plan, target(ps, instance))
+        results = run_checks(agent, plan, target(ps, instance, get_speech() is not None))
     except Exception as e:  # noqa: BLE001 - the engine refused or failed: record it, put the previous version back
         db.rollback()
         return _fail(db, ps, v, f"publish failed: {type(e).__name__}: {e}"[:2000], (eng, agent))
@@ -234,7 +262,7 @@ def check_drift(db: Session, ps: PhoneSystem, connect: Connect = connect) -> Dic
     v = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id, PhoneSystemVersion.number == ps.published_version)).scalar_one()
     instance = db.get(PbxInstance, ps.instance_id)
     plan = compile_plan(Document.model_validate(v.document), context(db, ps, instance))
-    b = fusionpbx.build(plan, target(ps, instance))
+    b = fusionpbx.build(plan, target(ps, instance, get_speech() is not None))
     eng, _agent = connect(instance)
     with eng.connect() as conn:
         found = compare(conn, b, str(ps.domain_uuid))

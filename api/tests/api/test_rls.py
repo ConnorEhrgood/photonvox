@@ -39,7 +39,7 @@ def test_every_table_has_row_level_security_and_a_policy_for_the_system_role(db)
 
 
 # What the app role may see of each table, by design: tables with no policy for it are the system's own.
-SYSTEM_ONLY = {"sync_state", "alembic_version", "engine_secret"}     # engine_secret: the API never reads a SIP password
+SYSTEM_ONLY = {"sync_state", "alembic_version", "engine_secret", "speech_audio"}   # the API never reads SIP passwords; audio is the worker's
 
 
 def test_every_table_either_has_an_app_policy_or_is_deliberately_system_only(db):

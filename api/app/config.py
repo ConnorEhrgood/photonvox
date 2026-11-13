@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Hickory Telephone's contact for 911 address changes (decision 31: an email per change, tracked until Hickory confirms).
     htc_e911_email: str = ""
 
+    # Text-to-speech for greetings (decision 30): Google Cloud Text-to-Speech, an API key restricted to that API and this server's address.
+    # Empty: menus are published without a spoken greeting (they answer and take keys silently) until a recording or a key is added.
+    google_tts_api_key: str = ""
+
     environment: str = "development"
 
     @property

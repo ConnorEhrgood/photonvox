@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, Index, Integer, SmallInteger, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, Index, Integer, LargeBinary, SmallInteger, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -265,3 +265,14 @@ class CarrierRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (CheckConstraint("status in ('open', 'sent', 'confirmed', 'rejected', 'superseded')", name="ck_carrier_request_status"),
                       CheckConstraint("method in ('email', 'ticket', 'api')", name="ck_carrier_request_method"))
+
+
+class SpeechAudio(Base):
+    """Greetings already spoken (decision 30), by a hash of voice and text: the same words in the same voice are paid for once, and a phone
+    system moved to another engine takes its audio with it. The system's own (the worker publishes)."""
+    __tablename__ = "speech_audio"
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    voice: Mapped[str] = mapped_column(String(60))
+    characters: Mapped[int] = mapped_column(Integer)
+    audio: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

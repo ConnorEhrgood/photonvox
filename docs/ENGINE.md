@@ -98,3 +98,6 @@ from the archives, which is not worth it for staging.
   tunnel until the management network does.
 - **Outgoing mail:** FusionPBX's `email` settings point at Mailpit on LXC 800 (`scripts/sipp.sh mailpit start`, SMTP 2525, API 8026), a sink
   standing in for Postmark; nothing leaves. Production instances get Postmark's SMTP through Platform → the instance's mail, then Apply.
+- **Reached from LXC 800** (the build test's API and worker, standing in for the management network): PostgreSQL listens on 10.10.0.60 too,
+  `pg_hba` admits only `photonvox_adapter` from 10.10.0.80, vox-agent binds 10.10.0.60:8780, and iptables admits 5432 and 8780 from 10.10.0.80
+  only (saved with netfilter-persistent).

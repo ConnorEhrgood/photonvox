@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from xml.sax.saxutils import quoteattr
 
+from app import speech
+
 OUTBOUND_APP = "8c914ec3-9fc0-8ab5-4cda-6c9288bdc9a3"
 INBOUND_APP = "c03b422e-13a8-bd1b-e42b-b6b9b4d27ce4"
 TIME_APP = "4b821450-926b-175a-af93-a03c441818b1"
@@ -66,6 +68,7 @@ class Target:
     phone_system_id: str
     domain_uuid: str
     gateways: Mapping[str, str]          # upstream key -> v_gateways.gateway_uuid
+    speech: bool = False                 # greetings were spoken and put on the engine (app/speech): menus name their files
 
 
 @dataclass
@@ -292,8 +295,9 @@ class _Builder:
                 + _act("sleep", "1000") + _act("set", "hangup_after_bridge=true") + _act("set", f"ivr_menu_uuid={menu}") + _act("ivr", menu)
                 + _act(app, data) + "\t</condition>\n")
         dp = self.dialplan("ivr:" + key, f"photonvox.menu.{key}", ORDER["menu"], IVR_APP, body, number=number)
-        # The greeting is spoken text in the document; this engine has no text-to-speech module, so it waits for recordings (SPIKES §1c).
-        self.row("v_ivr_menus", ivr_menu_uuid=menu, dialplan_uuid=dp, ivr_menu_name=key, ivr_menu_extension=number, ivr_menu_greet_long=None,
+        # The greeting is text in the document, spoken at publish (decision 30) into a file in the domain's recordings, which FusionPBX finds by name.
+        greeting = speech.file_name(m["greeting"], self.p.get("voice", speech.DEFAULT_VOICE)) if self.t.speech else None
+        self.row("v_ivr_menus", ivr_menu_uuid=menu, dialplan_uuid=dp, ivr_menu_name=key, ivr_menu_extension=number, ivr_menu_greet_long=greeting,
                  ivr_menu_dialect="us", ivr_menu_voice="callie", ivr_menu_confirm_attempts=1, ivr_menu_timeout=3000, ivr_menu_exit_app=app,
                  ivr_menu_exit_data=data, ivr_menu_inter_digit_timeout=2000, ivr_menu_max_failures=1, ivr_menu_max_timeouts=1,
                  ivr_menu_digit_len=1, ivr_menu_direct_dial=False, ivr_menu_ringback="local_stream://default", ivr_menu_context=self.domain,

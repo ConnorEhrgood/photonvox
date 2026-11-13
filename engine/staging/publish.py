@@ -30,6 +30,7 @@ from app.compiler.compile import Context, compile_plan  # noqa: E402
 from app.document.model import PhoneSystem  # noqa: E402
 from app.engine import fusionpbx, publish, service, upstreams  # noqa: E402
 from app.engine.agent import HttpAgent  # noqa: E402
+from app import speech  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 STATE = HERE / ".state"
@@ -43,7 +44,7 @@ UPSTREAMS = [upstreams.Upstream("sipp-upstream", "10.10.0.80:5071", ("10.10.0.80
 def tunnel(port: int = 15432, agent_port: int = 18780) -> subprocess.Popen:
     """The engine's database and its vox-agent both listen on the engine's localhost; one SSH tunnel carries both (the management network will)."""
     p = subprocess.Popen(["ssh", "-i", KEY, "-N", "-o", "ExitOnForwardFailure=yes", "-L", f"{port}:127.0.0.1:5432",
-                          "-L", f"{agent_port}:127.0.0.1:8780", HOST])
+                          "-L", f"{agent_port}:10.10.0.60:8780", HOST])
     for _ in range(50):
         try:
             socket.create_connection(("127.0.0.1", port), 0.2).close()
@@ -68,6 +69,7 @@ def main() -> None:
     ap.add_argument("--check", action="store_true", help="after publishing, run the post-publish check's synthetic calls")
     ap.add_argument("--only", action="store_true", help="with --check or --drift: do not publish, only look")
     ap.add_argument("--drift", action="store_true", help="compare the engine with what this document builds (hand edits)")
+    ap.add_argument("--speech", action="store_true", help="speak greetings with a stand-in provider (a tone) and put them on the engine")
     a = ap.parse_args()
     secret = pathlib.Path("~/.config/photonvox/agent-10.10.0.60.secret").expanduser().read_text().strip()
     agent = HttpAgent("http://127.0.0.1:18780", secret)
@@ -90,7 +92,11 @@ def main() -> None:
                       validated_locations={k: set(v) for k, v in meta["validated_locations"].items()})
         plan = compile_plan(doc, ctx)
         ps = meta["phone_system_id"]
-        target = fusionpbx.Target(ps, str(uuid.uuid5(uuid.UUID(ps), "domain")), up["gateways"])
+        target = fusionpbx.Target(ps, str(uuid.uuid5(uuid.UUID(ps), "domain")), up["gateways"], a.speech)
+        if a.speech:     # Google stands behind the same interface in production; staging uses a tone (no account, nothing paid)
+            tone = (HERE.parent.parent / "sipp/scenarios/tone-ulaw.wav").read_bytes()
+            for m in plan["ivr_menus"]:
+                agent.put_sound(meta["domain"], speech.file_name(m["greeting"], plan["voice"]), tone)
         STATE.mkdir(exist_ok=True)
         mf = STATE / f"{a.name}.manifest.json"
         previous = json.loads(mf.read_text()) if mf.exists() else []

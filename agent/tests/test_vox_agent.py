@@ -154,13 +154,28 @@ def test_unsigned_wrongly_signed_stale_future_and_replayed_requests_are_refused(
     assert call(agent, "GET", "/v1/status", sig=sig)[0] == 200
     assert call(agent, "GET", "/v1/status", sig=sig)[0] == 401                      # the same signature twice
     assert call(agent, "POST", "/v1/status", {}, sig=va.sign(SECRET, "GET", "/v1/status", b"{}"))[0] == 401   # signed for another method
+    assert call(agent, "GET", "/v1/status", sig=sig.replace(",n=", ",x="))[0] == 401                         # no nonce
+    t = int(time.time())
+    bad = va.sign(SECRET, "GET", "/v1/status", b"", t, "zz")                                                  # a nonce that is not hex
+    assert call(agent, "GET", "/v1/status", sig=bad)[0] == 401
+
+
+def test_two_identical_requests_in_the_same_second_are_both_accepted(agent):
+    t = int(time.time())
+    for _ in range(2):          # a publish's cache delete and its republish's, the same keys in the same second: not a replay
+        assert call(agent, "POST", "/v1/cache/delete", {"keys": ["dialplan.x.test"]}, t=t)[0] == 200
 
 
 def test_unknown_operations_bad_bodies_and_large_bodies(agent):
     assert call(agent, "GET", "/v1/nothing")[0] == 404
     assert call(agent, "POST", "/v1/reloadacl", [1])[0] == 400
-    big = {"keys": ["k"] * 20000}
-    assert call(agent, "POST", "/v1/cache/delete", big)[0] == 413
+    import http.client       # a body declared over the 8 MB a greeting may take is refused before it is read
+    host, port = agent["url"][7:].split(":")
+    conn = http.client.HTTPConnection(host, int(port), timeout=5)
+    conn.putrequest("POST", "/v1/cache/delete")
+    conn.putheader("Content-Length", str(9 * 1024 * 1024))
+    conn.endheaders()
+    assert conn.getresponse().status == 413
 
 
 def test_the_replay_window_forgets_old_signatures():
@@ -215,3 +230,25 @@ def test_photonvoxs_own_client_speaks_to_this_agent(agent):
     assert a.check("route", "911", "x.sip.test", UUID1, "fedcba9876543210") == "reached 301" and a.status()["registrations"] == 2
     with pytest.raises(AgentError, match="401"):
         HttpAgent(agent["url"], "x" * 40).reload_acl()
+
+
+def test_a_spoken_greeting_is_written_whole_into_the_domains_recordings(agent, tmp_path):
+    import base64
+    agent["cfg"].recordings = str(tmp_path / "recordings")
+    wav = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 28
+    name = "photonvox-" + "a" * 32 + ".wav"
+    body = {"domain_name": "x.sip.test", "name": name, "data": base64.b64encode(wav).decode()}
+    assert call(agent, "POST", "/v1/sound", body) == (200, {"written": name, "bytes": len(wav)})
+    assert (tmp_path / "recordings" / "x.sip.test" / name).read_bytes() == wav
+    assert not list((tmp_path / "recordings" / "x.sip.test").glob("*.part"))
+    for bad in ({"name": "../../etc/passwd"}, {"name": "photonvox-x.wav"}, {"domain_name": "../x"}, {"data": "not base64!"},
+                {"data": base64.b64encode(b"ID3 an mp3").decode()}, {"data": 7}):
+        assert call(agent, "POST", "/v1/sound", {**body, **bad})[0] == 400
+
+
+def test_a_greeting_over_the_size_limit_is_refused(agent, monkeypatch):
+    import base64
+    monkeypatch.setattr(va, "MAX_SOUND", 100)
+    wav = b"RIFF\x24\x00\x00\x00WAVE" + b"\x00" * 200
+    assert call(agent, "POST", "/v1/sound", {"domain_name": "x.sip.test", "name": "photonvox-" + "b" * 32 + ".wav",
+                                             "data": base64.b64encode(wav).decode()})[0] == 400

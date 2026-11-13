@@ -44,6 +44,9 @@ class FakeAgent:
     def reload_acl(self):
         self.calls.append("acl")
 
+    def put_sound(self, domain_name, name, audio):
+        self.calls.append(("sound", name, len(audio)))
+
     def _xml(self, c, domain_uuid, name):
         return c.execute(text("select dialplan_xml from v_dialplans where domain_uuid = :d and dialplan_name = :n"), {"d": domain_uuid, "n": name}).scalar()
 
@@ -526,3 +529,57 @@ def test_with_a_mail_password_set_once_and_none_given_later_it_still_writes_noth
 def test_routes_reach_engines_through_the_real_connection_unless_a_test_says_otherwise():
     from app.routes import platform
     assert platform.get_connect() is service.connect
+
+
+# ---- greetings spoken at publish (decision 30) ----
+
+class FakeSpeech:
+    def __init__(self):
+        self.spoken = []
+
+    def synthesize(self, text, voice):
+        self.spoken.append((text, voice))
+        return b"RIFF\x24\x00\x00\x00WAVE" + text.encode()
+
+
+def test_greetings_are_spoken_once_cached_and_named_by_their_menus(client, world, built, connect, agent, eng, monkeypatch):
+    from app import speech as sp
+    from app.models import SpeechAudio
+    fake = FakeSpeech()
+    monkeypatch.setattr(service, "get_speech", lambda: fake)
+    client.post(f"{built}/phone-system/draft/template", headers=auth("tech"),
+                json={"template": "front-desk-menu", "site_id": world.a1, "location": "main", "main_number": MAIN, "users": USERS})
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    d["voice"] = "en-US-Chirp3-HD-Charon"
+    client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": d})
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    greeting = d["menus"]["main"]["greeting"]
+    name = sp.file_name(greeting, "en-US-Chirp3-HD-Charon")
+    assert fake.spoken == [(greeting, "en-US-Chirp3-HD-Charon")]
+    assert ("sound", name, len(fake.synthesize(greeting, "x"))) in agent.calls
+    with eng.connect() as c:
+        assert c.execute(text("select ivr_menu_greet_long from v_ivr_menus")).scalar() == name
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    assert len(fake.spoken) == 2          # the second was this test's own call above: the republish took the audio from the cache
+    with SystemSession() as s:
+        assert [(a.voice, a.characters) for a in s.execute(select(SpeechAudio)).scalars()] == [("en-US-Chirp3-HD-Charon", len(greeting))]
+    assert client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["state"] == "ready"
+
+
+def test_without_a_provider_menus_publish_without_a_greeting(client, world, built, connect, eng):
+    client.post(f"{built}/phone-system/draft/template", headers=auth("tech"),
+                json={"template": "front-desk-menu", "site_id": world.a1, "location": "main", "main_number": MAIN, "users": USERS})
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    with eng.connect() as c:
+        assert c.execute(text("select ivr_menu_greet_long from v_ivr_menus")).scalar() is None
+
+
+def test_the_provider_is_google_when_a_key_is_set(monkeypatch):
+    from app.config import settings
+    from app.speech.google import GoogleSpeech
+    assert service.get_speech() is None
+    monkeypatch.setattr(settings, "google_tts_api_key", "k")
+    assert isinstance(service.get_speech(), GoogleSpeech)

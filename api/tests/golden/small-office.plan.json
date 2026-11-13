@@ -236,6 +236,7 @@
       }
     }
   ],
+  "voice": "en-US-Chirp3-HD-Kore",
   "voicemail_boxes": [
     {
       "email": "office@example.com",

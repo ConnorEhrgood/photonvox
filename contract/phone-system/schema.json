@@ -543,6 +543,11 @@
       "title": "Version",
       "type": "integer"
     },
+    "voice": {
+      "default": "en-US-Chirp3-HD-Kore",
+      "title": "Voice",
+      "type": "string"
+    },
     "sites": {
       "additionalProperties": {
         "$ref": "#/$defs/Site"

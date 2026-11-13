@@ -28,10 +28,13 @@ def test_the_http_agent_signs_each_call_and_speaks_the_agents_operations():
     a.rescan([])
     a.reload_acl()
     assert a.check("inbound", "+17245550100", "x.test", "d0", T) == "reached 301" and a.status() == {"agent": "0.1.0"}
-    assert [p for _m, p, _s, _c in seen] == ["/v1/seed-domain", "/v1/cache/delete", "/v1/rescan", "/v1/reloadacl", "/v1/check", "/v1/status"]
+    a.put_sound("x.test", "photonvox-" + "a" * 32 + ".wav", b"RIFF")
+    assert [p for _m, p, _s, _c in seen] == ["/v1/seed-domain", "/v1/cache/delete", "/v1/rescan", "/v1/reloadacl", "/v1/check", "/v1/status", "/v1/sound"]
+    assert json.loads(seen[-1][3]) == {"domain_name": "x.test", "name": "photonvox-" + "a" * 32 + ".wav", "data": "UklGRg=="}
     method, path, sig, body = seen[1]
-    t = int(sig.split(",")[0][2:])
-    assert sig == agent.sign("s" * 40, method, path, body, t) and json.loads(body) == {"keys": ["dialplan.x.test"]}
+    parts = dict(p.split("=", 1) for p in sig.split(","))
+    assert sig == agent.sign("s" * 40, method, path, body, int(parts["t"]), parts["n"]) and json.loads(body) == {"keys": ["dialplan.x.test"]}
+    assert len({s for _m, _p, s, _c in seen}) == len(seen) and agent.sign("k" * 40, "GET", "/v1/status", b"", 1) != agent.sign("k" * 40, "GET", "/v1/status", b"", 1)
 
 
 def test_an_agent_that_refuses_is_an_error_with_its_reason():

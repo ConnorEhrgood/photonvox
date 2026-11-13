@@ -24,7 +24,7 @@ Suite-wide topics (PhotonID and organizations, the rules for working on Photon, 
 
 **Decisions 1–28 approved as recommended ("Everything else looks quite good"), except decision 23, which Connor changed (the native handoff
 on cellular devices, automatic location elsewhere);
-the row below is the decided version. Decisions 29 (call blocking), 30 (text-to-speech) and 31 (911 addresses per number) were added the same day from Connor's answers.** The BUILD-GUIDE follows them. Changing one means changing it here first, with Connor.
+the row below is the decided version. Decisions 29 (call blocking), 30 (text-to-speech: Google Chirp 3 HD) and 31 (911 addresses per number) were added and decided the same day from Connor's answers.** The BUILD-GUIDE follows them. Changing one means changing it here first, with Connor.
 
 | # | Decision | Why | § |
 |---|---|---|---|
@@ -57,7 +57,7 @@ the row below is the decided version. Decisions 29 (call blocking), 30 (text-to-
 | 27 | **Builds: Android and Windows on the runner, iOS and macOS on Xcode Cloud** (25 hours a month included; needs the photonvox repo on GitHub), Connor's Mac as the fallback. **Apple Developer Program and Google Play Console as organization accounts, Connor the Account Holder**; Play App Signing with our upload key in `~/keys`; APNs and FCM keys on the gateway hosts and in Bitwarden. *Costs money (Apple $99 a year, Google $25 once, Windows signing a small monthly fee)* | No Mac to buy or keep running; keys held the way PhotonBoard's are | 18a |
 | 28 | **Phase A sits in R2**, first after R1, with its spikes during R1; about **4–5 months** to the stores | It needs R1's instances, numbers and locked 911; nothing in R1 waits for it | 18a |
 | 29 | **Call blocking per organization** (decided 2026-11-13, as Connor asked; §15a): Photon's default list (international until switched on, premium, high-cost Caribbean and other non-US North American codes, satellite and other high-cost ranges) blocked by default; the partner or an admin allows a category or adds and removes numbers and prefixes; compiled as one locked block route right after the emergency routes; 911 and 933 never blocked; Photon keeps the list current suite-wide. The block route, the default list and the page in R1; per-extension overrides and blocked-call alerts with it if small, else R2; inbound blocking (callers, anonymous) in R2, spam scoring later | The riskiest destinations closed for everyone without depending on each extension's call class; the live engine already needed a hand-built version (§17a) | 15a |
-| 30 | **Text-to-speech greetings** (Connor, 2026-11-13: a key feature): menus and messages are spoken from their text, **generated when the phone system is published and stored as files** on the engine (no dependency on the provider when a call comes in); a recorded greeting always overrides. *Provider, recommended pending a listening test on real phones:* **Google Cloud TTS, Chirp 3 HD** (8 kHz mu-law and 16 kHz output directly, an IVR audio profile, US English and Spanish voices, SSML and custom pronunciations, first 1M characters a month free then $30 per million, no logging of the text); runner-up **Azure Neural** ($15 per million, the most phone-ready formats; its code of conduct asks that a synthetic voice be disclosed); **Telnyx** if one vendor matters more (a REST TTS API exists; its Polly and Azure voices cost more than direct). ElevenLabs: most natural, 2–5 times the price, weak SSML on its newest models, OEM terms for resale to check | §8a |
+| 30 | **Text-to-speech greetings, Google Cloud Text-to-Speech, Chirp 3 HD** (decided by Connor, 2026-11-13: a key feature): menus and messages are spoken from their text, **generated when the phone system is published and stored as files** on the engine (no dependency on the provider when a call comes in); a recorded greeting always overrides. Integrators pick from a few voices (four proposed for the listening test, §8a). **Google Cloud TTS, Chirp 3 HD** (8 kHz mu-law and 16 kHz output directly, an IVR audio profile, US English and Spanish voices, SSML and custom pronunciations, first 1M characters a month free then $30 per million, no logging of the text); runner-up **Azure Neural** ($15 per million, the most phone-ready formats; its code of conduct asks that a synthetic voice be disclosed); **Telnyx** if one vendor matters more (a REST TTS API exists; its Polly and Azure voices cost more than direct). ElevenLabs: most natural, 2–5 times the price, weak SSML on its newest models, OEM terms for resale to check | §8a |
 | 31 | **911 addresses are held per number in PhotonVox and confirmed with the carrier** (Connor, 2026-11-13: Hickory tracks by hand which address each DID is at): every number the organization holds is registered at its site's validated address; a change makes a **carrier request** (for Hickory a clear email, or a ticket number staff record) tracked until Hickory confirms; until then the number shows **unconfirmed** (to the integrator, the customer's admins and Photon staff). A carrier with an API later submits and polls through the same request. *Recommended:* publishing is not held back while a number is unconfirmed (911 still routes, with the address the carrier last confirmed), but staff are alerted daily until it is | §11a |
 
 Dropped from revision 1 (no longer decisions now): Telnyx as the second carrier (replaced by 7), a login per phone (replaced by 13), and the
@@ -335,13 +335,37 @@ Integrators set these through screens, never as JSON; the document is what Photo
   or 911/933/988/311-style service codes.
 - **Versioned:** each publish is a version with who and when; "undo" publishes the previous one.
 
-### 8a. Greetings: text-to-speech at publish (decision 30)
+### 8a. Greetings: text-to-speech at publish (decision 30: Google Cloud Text-to-Speech, Chirp 3 HD)
 
-A menu's greeting (and any message the plan speaks) is text in the document. At publish, PhotonVox has it spoken once by the text-to-speech
-provider, at the engine's rates (8 kHz mu-law for G.711, 16 kHz for wideband), stores the files with the version and writes them to the engine
-with the rest; the engine plays files and never calls the provider. The audio is keyed by the text, voice and provider, so a republish reuses
-it, and a recorded greeting (uploaded or recorded by phone) overrides it. The staging engine has no speech module, so until this is built a
-menu answers silently (SPIKES §1f). Provider comparison (2026-11-13, list prices; a listening test on real phones decides):
+A menu's greeting is text in the document, with one voice per phone system. At publish the worker has each greeting spoken (`app/speech`:
+a provider interface, Google's implementation, 16 kHz WAV with the telephony audio profile), keeps the audio in PhotonVox keyed by a hash of
+voice and text (the same words in the same voice are paid for once, and survive a move to another engine), and vox-agent writes the file into
+the domain's recordings on the engine before the menu that names it is written; the engine plays a file and never calls Google. Without a
+key configured, menus publish without a spoken greeting. A recorded greeting (when recordings arrive) is played instead. Built and proven on
+staging with a stand-in provider (2026-11-13); Google itself waits for the key below.
+
+**Voices proposed for the listening test** (Google's Chirp 3 HD names; `scripts/tts-samples.py` makes the same greeting in each, about 1,000
+characters, inside the free monthly allowance; play them on real phones over G.711 and G.722, then keep three or four):
+
+| Voice | Who it is |
+|---|---|
+| `en-US-Chirp3-HD-Kore` | US English, female (the default) |
+| `en-US-Chirp3-HD-Charon` | US English, male |
+| `en-US-Chirp3-HD-Aoede` | US English, female, lighter |
+| `es-US-Chirp3-HD-Kore` | US Spanish, female |
+
+**What Connor creates in Google Cloud** (nothing has been signed up for):
+1. A Google Cloud project for PhotonVox's speech (for example `photonvox-tts`), with Photon's billing account linked.
+2. Enable one API: **Cloud Text-to-Speech API** (`texttospeech.googleapis.com`).
+3. One **API key** (APIs & Services → Credentials), restricted to the Cloud Text-to-Speech API only (API restrictions) and to the PhotonVox
+   server's public address (application restriction: IP addresses). An API key needs no IAM role. (If a service account is preferred
+   instead, it needs no Text-to-Speech-specific role; the code would then need a JSON key and token exchange, which is not built.)
+4. A **budget** on the project (Billing → Budgets & alerts), for example $10 a month, alerting Connor at 50%, 90% and 100%; and, because a
+   budget only warns, a **quota cap** on the API (its Quotas page: characters per minute or requests per day lowered to what greetings need).
+5. The key goes in PhotonVox's server environment as `GOOGLE_TTS_API_KEY` (and in Bitwarden). Expected cost: the first million characters a
+   month are free; a greeting is about 150 characters and is spoken once per change.
+
+The comparison that led here (2026-11-13, list prices):
 
 | Provider (voice tier) | Phone formats | Per million characters | Notes |
 |---|---|---|---|
@@ -1079,7 +1103,7 @@ since 2026-11-13, §17a.)
 **The business**
 10. Photon's regulatory standing for selling voice (§19): what it holds, what HTC covers, and who to ask.
 11. The first templates to build (which kinds of customers come first), and how many phone systems are expected in year one.
-12. Budget: the PhotonVox VPS; any upstream beyond HTC; the text-to-speech provider (decision 30). (Postmark: already on the paid tier.)
+12. Budget: the PhotonVox VPS; any upstream beyond HTC; the Google Cloud project for speech (decision 30, §8a lists what to create). (Postmark: already on the paid tier.)
 
 **The PhotonVox app** (phase A, §18a)
 13. Photon's legal entity name and its **D-U-N-S number** (both stores' organization accounts need them; getting one can take weeks). Does Photon

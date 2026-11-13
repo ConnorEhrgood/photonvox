@@ -1,11 +1,13 @@
 """What the adapter needs from vox-agent on an instance (ARCHITECTURE §5), and the client that asks it (agent/vox_agent.py is the agent).
-Fixed operations only; every request signed with the instance's agent secret (`X-PhotonVox-Signature: t=…,v1=…`), which vox-agent checks
-for age and replay. Reached over the management network."""
+Fixed operations only; every request signed with the instance's agent secret (`X-PhotonVox-Signature: t=…,n=…,v1=…`), which vox-agent
+checks for age and for a nonce seen before. Reached over the management network."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from typing import Any, Dict, Optional, Protocol, Sequence
 
@@ -25,6 +27,9 @@ class Agent(Protocol):
     def reload_acl(self) -> None:
         """Reload FreeSWITCH's access lists (`reloadacl`)."""
 
+    def put_sound(self, domain_name: str, name: str, audio: bytes) -> None:
+        """Write a spoken greeting (a WAV file) into the domain's recordings on the engine."""
+
     def check(self, kind: str, number: str, domain_name: str, domain_uuid: str, token: str) -> Optional[str]:
         """Place one synthetic call (the post-publish check) and say what it found: "reached <destination>" for an inbound number, "<route>
         <gateways> <number sent>" or "blocked <category>" for a dialed one; None if it found nothing. No phone rings and nothing leaves the engine."""
@@ -34,9 +39,11 @@ class AgentError(Exception):
     pass
 
 
-def sign(secret: str, method: str, path: str, body: bytes, t: Optional[int] = None) -> str:
+def sign(secret: str, method: str, path: str, body: bytes, t: Optional[int] = None, nonce: Optional[str] = None) -> str:
+    """vox-agent's signature: time, a fresh nonce (it refuses one seen before), method, path and body under the instance's secret."""
     t = int(time.time()) if t is None else t
-    return f"t={t},v1=" + hmac.new(secret.encode(), f"{t}.{method}.{path}.".encode() + body, hashlib.sha256).hexdigest()
+    nonce = nonce or secrets.token_hex(12)
+    return f"t={t},n={nonce},v1=" + hmac.new(secret.encode(), f"{t}.{nonce}.{method}.{path}.".encode() + body, hashlib.sha256).hexdigest()
 
 
 class HttpAgent:
@@ -70,6 +77,9 @@ class HttpAgent:
 
     def reload_acl(self) -> None:
         self.call("POST", "/v1/reloadacl", {})
+
+    def put_sound(self, domain_name: str, name: str, audio: bytes) -> None:
+        self.call("POST", "/v1/sound", {"domain_name": domain_name, "name": name, "data": base64.b64encode(audio).decode()})
 
     def check(self, kind: str, number: str, domain_name: str, domain_uuid: str, token: str) -> Optional[str]:
         return self.call("POST", "/v1/check", {"kind": kind, "number": number, "domain_name": domain_name, "domain_uuid": domain_uuid,

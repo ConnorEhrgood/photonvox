@@ -81,6 +81,7 @@ export interface DraftHours { week: Partial<Record<'mon' | 'tue' | 'wed' | 'thu'
 export interface DraftSite { emergency_location: string; emergency_number: string; caller_id: string; hours?: string | null; unreachable?: 'voicemail' | 'none'; outside_prefix?: '8' | '9' | null }
 export interface Draft {
   version: 1
+  voice?: string
   sites?: Record<string, DraftSite>
   hours?: Record<string, DraftHours>
   numbers?: Record<string, DraftNumber>
@@ -141,3 +142,9 @@ export interface CarrierRequestRow {
 }
 
 export interface PendingLocation { id: string; organization: string; site_id: string; key: string; address: EmergencyAddress }
+
+/** The voices greetings are spoken in (api/app/speech VOICES; decision 30: Google Chirp 3 HD), as integrators choose them. */
+export const VOICES: [string, string][] = [
+  ['en-US-Chirp3-HD-Kore', 'Kore (US English, female)'], ['en-US-Chirp3-HD-Charon', 'Charon (US English, male)'],
+  ['en-US-Chirp3-HD-Aoede', 'Aoede (US English, female, lighter)'], ['es-US-Chirp3-HD-Kore', 'Kore (US Spanish, female)'],
+]

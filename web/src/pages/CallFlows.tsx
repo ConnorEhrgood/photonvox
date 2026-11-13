@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../auth/TenantContext'
-import type { Draft, DraftGroup, DraftHours, DraftMenu } from '../api/types'
+import { VOICES, type Draft, type DraftGroup, type DraftHours, type DraftMenu } from '../api/types'
 import { rename, slug, TargetPicker, targetText, targetValue, toTarget, useDraft, useSiteNames } from '../components/draft'
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui'
 
@@ -40,6 +40,14 @@ export function CallFlowsPage() {
       </section>
       <section aria-label="Menus">
         <div className="ph-page-header"><h2>Menus</h2><div className="ph-actions">{add('menu')}</div></div>
+        <div className="ph-field">
+          <label htmlFor="pv-voice">Greetings are spoken in</label>
+          <select id="pv-voice" className="ph-input" disabled={!canBuild || saving} value={draft.voice ?? VOICES[0][0]}
+            onChange={(e) => void change((d) => ({ ...d, voice: e.target.value }))}>
+            {VOICES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+          <small className="ph-hint">Spoken when the phone system is published. A recorded greeting, when there is one, is played instead.</small>
+        </div>
         {menus.length === 0 ? <p className="ph-hint">None yet.</p> : (
           <ul className="pv-plain">{menus.map(([k, m]) => (
             <li key={k}><strong>{k}</strong>: “{m.greeting}” <span className="ph-hint">

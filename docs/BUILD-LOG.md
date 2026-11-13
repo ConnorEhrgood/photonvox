@@ -298,3 +298,23 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
 - For production: a Postmark server for voicemail (its token) and the sender domain's DNS (DKIM, Return-Path): Connor.
 - Fixed on the way: a test fixture set its dependency override on a freshly reloaded app object instead of the one serving (another test
   reloads `app.main`).
+
+## 2026-11-13: Step 3, the build test, a vox-agent fix, text-to-speech (decision 30 decided)
+
+- **Sites:** a site is set up for phones from the Sites page (its 911 address, the numbers its 911 calls and other calls show, its hours):
+  the gap the build test's second site found.
+- **The build test** (`engine/staging/build-test.sh`): the API and worker, in the test suite's container on LXC 800, build a phone system
+  through the same requests as the screens (the wizard with 30 pasted people across two sites, the second site, four numbers, a ring group per
+  site; staff validate both addresses), publish it to staging through vox-agent with the post-publish check, then find a hand edit and put it
+  back; SIPp then calls it (each number by its schedule, both groups, a direct line; calls out with each site's number and a user's direct
+  line; 911 from each site with that site's number; international and premium refused, toll-free allowed). 31 checks, passing repeatedly.
+  15 requests; the API's part 0.5 s, publishing and the check under 2 s. The "10 minutes of a tester's time" needs a person with the web app.
+  Staging's database and agent are now reachable from LXC 800 only (ENGINE.md).
+- **A vox-agent bug the build test caught:** two identical requests in the same second (a publish's cache deletes and its republish's) carried
+  the same signature and the second was refused as a replay, failing the publish and its restore. Signatures now carry a random nonce; replay
+  protection keys on it.
+- **Decision 30 decided by Connor: Google Cloud Text-to-Speech, Chirp 3 HD.** Built: `app/speech` (a provider interface; Google over REST with
+  an API key; four voices proposed: Kore, Charon, Aoede in US English, Kore in US Spanish), audio cached by voice and text (`speech_audio`,
+  the system's own), vox-agent's `sound` operation writing the file into the domain's recordings, menus naming it, the voice chosen on Call
+  flows. Proven on staging with a stand-in provider (a tone): the menu played the file (69 checks). Waiting: Connor's Google Cloud project, the
+  API key and budget (ARCHITECTURE §8a lists exactly what), then the listening test (`scripts/tts-samples.py`).
