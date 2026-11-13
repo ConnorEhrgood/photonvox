@@ -435,3 +435,8 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   nightly keep-3 pruning (`vzdump-lxc-600-2026_11_13-17_52_33.tar.zst`); `pg_dump -Fc` of `fusionpbx` inside CT 600 to
   `/root/photon-changes/fusionpbx-pre-takeover-20261113.dump` (3.96 MB, 119 tables with data, sha256 234ca6fd…), copied to the NAS
   (`~/backups/ct600/` on the runner's SSDs pool, mode 600; same sha256; py's temporary copy removed).
+- **Step 1, GATE 1c (about 23:10 UTC):** `gate-1c.sh` revised for Step 7 (every non-secret column of 15 tables, the dial plans included;
+  20 secret columns unreadable), rehearsed on staging, then on CT 600: check clean (photon_ro's line, the iptables rule for 10.2.1.5),
+  apply with all checks ok, the password moved to the runner (`~/.config/photonvox/live-ro.pass`, mode 600) and deleted on CT 600; from the
+  Vultr host, port 5432 reachable over mgmtnet and a real login from PhotonVox's API container (2 domains, 10 extensions, read-only session,
+  a SIP password refused). No iptables or mgmtnet change was needed. Undo: `gate-1c.sh undo` on CT 600.

@@ -304,7 +304,7 @@ the write role on that production instance.
 **Done when:** a real phone system was deployed by an integrator in the times ARCHITECTURE §1 promises, works, and is watched on the pane and in
 PhotonConsole. **GATE 6: R1 done.**
 
-### Step 7 (proposed, decision 32): take over HUEPC in place
+### Step 7 (decision 32, decided 2026-11-13): take over HUEPC in place
 
 Needs **GATE 7a**: decision 32; read access to the live domain's dial plans (extending GATE 1c); a write role on CT 600; vox-agent on CT 600
 (Step 2); the test window agreed with Hickory Church.
@@ -322,7 +322,7 @@ rollback passed unused, and the drift check is clean. **GATE 7.**
 | Release | Step | Core |
 |---|---|---|
 | R2 | Partner trunks | ARCHITECTURE §9: per-domain gateways, numbers on partner trunks, "the trunk that holds the caller ID", failover to Photon trunking, 911 never on them |
-| R2 | Move between instances | ARCHITECTURE §17.9 (only if needed; HUEPC is taken over in place in Step 7 if decision 32 is approved): publish to the new instance, inter-instance trunk, voicemail copied, phones by names or GDMS, numbers at HTC; retire LXC 600 |
+| R2 | Move between instances | ARCHITECTURE §17.9 (only if needed; HUEPC is taken over in place in Step 7, decision 32): publish to the new instance, inter-instance trunk, voicemail copied, phones by names or GDMS, numbers at HTC; retire LXC 600 |
 | R2 | Standby at DC10 | Replica, file sync, runbook, drill; GDMS SIP servers list both |
 | R2 | Inbound call blocking | ARCHITECTURE §15a: block a caller, anonymous callers; spam scoring later; per-extension blocking overrides if not done in R1 |
 | R2 | Numbers by API | Ordering, porting and E911 records through an upstream with APIs (if HTC has none, the upstream Connor chooses) |
