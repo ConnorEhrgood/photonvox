@@ -146,3 +146,11 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   for a user who shows a direct line; shared voicemail boxes are separate from users' own; every user gets a voicemail box.
 - Tests: 275 on LXC 800, 100% line and branch coverage, with `validate.py`, `compile.py` and `classes.py` added to the critical modules. The
   golden plan for the sample was read line by line before it was frozen.
+
+## 2026-11-13: the second inventory run (outbound routes)
+
+- Run by the operator, read-only, no errors (report outside git). The customer has 2 enabled outbound routes: at least one allows international
+  (011 or +), North American numbers are covered, none names 900 or 976. With no call class on any extension, **international dialing is open
+  from every extension** on the live system. Recorded in ARCHITECTURE §17a. The operator is raising the fix with Connor; nothing is written here.
+- Limit of the classification, recorded with it: it only notices patterns that name 900 or 976. A broad North American pattern would also let
+  premium 900 numbers and the high-cost Caribbean area codes through, so whether those are open is unknown until someone reads the two patterns.
