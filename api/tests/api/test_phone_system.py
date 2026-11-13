@@ -88,7 +88,8 @@ def connect(eng, agent):
 def built(client, world):
     """An instance, Cedar Works' phone system from the small-office template, the main site's emergency address validated."""
     r = client.post("/platform/instances", headers=auth("staff"), json={
-        "name": "colo-a", "hostname": "vox-a", "database_url": "postgresql+psycopg://adapter:x@engine/fusionpbx", "agent": {"kind": "ssh", "host": "h", "key": "k"},
+        "name": "colo-a", "hostname": "vox-a", "database_url": "postgresql+psycopg://adapter:x@engine/fusionpbx",
+        "agent_url": "http://10.2.1.21:8780", "agent_secret": "a" * 64,
         "upstreams": [{"key": "htc", "proxy": "198.51.100.5", "addresses": ["198.51.100.0/28"]}], "routing": {"national": ["htc"]},
         "emergency_upstream": "htc"})
     assert r.status_code == 201, r.text
@@ -391,7 +392,7 @@ def test_staff_queue_and_validation_need_staff(client, world, built):
 
 
 def test_an_instance_must_route_through_its_own_upstreams(client, world):
-    body = {"name": "bad", "hostname": "h", "database_url": "postgresql://x/y", "agent": {"kind": "ssh"},
+    body = {"name": "bad", "hostname": "h", "database_url": "postgresql://x/y", "agent_url": "http://e:8780", "agent_secret": "a" * 40,
             "upstreams": [{"key": "htc", "proxy": "p.example", "addresses": ["198.51.100.0/28"]}], "routing": {"national": ["other"]}, "emergency_upstream": "htc"}
     r = client.post("/platform/instances", headers=auth("staff"), json=body)
     assert r.status_code == 422 and r.json()["detail"]["code"] == "bad_routing"
@@ -421,13 +422,14 @@ def test_the_worker_publishes_queued_versions(client, world, built, connect):
 
 
 def test_an_instance_is_reached_through_its_sealed_login_and_its_agent(client, world, built):
-    from app.engine.agent import SshAgent
+    from app.engine.agent import HttpAgent
     from app.models import PbxInstance
     with SystemSession() as s:
         i = s.execute(select(PbxInstance)).scalar_one()
         assert "adapter:x@engine" not in i.database_url_sealed
         eng, a = service.connect(i)
-        assert str(eng.url).startswith("postgresql+psycopg://adapter:") and isinstance(a, SshAgent)
+        assert str(eng.url).startswith("postgresql+psycopg://adapter:") and isinstance(a, HttpAgent) and a.url == "http://10.2.1.21:8780"
+        assert "a" * 64 not in i.agent_secret_sealed and a.secret == "a" * 64
         i.agent = {}
         with pytest.raises(RuntimeError, match="no agent"):
             service.connect(i)

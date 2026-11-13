@@ -230,8 +230,11 @@ active/active is needed (§16).
 - **Drift:** the worker compares what FusionPBX holds with `engine_object` hashes every few minutes. A difference (someone edited FusionPBX by
   hand) is shown on the phone system ("changed outside PhotonVox") and replaced by the next publish (decision 5). Objects PhotonVox did not
   write are left alone and listed.
-- **vox-agent** (one per instance) offers fixed operations only, signed (`X-PhotonVox-Signature: t=…,v1=…`) and over mgmtnet: status,
-  registrations, channels, gateway states, cache flush, reload, synthetic call, hang up a call. The event socket never leaves localhost.
+- **vox-agent** (one per instance) offers fixed operations only, signed (`X-PhotonVox-Signature: t=…,v1=…`, five minutes' skew, no replays)
+  and over mgmtnet: status (version, profiles, gateway states, registrations), cache deletes, gateway rescans, ACL reloads, seeding a new
+  domain, the post-publish check's synthetic calls; channels and hanging up a call arrive with monitoring (Step 5). The event socket never
+  leaves localhost. Built in Step 3 (`agent/`): Python 3's standard library only, run by systemd as `www-data` with the system read-only
+  except FusionPBX's cache and FreeSWITCH's own directories, no capabilities.
 
 ### Several instances (decision 3)
 

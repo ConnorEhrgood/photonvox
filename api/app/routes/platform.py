@@ -50,7 +50,8 @@ class InstanceIn(BaseModel):
     role: str = Field("active", pattern=r"^(active|standby|draining)$")
     hostname: str = Field(min_length=1, max_length=120)
     database_url: str = Field(min_length=10)
-    agent: Dict[str, str]
+    agent_url: str = Field(pattern=r"^https?://[A-Za-z0-9.:\[\]-]+(:[0-9]+)?/?$")
+    agent_secret: str = Field(min_length=32, max_length=200)
     upstreams: List[UpstreamIn]
     routing: Dict[str, List[str]]
     emergency_upstream: str
@@ -68,12 +69,13 @@ def instances(who: Who = Depends(platform_admin), db: Session = Depends(get_db))
 
 @router.post("/instances", status_code=201)
 def add_instance(body: InstanceIn, who: Who = Depends(platform_admin), db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Register an engine. Its database login is sealed at once and never shown again."""
+    """Register an engine. Its database login and its vox-agent secret are sealed at once and never shown again."""
     keys = {u.key for u in body.upstreams}
     if body.emergency_upstream not in keys or not body.routing.get("national") or any(k not in keys for ks in body.routing.values() for k in ks):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "bad_routing", "detail": "Routing and 911 must name upstreams of this instance, with one for national calls."})
     i = PbxInstance(name=body.name, region=body.region, role=body.role, hostname=body.hostname, database_url_sealed=crypto.seal(body.database_url),
-                    agent=body.agent, upstreams=[u.model_dump() for u in body.upstreams], routing=body.routing, emergency_upstream=body.emergency_upstream)
+                    agent={"kind": "http", "url": body.agent_url}, agent_secret_sealed=crypto.seal(body.agent_secret),
+                    upstreams=[u.model_dump() for u in body.upstreams], routing=body.routing, emergency_upstream=body.emergency_upstream)
     db.add(i)
     db.flush()
     audit.record(db, actor_id=who.id, actor_label=who.label, actor_source="platform", action="instance.added", target_type="pbx_instance", target_id=i.id,

@@ -24,7 +24,7 @@ from app import audit, crypto
 from app.compiler.compile import CompileError, Context, compile_plan
 from app.document.model import PhoneSystem as Document
 from app.engine import fusionpbx, publish, upstreams, writer
-from app.engine.agent import Agent, SshAgent
+from app.engine.agent import Agent, HttpAgent
 from app.models import (EmergencyLocation, EngineObject, EngineSecret, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, utcnow)
 
 Connect = Callable[[PbxInstance], Tuple[Engine, Agent]]
@@ -35,9 +35,9 @@ def connect(instance: PbxInstance) -> Tuple[Engine, Agent]:
     from sqlalchemy import create_engine
     eng = create_engine(crypto.unseal(instance.database_url_sealed), pool_pre_ping=True, connect_args={"client_encoding": "utf8"})
     a = instance.agent or {}
-    if a.get("kind") != "ssh":
+    if a.get("kind") != "http" or not instance.agent_secret_sealed:
         raise RuntimeError(f"instance {instance.name}: no agent configured")
-    return eng, SshAgent(a["host"], a["key"])
+    return eng, HttpAgent(a["url"], crypto.unseal(instance.agent_secret_sealed))
 
 
 def context(db: Session, ps: PhoneSystem, instance: PbxInstance) -> Context:

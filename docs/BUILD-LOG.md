@@ -270,3 +270,15 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   number and template, people pasted and reviewed row by row); Users with bulk import into a ring group; Platform → 911 for staff (addresses
   to check, requests to carriers with the email text, "sent by hand" with a ticket number, the carrier's answer). 121 web tests; screenshots
   of the new pages at the three sizes, no sideways scrolling.
+
+## 2026-11-13: Step 3, vox-agent (the SSH stand-in replaced)
+
+- `agent/vox_agent.py`: the engine's agent, Python 3 standard library only. Signed requests (HMAC-SHA256 over time, method, path and body;
+  five minutes' skew; a signature is never accepted twice), fixed operations (status, cache deletes, rescans with killing removed gateways,
+  ACL reloads, seeding a domain with FusionPBX's `upgrade.php --defaults`, the synthetic calls of the post-publish check), every value checked
+  against a fixed pattern, nothing through a shell; FreeSWITCH reached through its event socket on localhost. 18 tests at 100% (a fake event
+  socket; PhotonVox's own client against the real agent).
+- Installed on staging as a hardened systemd service (www-data). Found while installing: FusionPBX's `--defaults` writes FreeSWITCH's
+  scripts, configuration and storage directories, so those are writable to the service (www-data owns them anyway); everything else is not.
+- The API's side is `HttpAgent` (instances are registered with the agent's URL and secret, sealed); the SSH stand-in is gone. The staging
+  proofs (66 checks) pass with everything going through vox-agent.

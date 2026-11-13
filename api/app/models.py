@@ -137,7 +137,7 @@ class PbxInstance(Base):
     role: Mapped[str] = mapped_column(String(20), default="active")          # active | standby | draining
     hostname: Mapped[str] = mapped_column(String(120))                       # FreeSWITCH's own hostname (part of a cache key)
     database_url_sealed: Mapped[str] = mapped_column(Text, default="")
-    agent: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)      # how to reach its agent: {"kind": "ssh", "host": ...} until vox-agent
+    agent: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)      # how to reach its vox-agent: {"kind": "http", "url": ...}
     agent_secret_sealed: Mapped[str] = mapped_column(Text, default="")
     # [{key, proxy, addresses}] and, per call class, the upstream keys in Photon's order ({"national": ["htc"], ...}); 911's upstream.
     upstreams: Mapped[List[Dict[str, Any]]] = mapped_column(JSONB, default=list)

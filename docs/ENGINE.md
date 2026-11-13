@@ -92,3 +92,7 @@ from the archives, which is not worth it for staging.
 - The database role `photonvox_adapter`: select/insert/update/delete on the tables the adapter writes, insert on `v_domains`, select on
   `v_access_controls`; nothing else. Its password is on the runner in `~/.config/photonvox/staging-adapter.pass` (mode 600); the test phones'
   SIP passwords and PINs in `~/.config/photonvox/staging-secrets.json` (mode 600).
+- **vox-agent** (`agent/install.sh root@10.10.0.60 ~/.ssh/vox_staging 127.0.0.1:8780`): `/opt/vox-agent/vox_agent.py`, the unit
+  `vox-agent.service` (as www-data, hardened), its secret in `/etc/vox-agent.env` (root:www-data 0640) and on the runner in
+  `~/.config/photonvox/agent-10.10.0.60.secret`. It listens on the engine's localhost; the harness reaches it, and the database, through one SSH
+  tunnel until the management network does.

@@ -1,0 +1,34 @@
+# vox-agent: PhotonVox's agent on a FusionPBX engine (agent/vox_agent.py). As www-data, which owns FusionPBX's cache and FreeSWITCH's logs;
+# everything else read-only, no privilege gain, no capabilities.
+[Unit]
+Description=PhotonVox agent (vox-agent)
+After=network-online.target freeswitch.service
+Wants=network-online.target
+
+[Service]
+User=www-data
+Group=www-data
+EnvironmentFile=/etc/vox-agent.env
+ExecStart=/usr/bin/python3 /opt/vox-agent/vox_agent.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+# FusionPBX's cache, and what its upgrade.php --defaults (seeding a domain) writes: the Lua scripts it copies, FreeSWITCH's configuration and
+# storage. All www-data's already; everything else stays read-only.
+ReadWritePaths=/var/cache/fusionpbx /usr/share/freeswitch /etc/freeswitch /var/lib/freeswitch
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

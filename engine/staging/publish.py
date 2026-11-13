@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Publish a phone-system document to the staging engine with PhotonVox's adapter (BUILD-GUIDE Step 3), as the API will, except that vox-agent
-is played over SSH (ssh_agent.py) and the records PhotonVox would keep are files:
+"""Publish a phone-system document to the staging engine with PhotonVox's adapter (BUILD-GUIDE Step 3), as the worker does (vox-agent on the
+engine, reached through an SSH tunnel standing in for the management network), except that the records PhotonVox would keep are files:
   - the manifest of what was written: engine/staging/.state/<name>.manifest.json (not in git), so the next publish can remove what left;
   - new SIP passwords and PINs: ~/.config/photonvox/staging-secrets.json (mode 600; staging test values, never printed).
 
@@ -23,12 +23,12 @@ import uuid
 
 from sqlalchemy import create_engine
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from ssh_agent import HOST, KEY, staging_agent  # noqa: E402
-
+HOST = os.environ.get("VOX_STAGING", "root@10.10.0.60")
+KEY = os.path.expanduser(os.environ.get("VOX_STAGING_KEY", "~/.ssh/vox_staging"))
 from app.compiler.compile import Context, compile_plan  # noqa: E402
 from app.document.model import PhoneSystem  # noqa: E402
 from app.engine import fusionpbx, publish, service, upstreams  # noqa: E402
+from app.engine.agent import HttpAgent  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 STATE = HERE / ".state"
@@ -39,8 +39,10 @@ HOSTNAME = "vox-staging"
 UPSTREAMS = [upstreams.Upstream("sipp-upstream", "10.10.0.80:5071", ("10.10.0.80/32",))]
 
 
-def tunnel(port: int = 15432) -> subprocess.Popen:
-    p = subprocess.Popen(["ssh", "-i", KEY, "-N", "-o", "ExitOnForwardFailure=yes", "-L", f"{port}:127.0.0.1:5432", HOST])
+def tunnel(port: int = 15432, agent_port: int = 18780) -> subprocess.Popen:
+    """The engine's database and its vox-agent both listen on the engine's localhost; one SSH tunnel carries both (the management network will)."""
+    p = subprocess.Popen(["ssh", "-i", KEY, "-N", "-o", "ExitOnForwardFailure=yes", "-L", f"{port}:127.0.0.1:5432",
+                          "-L", f"{agent_port}:127.0.0.1:8780", HOST])
     for _ in range(50):
         try:
             socket.create_connection(("127.0.0.1", port), 0.2).close()
@@ -66,7 +68,8 @@ def main() -> None:
     ap.add_argument("--only", action="store_true", help="with --check or --drift: do not publish, only look")
     ap.add_argument("--drift", action="store_true", help="compare the engine with what this document builds (hand edits)")
     a = ap.parse_args()
-    agent = staging_agent()
+    secret = pathlib.Path("~/.config/photonvox/agent-10.10.0.60.secret").expanduser().read_text().strip()
+    agent = HttpAgent("http://127.0.0.1:18780", secret)
     t = tunnel()
     try:
         eng = engine()

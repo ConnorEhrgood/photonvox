@@ -1,17 +1,15 @@
-"""What the adapter needs from vox-agent on an instance (ARCHITECTURE §5): fixed operations only. vox-agent is not built yet; `SshAgent` is
-the interim implementation (staging), with the same operations, over SSH to the engine as root."""
+"""What the adapter needs from vox-agent on an instance (ARCHITECTURE §5), and the client that asks it (agent/vox_agent.py is the agent).
+Fixed operations only; every request signed with the instance's agent secret (`X-PhotonVox-Signature: t=…,v1=…`), which vox-agent checks
+for age and replay. Reached over the management network."""
 from __future__ import annotations
 
-import os
-import re
-import shlex
-import subprocess
-from typing import Optional, Protocol, Sequence
+import hashlib
+import hmac
+import json
+import time
+from typing import Any, Dict, Optional, Protocol, Sequence
 
-SAFE = re.compile(r"^[A-Za-z0-9@.+_:-]+$")      # cache file names and dialed numbers are built from our own ids, numbers and domains
-# FreeSWITCH logs each line twice (the EXECUTE line wraps the data in "log(...)"), so values stop at a space or a closing parenthesis.
-FOUND = re.compile(r"PhotonVox-synthetic token=(\w+) (?:reached=([^\s)]+)|route=([^\s)]+) gateways=([^\s)]+) dial=([^\s)]*))"
-                   r"|PhotonVox blocked (\w+) .* token=(\w+)")
+import httpx
 
 
 class Agent(Protocol):
@@ -32,55 +30,47 @@ class Agent(Protocol):
         <gateways> <number sent>" or "blocked <category>" for a dialed one; None if it found nothing. No phone rings and nothing leaves the engine."""
 
 
-def parse(log: str, token: str) -> Optional[str]:
-    """What a synthetic call found, from the engine's log lines carrying its token (the dial plans write them: app/engine/fusionpbx.py)."""
-    for m in FOUND.finditer(log):
-        if m.group(1) == token:
-            return f"reached {m.group(2)}" if m.group(2) else f"{m.group(3)} {m.group(4)} {m.group(5)}"
-        if m.group(7) == token:
-            return f"blocked {m.group(6)}"
-    return None
+class AgentError(Exception):
+    pass
 
 
-class SshAgent:
-    """The interim agent: `{"kind": "ssh", "host": "root@10.10.0.60", "key": "~/.ssh/vox_staging"}` in the instance's agent settings."""
+def sign(secret: str, method: str, path: str, body: bytes, t: Optional[int] = None) -> str:
+    t = int(time.time()) if t is None else t
+    return f"t={t},v1=" + hmac.new(secret.encode(), f"{t}.{method}.{path}.".encode() + body, hashlib.sha256).hexdigest()
 
-    def __init__(self, host: str, key: str) -> None:
-        self.host, self.key = host, os.path.expanduser(key)
 
-    def run(self, command: str) -> str:
-        return subprocess.run(["ssh", "-i", self.key, "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", self.host, command], check=True,
-                              capture_output=True, text=True, timeout=120).stdout
+class HttpAgent:
+    """vox-agent over HTTP: `{"kind": "http", "url": "http://10.2.1.21:8780"}` in the instance's agent settings, the secret sealed beside it."""
+
+    def __init__(self, url: str, secret: str, client: Optional[httpx.Client] = None) -> None:
+        self.url, self.secret = url.rstrip("/"), secret
+        self.client = client or httpx.Client(timeout=310)        # seeding a domain can take minutes on a busy engine
+
+    def call(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        data = json.dumps(body).encode() if body is not None else b""
+        r = self.client.request(method, self.url + path, content=data or None,
+                                headers={"X-PhotonVox-Signature": sign(self.secret, method, path, data), "Content-Type": "application/json"})
+        if r.status_code != 200:
+            raise AgentError(f"vox-agent {path}: HTTP {r.status_code} {r.json().get('error', '') if r.content else ''}".strip())
+        return r.json()
+
+    def status(self) -> Dict[str, Any]:
+        return self.call("GET", "/v1/status")
 
     def seed_domain(self) -> None:
-        self.run("cd /var/www/fusionpbx && sudo -u www-data php core/upgrade/upgrade.php --defaults > /dev/null 2>&1")
+        self.call("POST", "/v1/seed-domain", {})
 
     def clear_cache(self, keys: Sequence[str]) -> None:
-        _safe(keys)
         if keys:
-            self.run("cd /var/cache/fusionpbx && rm -f " + " ".join(shlex.quote(k) for k in keys))
+            self.call("POST", "/v1/cache/delete", {"keys": list(keys)})
 
     def rescan(self, profiles: Sequence[str], kill: Sequence[str] = ()) -> None:
-        _safe(list(profiles) + list(kill))
-        cmds = [f"fs_cli -x 'sofia profile {p} killgw {g}'" for g in kill for p in profiles] + [f"fs_cli -x 'sofia profile {p} rescan'" for p in profiles]
-        if cmds:
-            self.run(" ; ".join(cmds) + " > /dev/null")
+        if profiles:
+            self.call("POST", "/v1/rescan", {"profiles": list(profiles), "kill": list(kill)})
 
     def reload_acl(self) -> None:
-        self.run("fs_cli -x reloadacl > /dev/null")
+        self.call("POST", "/v1/reloadacl", {})
 
     def check(self, kind: str, number: str, domain_name: str, domain_uuid: str, token: str) -> Optional[str]:
-        _safe([kind, number, domain_name, domain_uuid, token])
-        context = "public" if kind == "inbound" else domain_name
-        synthetic = "inbound" if kind == "inbound" else "route"
-        vars_ = (f"photonvox_synthetic={synthetic},photonvox_token={token},domain_name={domain_name},domain_uuid={domain_uuid},"
-                 "origination_caller_id_number=2125550000,originate_timeout=10,ignore_early_media=true")
-        log = self.run(f"fs_cli -x \"originate {{{vars_}}}loopback/{number}/{context} &park()\" > /dev/null; sleep 1; "
-                       f"grep -F 'token={token}' /var/log/freeswitch/freeswitch.log | tail -5")
-        return parse(log, token)
-
-
-def _safe(values: Sequence[str]) -> None:
-    bad = [v for v in values if not SAFE.match(v)]
-    if bad:
-        raise ValueError(f"unexpected value {bad[0]!r}")
+        return self.call("POST", "/v1/check", {"kind": kind, "number": number, "domain_name": domain_name, "domain_uuid": domain_uuid,
+                                               "token": token})["found"]
