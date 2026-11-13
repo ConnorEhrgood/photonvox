@@ -424,3 +424,14 @@ rehearsed on a staging copy (no gateways), **taken over in place** (rows keep th
 do not notice; HTC and the numbers unchanged; one behavior-identical publish with no lost calls; a week of instant "back to hand-built"), then
 the protections as a later version. §17a records the mapping. Proposed decision 32 (in place, in R1 as Step 7) and BUILD-GUIDE Step 7 and
 GATE 7a for Connor; questions 19–23 in §22. Nothing changed in production.
+
+## 2026-11-13/14: Step 7, the in-place takeover of HUEPC (decision 32), on the live engine
+
+Connor approved it as a phase: the window runs to Saturday 2026-11-14 22:00 Eastern (Hickory Church is empty until Sunday). By then HUEPC is
+either managed by PhotonVox with no behavior change and test calls passing, or fully back as it was. Each production step: exact commands in
+`~/vox-takeover/stepN.sh` (outside git, mode 600, no secrets), reviewed, then "go". Never 911 or 933. Protections are not part of it.
+
+- **Step 0, backups (22:52–22:55 UTC):** vzdump of CT 600 to `local` in snapshot mode, 31 s, 2.50 GB, zstd-checked, **protected** from the
+  nightly keep-3 pruning (`vzdump-lxc-600-2026_11_13-17_52_33.tar.zst`); `pg_dump -Fc` of `fusionpbx` inside CT 600 to
+  `/root/photon-changes/fusionpbx-pre-takeover-20261113.dump` (3.96 MB, 119 tables with data, sha256 234ca6fd…), copied to the NAS
+  (`~/backups/ct600/` on the runner's SSDs pool, mode 600; same sha256; py's temporary copy removed).
