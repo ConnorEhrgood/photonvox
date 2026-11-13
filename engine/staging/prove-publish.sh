@@ -43,6 +43,7 @@ acl_off() { # phones and the upstream share LXC 800's address; FusionPBX applies
 }
 
 before_spike=$(spike_rows)
+$SIPP mailpit stop; $SIPP mailpit start
 python3 engine/staging/system.py full > /dev/null
 check "publish the full system" "$(publish engine/staging/.state/adapter.json | grep -c '"domain"')" 1
 check "staging-check passes" "$(bash scripts/staging-check.sh > /dev/null; echo $?)" 0
@@ -92,6 +93,10 @@ check "  302 rang, 301 did not" "$(invites ph302)/$(invites ph301)" 1/0
 check "an unregistered user at a hang-up site: not answered" "$( [ "$(inbound i-303 12125550303 call.xml -d 1000)" != 0 ] && echo unanswered)" unanswered
 check "  forwarded to the hang-up dial plan" "$(S "grep -c 'photonvox-hangup XML $DOMAIN' /var/log/freeswitch/freeswitch.log" | awk '{print ($1 >= 1) ? "yes" : "no"}')" yes
 check "an unregistered user at a voicemail site: voicemail answers" "$(inbound i-304 12125550304 call.xml -d 2000)" 0
+check "a caller leaves a message (a spoken tone, past the greeting)" "$(inbound i-304vm 12125550304 call-speak.xml -mi 10.10.0.80 -d 18000)" 0
+sleep 12      # FusionPBX's email queue sends every few seconds
+check "  it arrives by email at 304's address, with the recording attached" \
+  "$($SIPP mailpit messages | python3 -c 'import json,sys; m=[x for x in json.load(sys.stdin)["messages"] if x["To"][0]["Address"]=="di@example.test"]; print(len(m), m[0]["Attachments"] if m else 0, "Voicemail from 3105550199" in (m[0]["Subject"] if m else ""))')" "1 1 True"
 
 # ---- the post-publish check (synthetic calls: nothing rings, nothing leaves the engine) ----
 checks() { publish engine/staging/.state/adapter.json --check --only | python3 -c 'import json,sys; c=json.load(sys.stdin)["check"]; print(sum(x["ok"] for x in c), len(c), ",".join(x["number"] for x in c if not x["ok"]))'; }
@@ -125,5 +130,6 @@ check "  the menu's key 2 is gone" "$(q "select count(*) from v_ivr_menu_options
 check "the spike's domain was not touched" "$(spike_rows)" "$before_spike"
 check "staging-check still passes" "$(bash scripts/staging-check.sh > /dev/null; echo $?)" 0
 
+$SIPP mailpit stop
 $SIPP clean
 echo "$pass passed, $fail failed"; [ $fail = 0 ]

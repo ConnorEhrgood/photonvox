@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import uuid
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 
@@ -73,14 +74,16 @@ def main() -> None:
     t = tunnel()
     try:
         eng = engine()
-        with eng.begin() as conn:
-            up = upstreams.write_upstreams(conn, INSTANCE, HOSTNAME, UPSTREAMS)
-        agent.clear_cache(up["cache"])
-        agent.reload_acl()
-        agent.rescan(up["rescan"], up["kill"])
+        # The instance's own settings through the same path as Platform → Apply (app/engine/service.py): upstreams and outgoing mail, which
+        # on staging is Mailpit on LXC 800 (scripts/sipp.sh mailpit) standing in for Postmark.
+        inst = SimpleNamespace(id=INSTANCE, hostname=HOSTNAME, upstreams=[{"key": u.key, "proxy": u.proxy, "addresses": list(u.addresses)} for u in UPSTREAMS],
+                               email={"host": "10.10.0.80", "port": 2525, "secure": "none", "from": "voicemail@vox-staging.test", "from_name": "Voicemail"},
+                               email_password_sealed="")
+        applied = service.apply_instance(inst, lambda _i: (eng, agent))
         if a.upstreams:
-            print(json.dumps({"upstreams": sorted(up["gateways"])}))
+            print(json.dumps({"upstreams": applied["gateways"]}))
             return
+        up = {"gateways": {u.key: upstreams.gateway_uuid(INSTANCE, u.key) for u in UPSTREAMS}}
         doc = PhoneSystem.model_validate(json.loads(pathlib.Path(a.document).read_text()))
         meta = json.loads(pathlib.Path(a.document).with_suffix(".context.json").read_text())
         ctx = Context(domain=meta["domain"], timezones=meta["timezones"], upstreams={"national": ["sipp-upstream"]}, emergency_gateway="sipp-upstream",

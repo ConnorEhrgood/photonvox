@@ -90,9 +90,11 @@ from the archives, which is not worth it for staging.
   `adapter.vox.test` (written by PhotonVox's adapter: `engine/staging/prove-publish.sh`). The spike's direct-write domain was removed.
 - Gateways: two SIPp upstreams on LXC 800, `sipp-upstream` on 5070 (the spike's, by page) and on 5071 (the adapter's, PhotonVox-owned).
 - The database role `photonvox_adapter`: select/insert/update/delete on the tables the adapter writes, insert on `v_domains`, select on
-  `v_access_controls`; nothing else. Its password is on the runner in `~/.config/photonvox/staging-adapter.pass` (mode 600); the test phones'
+  `v_access_controls`, select/insert/update on `v_default_settings` (the adapter writes only its `email` rows); nothing else. Its password is on the runner in `~/.config/photonvox/staging-adapter.pass` (mode 600); the test phones'
   SIP passwords and PINs in `~/.config/photonvox/staging-secrets.json` (mode 600).
 - **vox-agent** (`agent/install.sh root@10.10.0.60 ~/.ssh/vox_staging 127.0.0.1:8780`): `/opt/vox-agent/vox_agent.py`, the unit
   `vox-agent.service` (as www-data, hardened), its secret in `/etc/vox-agent.env` (root:www-data 0640) and on the runner in
   `~/.config/photonvox/agent-10.10.0.60.secret`. It listens on the engine's localhost; the harness reaches it, and the database, through one SSH
   tunnel until the management network does.
+- **Outgoing mail:** FusionPBX's `email` settings point at Mailpit on LXC 800 (`scripts/sipp.sh mailpit start`, SMTP 2525, API 8026), a sink
+  standing in for Postmark; nothing leaves. Production instances get Postmark's SMTP through Platform → the instance's mail, then Apply.

@@ -52,7 +52,7 @@ def document(mode: str) -> dict:
             "u1": {"name": "Ann Desk", "site": S1, "extension": "301", "direct_number": "+12125550301", "show": "direct"},
             "u2": {"name": "Bo Desk", "site": S1, "extension": "302"},
             "u3": {"name": "Cy York", "site": S2, "extension": "303"},
-            "u4": {"name": "Di Away", "site": S1, "extension": "304"},
+            "u4": {"name": "Di Away", "site": S1, "extension": "304", "email": "di@example.test"},
         },
         "boxes": {"general": {"name": "General mailbox"}},
         "calling": {"national": True, "toll_free": True, "international": [],

@@ -6,6 +6,7 @@
 #   scripts/sipp.sh run <name> <sipp args>    run to the end and return SIPp's exit code (0 = every call succeeded)
 #   scripts/sipp.sh log <name>                its message trace (-trace_msg writes to /logs/<name>.log)
 #   scripts/sipp.sh stop <name> | clean       stop one | stop all of ours and remove the logs (clean --image also removes the image)
+#   scripts/sipp.sh mailpit start|messages|stop   an SMTP sink for voicemail to email (Mailpit, already on LXC 800)
 set -euo pipefail
 HOST="${SIPP_HOST:-lxc800}"
 DIR=/root/vox-test/sipp
@@ -28,5 +29,12 @@ case "${1:-}" in
   stop)  ssh "$HOST" "docker stop vox-sipp-$2 >/dev/null 2>&1 || true" ;;
   clean) ssh "$HOST" "ids=\$(docker ps -aq --filter label=$LABEL --filter name=vox-sipp-); [ -z \"\$ids\" ] || docker rm -f \$ids >/dev/null; rm -rf $DIR/logs"
          [ "${2:-}" = --image ] && ssh "$HOST" "docker rmi $IMAGE >/dev/null 2>&1 || true; rm -rf $DIR" || true ;;
+  mailpit)   # an SMTP sink standing in for Postmark: start | messages | stop  (SMTP 2525, its API 8026; 8025 is someone else's)
+    case "${2:-}" in
+      start) ssh "$HOST" "docker run -d --rm --name vox-mailpit --label $LABEL --network host axllent/mailpit:v1.27.10 --smtp 0.0.0.0:2525 \
+               --listen 0.0.0.0:8026 --smtp-auth-accept-any --smtp-auth-allow-insecure > /dev/null" ;;
+      messages) ssh "$HOST" "curl -s localhost:8026/api/v1/messages" ;;
+      stop) ssh "$HOST" "docker stop vox-mailpit > /dev/null 2>&1 || true" ;;
+    esac ;;
   *) sed -n 2,9p "$0"; exit 2 ;;
 esac

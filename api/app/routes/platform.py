@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import audit, crypto, emergency
+from app.engine import service
 from app.db import SystemSession, get_db
 from app.deps import Who, platform_admin
 from app.models import CarrierRequest, EmergencyLocation, PbxInstance, SyncState, Tenant, utcnow
@@ -59,7 +60,8 @@ class InstanceIn(BaseModel):
 
 def _instance_json(i: PbxInstance) -> Dict[str, Any]:
     return {"id": str(i.id), "name": i.name, "region": i.region, "role": i.role, "hostname": i.hostname, "agent_kind": (i.agent or {}).get("kind"),
-            "upstreams": i.upstreams, "routing": i.routing, "emergency_upstream": i.emergency_upstream, "versions": i.versions}
+            "upstreams": i.upstreams, "routing": i.routing, "emergency_upstream": i.emergency_upstream, "versions": i.versions,
+            "email": {k: v for k, v in (i.email or {}).items()}, "email_password_set": bool(i.email_password_sealed)}
 
 
 @router.get("/instances")
@@ -152,3 +154,49 @@ def request_closed(request_id: uuid.UUID, body: Verdict, who: Who = Depends(plat
                      "carrier_request.rejected", tenant_id=req.tenant_id, target_type="carrier_request", target_id=req.id)
         s.commit()
         return {"id": str(req.id), "status": req.status}
+
+
+class EmailIn(BaseModel):
+    host: str = Field(min_length=3, max_length=200)
+    port: int = Field(587, ge=1, le=65535)
+    secure: str = Field("tls", pattern=r"^(tls|ssl|none)$")
+    username: str = Field("", max_length=200)
+    password: str = Field("", max_length=500)
+    from_: str = Field(alias="from", pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    from_name: str = Field("", max_length=100)
+
+
+def get_connect() -> service.Connect:  # overridden in tests
+    return service.connect
+
+
+@router.put("/instances/{instance_id}/email")
+def set_email(instance_id: uuid.UUID, body: EmailIn, who: Who = Depends(platform_admin), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """The instance's outgoing mail (voicemail to email). The password (a Postmark server token) is sealed; leaving it empty keeps the one set."""
+    i = db.get(PbxInstance, instance_id)
+    if i is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    i.email = {"host": body.host, "port": body.port, "secure": body.secure, "username": body.username, "from": body.from_, "from_name": body.from_name}
+    if body.password:
+        i.email_password_sealed = crypto.seal(body.password)
+    audit.record(db, actor_id=who.id, actor_label=who.label, actor_source="platform", action="instance.email_set", target_type="pbx_instance",
+                 target_id=i.id, host=body.host)
+    db.commit()
+    return _instance_json(i)
+
+
+@router.post("/instances/{instance_id}/apply")
+def apply_instance(instance_id: uuid.UUID, who: Who = Depends(platform_admin), db: Session = Depends(get_db),
+                   connect: service.Connect = Depends(get_connect)) -> Dict[str, Any]:
+    """Put the instance's upstreams and outgoing mail on its engine now."""
+    i = db.get(PbxInstance, instance_id)
+    if i is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    try:
+        out = service.apply_instance(i, connect)
+    except Exception as e:  # noqa: BLE001 - the engine or its agent failed: say so, in a sentence
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, {"code": "engine_failed", "detail": f"The engine did not take it: {type(e).__name__}."})
+    audit.record(db, actor_id=who.id, actor_label=who.label, actor_source="platform", action="instance.applied", target_type="pbx_instance",
+                 target_id=i.id, **out)
+    db.commit()
+    return out

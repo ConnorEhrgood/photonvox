@@ -460,3 +460,69 @@ def test_a_customers_call_flows_can_be_cloned_by_someone_who_sees_both(client, w
     assert client.post(f"{b}/phone-system/draft/clone", headers=auth("b-owner"), json={"from_tenant_id": world.a}).status_code == 404   # cannot see A
     assert client.post(f"{built}/phone-system/draft/clone", headers=auth("tech"), json={"from_tenant_id": world.a}).status_code == 404  # itself
     assert client.post(f"{b}/phone-system/draft/clone", headers=auth("tech"), json={"from_tenant_id": str(uuid.uuid4())}).status_code == 404
+
+
+# ---- an instance's own settings: upstreams and outgoing mail ----
+
+@pytest.fixture()
+def staff_connect(client, connect):
+    """On the client's own app: another test reloads app.main, so `from app.main import app` may be a different object than the one serving."""
+    from app.routes import platform
+    client.app.dependency_overrides[platform.get_connect] = lambda: connect
+    yield
+    client.app.dependency_overrides.pop(platform.get_connect, None)
+
+
+def test_an_instances_upstreams_and_mail_are_put_on_its_engine(client, world, built, staff_connect, eng, agent):
+    iid = client.get("/platform/instances", headers=auth("staff")).json()[0]["id"]
+    body = {"host": "smtp.postmarkapp.com", "port": 587, "secure": "tls", "username": "pm-token", "password": "pm-token", "from": "voicemail@photonind.com",
+            "from_name": "Voicemail"}
+    got = client.put(f"/platform/instances/{iid}/email", headers=auth("staff"), json=body).json()
+    assert got["email"]["host"] == "smtp.postmarkapp.com" and got["email_password_set"] and "password" not in got["email"]
+    with eng.begin() as c:
+        c.execute(text("insert into v_access_controls values (gen_random_uuid(), 'providers')"))
+    r = client.post(f"/platform/instances/{iid}/apply", headers=auth("staff"))
+    assert r.status_code == 200 and r.json() == {"gateways": ["htc"], "removed": 0, "email": True}, r.text
+    assert agent.calls == ["cache", "rescan", "acl"]
+    with eng.connect() as c:
+        rows = dict(c.execute(text("select default_setting_subcategory, default_setting_value from v_default_settings where default_setting_category = 'email'")).all())
+        gw = c.execute(text("select gateway, proxy from v_gateways")).all()
+    assert rows == {"smtp_host": "smtp.postmarkapp.com", "smtp_port": "587", "smtp_secure": "tls", "smtp_auth": "true", "smtp_username": "pm-token",
+                    "smtp_password": "pm-token", "smtp_from": "voicemail@photonind.com", "smtp_from_name": "Voicemail"}
+    assert gw == [("htc", "198.51.100.5")]
+    client.put(f"/platform/instances/{iid}/email", headers=auth("staff"), json={**body, "password": "", "username": ""})
+    client.post(f"/platform/instances/{iid}/apply", headers=auth("staff"))
+    with eng.connect() as c:
+        rows = dict(c.execute(text("select default_setting_subcategory, default_setting_value from v_default_settings where default_setting_category = 'email'")).all())
+    assert rows["smtp_password"] == "pm-token" and rows["smtp_auth"] == "false"          # an empty password keeps the one set
+
+
+def test_an_instance_without_mail_or_an_engine_that_fails(client, world, built, staff_connect, agent, eng):
+    iid = client.get("/platform/instances", headers=auth("staff")).json()[0]["id"]
+    with eng.begin() as c:
+        c.execute(text("insert into v_access_controls values (gen_random_uuid(), 'providers')"))
+    assert client.post(f"/platform/instances/{iid}/apply", headers=auth("staff")).json()["email"] is False
+    agent.fail_cache_after = 0
+    r = client.post(f"/platform/instances/{iid}/apply", headers=auth("staff"))
+    assert r.status_code == 502 and r.json()["detail"]["code"] == "engine_failed"
+    for path in (f"/platform/instances/{uuid.uuid4()}/apply",):
+        assert client.post(path, headers=auth("staff")).status_code == 404
+    assert client.put(f"/platform/instances/{uuid.uuid4()}/email", headers=auth("staff"),
+                      json={"host": "smtp.example", "from": "a@b.co"}).status_code == 404
+    assert client.post(f"/platform/instances/{iid}/apply", headers=auth("tech")).status_code == 403
+
+
+def test_with_a_mail_password_set_once_and_none_given_later_it_still_writes_nothing_new(client, world, built, staff_connect, eng):
+    iid = client.get("/platform/instances", headers=auth("staff")).json()[0]["id"]
+    client.put(f"/platform/instances/{iid}/email", headers=auth("staff"), json={"host": "10.10.0.80", "port": 2525, "secure": "none", "from": "vm@vox.test"})
+    with eng.begin() as c:
+        c.execute(text("insert into v_access_controls values (gen_random_uuid(), 'providers')"))
+    client.post(f"/platform/instances/{iid}/apply", headers=auth("staff"))
+    with eng.connect() as c:
+        rows = dict(c.execute(text("select default_setting_subcategory, default_setting_value from v_default_settings where default_setting_category = 'email'")).all())
+    assert rows["smtp_password"] == "" and rows["smtp_secure"] == "none" and rows["smtp_port"] == "2525"
+
+
+def test_routes_reach_engines_through_the_real_connection_unless_a_test_says_otherwise():
+    from app.routes import platform
+    assert platform.get_connect() is service.connect

@@ -282,3 +282,19 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   scripts, configuration and storage directories, so those are writable to the service (www-data owns them anyway); everything else is not.
 - The API's side is `HttpAgent` (instances are registered with the agent's URL and secret, sealed); the SSH stand-in is gone. The staging
   proofs (66 checks) pass with everything going through vox-agent.
+
+## 2026-11-13: Step 3, the screens, clone, voicemail to email
+
+- **Numbers** (what each number rings, by its hours, per site), **Call flows** (ring groups, menus with keys 0–9 and the no-key outcome,
+  shared mailboxes, office hours and each site's hours). Every change saves the draft whole; renaming a group, menu, mailbox or hours updates
+  every reference; names are typed freely and stored in their short form. 135 web tests, coverage above the ratchet, screenshots at three sizes.
+- **Clone:** another customer's call flows, hours, calling policy and features into this draft (the integrator must see both); this
+  customer's sites, numbers and people stay; people matched by extension; what does not match is left for the problems list.
+- **Voicemail to email:** FusionPBX's email queue sends voicemail with the recording attached; PhotonVox keeps each instance's outgoing mail
+  (Platform → the instance's mail, the password sealed) and writes it to FusionPBX's `email` settings with Apply (also the upstreams), and each
+  mailbox's address from the document. Proven on staging with Mailpit on LXC 800 as the SMTP sink: a SIPp caller who speaks (a looped tone,
+  `call-speak.xml`) leaves a message for an unregistered user and the email arrives with the recording. Found on the way: a message of silence
+  is discarded by FusionPBX (3 seconds of silence end the recording), and the greeting takes about 10 seconds before recording starts.
+- For production: a Postmark server for voicemail (its token) and the sender domain's DNS (DKIM, Return-Path): Connor.
+- Fixed on the way: a test fixture set its dependency override on a freshly reloaded app object instead of the one serving (another test
+  reloads `app.main`).

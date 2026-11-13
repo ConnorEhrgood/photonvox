@@ -43,6 +43,11 @@ def create():
                        "proxy text, register boolean, expire_seconds numeric, retry_seconds numeric, distinct_to boolean, caller_id_in_from boolean, "
                        "supress_cng boolean, contact_in_ping boolean, channels numeric, context text, profile text, enabled boolean, description text, "
                        "insert_date timestamptz, update_date timestamptz)"))
+        c.execute(text("create table v_default_settings (default_setting_uuid uuid primary key, default_setting_category text, "
+                       "default_setting_subcategory text, default_setting_name text, default_setting_value text, default_setting_enabled boolean, "
+                       "default_setting_description text)"))
+        for sub in ("smtp_host", "smtp_port", "smtp_secure", "smtp_auth", "smtp_username", "smtp_from"):     # an install has these, not all
+            c.execute(text("insert into v_default_settings values (gen_random_uuid(), 'email', :s, 'text', '', false, '')"), {"s": sub})
         c.execute(text("create table v_access_controls (access_control_uuid uuid primary key, access_control_name text)"))
         c.execute(text("create table v_access_control_nodes (access_control_node_uuid uuid primary key, access_control_uuid uuid, node_type text, "
                        "node_cidr text, node_description text, insert_date timestamptz, update_date timestamptz)"))

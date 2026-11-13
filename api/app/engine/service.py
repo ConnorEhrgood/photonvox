@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from app import audit, crypto
 from app.compiler.compile import CompileError, Context, compile_plan
 from app.document.model import PhoneSystem as Document
-from app.engine import fusionpbx, publish, upstreams, writer
+from app.engine import fusionpbx, instance as instance_settings, publish, upstreams, writer
 from app.engine.agent import Agent, HttpAgent
 from app.models import (EmergencyLocation, EngineObject, EngineSecret, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, utcnow)
 
@@ -38,6 +38,22 @@ def connect(instance: PbxInstance) -> Tuple[Engine, Agent]:
     if a.get("kind") != "http" or not instance.agent_secret_sealed:
         raise RuntimeError(f"instance {instance.name}: no agent configured")
     return eng, HttpAgent(a["url"], crypto.unseal(instance.agent_secret_sealed))
+
+
+def apply_instance(instance: PbxInstance, connect: Connect = connect) -> Dict[str, Any]:
+    """Put the instance's own settings on its engine: its upstreams (gateways and providers entries) and its outgoing mail, in one transaction,
+    then have vox-agent clear the cache, stop removed gateways, rescan and reload the access lists."""
+    eng, agent = connect(instance)
+    with eng.begin() as conn:
+        up = upstreams.write_upstreams(conn, str(instance.id), instance.hostname,
+                                       [upstreams.Upstream(u["key"], u["proxy"], tuple(u["addresses"])) for u in instance.upstreams])
+        if instance.email.get("host"):
+            instance_settings.write_email(conn, str(instance.id), instance.email, crypto.unseal(instance.email_password_sealed)
+                                          if instance.email_password_sealed else "")
+    agent.clear_cache(up["cache"])
+    agent.rescan(up["rescan"], up["kill"])
+    agent.reload_acl()
+    return {"gateways": sorted(up["gateways"]), "removed": len(up["kill"]), "email": bool(instance.email.get("host"))}
 
 
 def context(db: Session, ps: PhoneSystem, instance: PbxInstance) -> Context:

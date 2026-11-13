@@ -238,15 +238,17 @@ queue in PhotonVox with HTC's turnaround is the R1 path).
   post-publish check (synthetic calls), versions and undo, hand-edit detection, the publish records (`engine_object`, sealed `engine_secret`);
   templates and bulk import; sites' emergency addresses with Photon staff's queue and numbers' 911 registrations with carrier requests
   (decision 31); the web app's Overview (state, problems, hand edits, publish, versions, undo, numbers' 911 state), setup wizard, Users with
-  import, and Platform → 911. Proven: `engine/staging/prove-publish.sh` (66 checks on staging), the API suite at 100%. Still to do here:
-  vox-agent in place of the SSH stand-in; the call-flow, numbers and hours screens (the draft is edited through templates and import so
-  far); clone; text-to-speech at publish (decision 30, after the listening test); voicemail to email; numbers from stock and port requests;
-  Hickory's 911 contact and turnaround (ARCHITECTURE §22); the done-when timing and the security review.*
+  import, and Platform → 911; vox-agent (`agent/`); the numbers and call-flow screens (ring groups, menus, mailboxes, office hours); clone;
+  voicemail to email (each instance's outgoing mail written to FusionPBX's email settings; Postmark's SMTP in production). Proven:
+  `engine/staging/prove-publish.sh` (68 checks on staging), the API suite at 100%. Still to do here: text-to-speech at publish (decision
+  30, after the listening test); numbers from stock and port requests; Hickory's 911 contact and turnaround (ARCHITECTURE §22); the
+  done-when build test and the security review; Postmark's voicemail server token and sender domain for production (Connor).*
 - **Photon trunking:** upstream gateways per instance generated from `upstream`; outbound routes per call class in Photon's order; caller ID
   only from held numbers; the **locked 911 route** per site; the **locked block route** right after it (ARCHITECTURE §15a, decision 29): Photon's default list on the Platform page, the organization's **Call blocking** page (allow a category, add or remove numbers and
   prefixes), blocked attempts reported by vox-agent to the audit and the partner. Per-extension overrides here if small, else R2; inbound
   blocking in R2.
-- Voicemail to email through Postmark (its own stream; Photon is on the paid tier).
+- Voicemail to email through Postmark (its own stream; Photon is on the paid tier). *Built: FusionPBX's email queue sends it; PhotonVox
+  writes each instance's SMTP settings (a Postmark server of its own for voicemail) and each mailbox's address.*
 - Text-to-speech greetings generated at publish and stored (decision 30, ARCHITECTURE §8a): the provider after a listening test.
 - Numbers' 911 addresses with the carrier (decision 31, ARCHITECTURE §11a): per-number registration, carrier requests, the staff queue.
 

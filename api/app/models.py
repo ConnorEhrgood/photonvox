@@ -144,6 +144,9 @@ class PbxInstance(Base):
     routing: Mapped[Dict[str, List[str]]] = mapped_column(JSONB, default=dict)
     emergency_upstream: Mapped[str] = mapped_column(String(60), default="")
     versions: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)   # FusionPBX, FreeSWITCH, as last reported
+    # Outgoing mail (voicemail to email): {host, port, secure, username, from, from_name}; Postmark's SMTP with a voicemail server's token.
+    email: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
+    email_password_sealed: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (CheckConstraint("role in ('active', 'standby', 'draining')", name="ck_pbx_instance_role"),)
 
