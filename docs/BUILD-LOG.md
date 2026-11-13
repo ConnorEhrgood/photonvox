@@ -440,3 +440,20 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   apply with all checks ok, the password moved to the runner (`~/.config/photonvox/live-ro.pass`, mode 600) and deleted on CT 600; from the
   Vultr host, port 5432 reachable over mgmtnet and a real login from PhotonVox's API container (2 domains, 10 extensions, read-only session,
   a SIP password refused). No iptables or mgmtnet change was needed. Undo: `gate-1c.sh undo` on CT 600.
+- **Step 2, the export (about 23:15 UTC):** one read-only export of HUEPC through photonvox_ro from the Vultr host: 10 extensions, 10 voicemail
+  boxes, 4 numbers, 1 menu (5 keys), 0 ring groups, 2 recordings, 1 FusionPBX user, 66 dial plans (domain, public, global), 1 gateway; no secret
+  column. Kept on the runner (`~/vox-takeover/data`, mode 600, outside git).
+- **Offline, the import and the compare-until-identical (no production access):** the importer, the builder's adoption, the compare and the
+  writer that writes only differing rows (commit a6ced4b). Result on HUEPC: **the first publish is identical to the live rows** (15 objects, 47
+  rows; 59 hand-built rows untouched and watched). The understanding check (each object regenerated from the document, compared by what it
+  does): every number, menu key, voicemail box and extension the same, except **extension 701 (the elevator)**, whose outside and 911 calls show
+  the second number; the document cannot say that yet, so it is kept exactly as it is and listed to decide. Fixed in the importer on the way:
+  voicemail switched off on 3 extensions (a `voicemail` flag per user), a menu that ends the call (timeout optional), greetings that are their
+  own recordings (`recording:<file>`), and 911 caller ID read as FusionPBX sends it (the emergency one, else the outbound one).
+- **Staging rehearsal, before the takeover:** HUEPC copied onto CT 610 (`engine/staging/load_copy.py`: same domain and row ids, random secrets,
+  the gateway a SIPp stand-in with the live gateway's id, never a carrier); the call matrix (`engine/staging/takeover-calls.sh`) passes 22 of 22:
+  internal calls, the menu, a key, each of the 4 numbers, a call out.
+- **Found: HUEPC's phones have no 911 route on the engine.** None of the 52 enabled dial plans a call from its extensions passes through (the
+  domain's and the global ones) matches 911, 933, 9911 or 1911; the outbound routes all need 10 or 11 digits. A 911 call through FusionPBX
+  would end with no route. Whether the phones reach 911 another way (a second account, the HT801's line) is for Connor. Read from the export,
+  never dialed. Not changed by the takeover (its first publish is a no-op); raised with the operator at once.
