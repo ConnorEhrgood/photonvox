@@ -71,3 +71,18 @@ Dated notes, kept for their reasoning. They describe what was true and decided o
   `remote-test.sh` rebuilds it, a few minutes).
 - **Next, and what blocks it:** 0.2 (the inventory script) can be written without anyone; 0.6 (the staging instance) needs GATE 0a, and the GDMS,
   zero-touch and barcode spikes need GATES 0c and 0d (BUILD-GUIDE §9). Everything after Step 0 waits for Connor's answers to the decisions.
+
+## 2026-11-13: the PhotonVox app (design; phase A)
+
+- Connor's direction: a custom, branded PhotonVox softphone app as its own phase (Teams Phone falls short for mobile-first and softphone-first
+  clients; desk-phone customers should get a branded companion). ARCHITECTURE §18a and decisions 20–28; BUILD-GUIDE phase A (A0–A5) with gates.
+- The main choice, **WebRTC with PhotonVox's own signaling through a gateway beside FreeSWITCH, instead of a native SIP stack**: it shares one
+  engine with the browser softphone, avoids PJSIP's and liblinphone's GPL-or-commercial licenses (GPL is impractical through the App Store), and
+  keeps SIP passwords off devices (the gateway registers each device to its extension). It also makes the gateway the natural push sender,
+  so RFC 8599 through Kamailio is not needed.
+- Checked on the web (2026-11-13): Apple's guideline 4.2.6 (template apps only when submitted by the content's provider) and 4.3, from secondary
+  sources (Apple's own page was not reached); Xcode Cloud's 25 included hours a month (Apple's announcement); Google Play's 14-day,
+  12-tester closed test for new personal accounts (Google's help page; the organization-account exemption only from third-party guides, marked
+  "to confirm" in §18a).
+- Replaced: revision 1's "white-label softphone first", R2's separate browser softphone and R3's mobile softphone. Six new questions for
+  Connor (§22, 13–18).

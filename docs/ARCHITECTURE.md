@@ -1,7 +1,8 @@
 # PhotonVox — architecture
 
-**Status:** design, revision 2, 2026-11-13. Nothing is built. Revision 2 follows Connor's product direction of the same day (below), which
-takes priority over revision 1 wherever they differ. The live phone system (FusionPBX in LXC 600, `10.10.0.21`) was **not read or touched**:
+**Status:** design, revision 2, 2026-11-13, with §18a (the PhotonVox app, phase A) added the same day. Nothing of the product is built
+(BUILD-GUIDE Step 0's skeleton is). Revision 2 follows Connor's product direction of the same day (below), which takes priority over revision 1
+wherever they differ. The live phone system (FusionPBX in LXC 600, `10.10.0.21`) was **not read or touched**:
 facts about it come from `photon/docs/fusionpbx-integration.md`, PhotonConsole's code and the suite documents; whatever they do not say is a
 question in §22. The build is driven by [BUILD-GUIDE.md](BUILD-GUIDE.md).
 
@@ -25,7 +26,7 @@ Each line is a yes/no; the recommendation is **yes** for every line. BUILD-GUIDE
 
 | # | Decision | Why yes | § |
 |---|---|---|---|
-| 1 | **The first release (R1) is: fast deployment (wizard, templates, bulk import), several FusionPBX instances, routing abstracted, Photon trunking with locked 911, GDMS, barcode enrollment, the monitoring pane and the PhotonConsole feed, toll-fraud defaults.** R2: partner trunks, taking over today's hand-built customers, the standby engine at DC10, number automation, the browser softphone, voicemail and recordings in the app, metering. R3: texting, chat, the mobile softphone | It is Connor's product, and the smallest release that delivers it | 1 |
+| 1 | **The first release (R1) is: fast deployment (wizard, templates, bulk import), several FusionPBX instances, routing abstracted, Photon trunking with locked 911, GDMS, barcode enrollment, the monitoring pane and the PhotonConsole feed, toll-fraud defaults.** R2: partner trunks, taking over today's hand-built customers, the standby engine at DC10, number automation, the PhotonVox app (phase A: browser, desktop and mobile softphone, §18a), voicemail and recordings in the app, metering. R3: texting and chat | It is Connor's product, and the smallest release that delivers it | 1 |
 | 2 | **Keep FreeSWITCH + FusionPBX as the engine, driven entirely by PhotonVox.** Integrators never use FusionPBX's screens; Photon staff keep them for emergencies, off the internet | Live customers run on it; it already has the call features; PhotonVox adds the speed and the abstraction | 5 |
 | 3 | **Several FusionPBX instances, all Photon's**, each with an optional standby. PhotonVox places each new phone system on an instance; integrators never choose or see one | Room to grow and to move customers; one engine per partner would multiply what Photon must secure | 5 |
 | 4 | **One phone system per organization**, covering all its sites, on a neutral SIP domain name (`<id>.sip.photoninfra.xyz`); existing domains keep their names | Internal dialing across sites; names change, domains in phone configurations should not | 6 |
@@ -42,12 +43,21 @@ Each line is a yes/no; the recommendation is **yes** for every line. BUILD-GUIDE
 | 15 | **Phone users are PhotonVox's own records** (name, extension, site, email), linked to a PhotonID person only if they will sign in. Roles for people who sign in: owner, admin, user (supervisor arrives with call queues) | Building a phone system for 30 people must not mean 30 PhotonID invitations | 6, 7 |
 | 16 | **Today's live customers stay as they are in R1** (monitored, not managed by PhotonVox) and are taken over in R2 with no downtime | R1 builds new phone systems; nothing risks the live ones until the builder is proven | 17 |
 | 17 | **Toll-fraud defaults on every organization, applied to the live engine first**: international and premium off, a daily spend limit that stops outbound calls (never 911), no outside dialing from voicemail | The largest financial risk in a phone system | 15 |
-| 18 | **PhotonVox's app on its own small VPS** (Misaka, Ashburn, 2 vCPU / 4 GB). *Costs money* | Calls never depend on the app; it should not share a failure with PhotonID or PhotonGuard | 16 |
+| 18 | **PhotonVox's cloud (API, web app, worker) on its own small VPS** (Misaka, Ashburn, 2 vCPU / 4 GB). *Costs money* | Calls never depend on the app; it should not share a failure with PhotonID or PhotonGuard | 16 |
 | 19 | **Redundancy: a warm standby instance at Equinix DC10 in R2**, promoted by a drilled runbook (target 15 minutes). Phones point at names from day one (GDMS holds the server names, so a move is one edit and a push) | Matches the suite's Stage 3; names keep every later move invisible | 16 |
+| 20 | **Build our own branded PhotonVox app** (replaces "white-label softphone first"): one app on iOS, Android, macOS and Windows plus the browser, all on one TypeScript calling engine (React Native on mobile, Electron on desktop). Calls, voicemail, history, contacts, presence, transfer and park now; texting and chat with R3. It rings together with the user's desk phone (same extension) | Connor's direction; one engine means one set of calling bugs, not three | 18a |
+| 21 | **WebRTC with PhotonVox's own signaling**, through a small **calling gateway (`vox-gateway`, Go) beside each FreeSWITCH instance**; FreeSWITCH terminates the media (Opus to the app, G.711 to the PSTN); coturn on each instance for UDP-blocked networks; no separate SBC. Not a native SIP stack (PJSIP or liblinphone) | Same engine as the browser; no GPL or commercial SIP license; no SIP password on any device; encryption and NAT traversal always on | 18a |
+| 22 | **Incoming calls wake the app through the gateway**: APNs VoIP push + CallKit on iOS, FCM high-priority + Telecom (ConnectionService) on Android; the gateway rings the caller back at once and holds the call until the device connects. Not RFC 8599 through Kamailio. Devices keep no standing connection in the background | The app is not a SIP client, and the gateway already stands where Kamailio would; near-zero battery at rest | 18a |
+| 23 | **911 in the app**: the user confirms their location at sign-in and on every network change (matched to a site automatically where possible, else an address validated with the upstream); on phones with cellular service 911 is handed to the phone's own dialer; elsewhere it goes through PhotonVox with the confirmed location; notification always; never blocked | RAY BAUM'S Act for non-fixed devices, Kari's Law, and the locked 911 design (§11) | 18a |
+| 24 | **One app in the stores ("PhotonVox"), the partner's branding inside after sign-in**; per-partner store listings later as a paid option, published from the partner's own developer accounts | Apple's 4.2.6/4.3 make per-partner apps a partner-account job; one listing is one build and one review per release | 18a |
+| 25 | **Sign in with PhotonID, or pair by a one-time QR code** an admin shows, for phone users without a PhotonID account | Keeps "a 30-person office in minutes" true; still revocable per device | 18a |
+| 26 | **A key per device in the Secure Enclave or Keystore, no SIP credentials on devices**; signing out a device or removing the user cuts it off at the gateway at once and wipes the app's data on its next run | A stolen phone carries nothing that works elsewhere | 18a |
+| 27 | **Builds: Android and Windows on the runner, iOS and macOS on Xcode Cloud** (25 hours a month included; needs the photonvox repo on GitHub), Connor's Mac as the fallback. **Apple Developer Program and Google Play Console as organization accounts, Connor the Account Holder**; Play App Signing with our upload key in `~/keys`; APNs and FCM keys on the gateway hosts and in Bitwarden. *Costs money (Apple $99 a year, Google $25 once, Windows signing a small monthly fee)* | No Mac to buy or keep running; keys held the way PhotonBoard's are | 18a |
+| 28 | **Phase A sits in R2**, first after R1, with its spikes during R1; about **4–5 months** to the stores | It needs R1's instances, numbers and locked 911; nothing in R1 waits for it | 18a |
 
 Dropped from revision 1 (no longer decisions now): Telnyx as the second carrier (replaced by 7), a login per phone (replaced by 13), and the
-R3 items (texting, chat, mobile softphone, B2 bucket for recordings), which keep their design in §18 and come back as decisions before their
-release.
+R3 items (texting, chat, B2 bucket for recordings), which keep their design in §18 and come back as decisions before their release. Revision 1's
+"white-label mobile softphone first" is replaced by the PhotonVox app (decisions 20–28).
 
 ---
 
@@ -93,8 +103,8 @@ monitoring. Call queues, conferences, paging and call park are in FusionPBX and 
 | Release | Contents |
 |---|---|
 | **R1** | The builder (wizard, templates, bulk import, outcomes); several FusionPBX instances; generated routing with Photon trunking (HTC) and locked 911; GDMS; barcode enrollment; the monitoring pane; the PhotonConsole feed; toll-fraud defaults; voicemail to email |
-| **R2** | Partner trunks; taking over today's live customers; the standby instance at DC10; number ordering, porting and E911 records through upstream APIs (where they exist); the browser softphone; voicemail and recordings in the app (B2); metering for billing; call queues with supervisor views; Yealink |
-| **R3** | Texting and 10DLC; team chat; the mobile softphone; billing itself |
+| **R2** | Partner trunks; taking over today's live customers; the standby instance at DC10; number ordering, porting and E911 records through upstream APIs (where they exist); **the PhotonVox app (phase A, §18a): browser, desktop and mobile softphone**; voicemail and recordings in the app (B2); metering for billing; call queues with supervisor views; Yealink |
+| **R3** | Texting and 10DLC; team chat (both in the app too); billing itself |
 
 ---
 
@@ -176,6 +186,7 @@ the same quality every time.
 | **vox-web** | The integrator's app (desktop and phone equally first-class, suite §6) with the barcode scanner; the customer admin's small portal | React 19 + Vite + `@photon/ui` |
 | **vox-agent** | On each instance: status, cache flush and reload after a publish, the synthetic test call, the fraud breaker's hang-up | systemd service; successor to `photon-fpbx-shim` |
 | **engine instance** | FusionPBX + FreeSWITCH: calls, voicemail, menus, ring groups | Debian, in an LXC (colo) or a VPS |
+| **vox-gateway** (phase A) | Beside each instance: the PhotonVox app's signaling and push, registering each app device to its extension; coturn beside it (§18a) | Go |
 
 **Calls never depend on the PhotonVox app or on GDMS.** With vox-api down, phones keep calling; with GDMS down, phones keep the settings
 they have and keep calling; only changes wait.
@@ -372,7 +383,7 @@ A partner may add its own VoIP trunk (credentials or IP authentication) and make
 - **Notification (Kari's Law):** every 911 call notifies the organization's designated contacts at once (email, and on screen in PhotonVox),
   with the phone, user and location; it never delays the call. Photon staff are told too (a record that one happened).
 - **Moved phones:** a phone that registers from a public address that is not its site's known address is flagged on the pane ("this phone may
-  have moved: its 911 address may be wrong"). Softphones (R2) ask the user for their location.
+  have moved: its 911 address may be wrong"). The PhotonVox app asks the user to confirm their location and hands 911 to the cellular dialer where it can (§18a).
 - **Customer notice of VoIP 911 limits**, accepted and recorded when a phone system is created (§19).
 - **Never place a real 911 test call** without the PSAP's agreement; 933 and the engine's synthetic check are the tests.
 - With HTC: how emergency records are created and changed (by hand, with what turnaround) and how 911 will be routed after HTC's softswitch
@@ -562,16 +573,199 @@ procedure for lawful requests; RLS, tenant-isolation tests on every route, criti
 
 | Item | Release | Design notes kept from revision 1 |
 |---|---|---|
-| **Browser softphone** | R2 | SIP over WSS to the instance, DTLS-SRTP, in the PhotonVox web app; a TURN service only for networks that block UDP |
+| **The PhotonVox app** (browser, desktop, mobile softphone) | R2, phase A | §18a: one app and one calling engine; replaces the separate browser and mobile softphone items |
 | **Voicemail and recordings in the app** | R2 | A PhotonVox B2 bucket (`prod/`, `dev/`, `test/`), vox-agent copies voicemail and uploads recordings; recording off by default, with a consent notice where law requires (Pennsylvania needs all parties' consent); every listen audited |
 | **Metering** | R2 | `usage_day` per organization and meter (seats, phones, numbers, minutes by class and trunk, recordings); CDR rating against Photon's rate table; wholesale to partners; telecom taxes and fees decided before any invoice (§19) |
 | **Call queues and supervisors** | R2 | FusionPBX call center as an outcome; the `supervisor` role |
 | **Yealink** | R2 | Yealink's redirect service (RPS) or management cloud in place of GDMS, behind the same "phone" model |
 | **Partners' own GDMS accounts** | R2+ | GDMS connection per partner; the same device flow |
-| **Texting (SMS/MMS) and 10DLC** | R3 | Needs an upstream with messaging (§22). Brands and campaigns per organization through the upstream; shared inboxes and personal numbers; STOP/HELP enforced; MMS media in B2; Photon's own campaign for suite notifications |
-| **Team chat** | R3 | Built in, one conversation model with texting; presence from registrations |
-| **Mobile softphone** | R3 | White-label first (push for incoming calls), own app later |
+| **Texting (SMS/MMS) and 10DLC** | R3 | Needs an upstream with messaging (§22). Brands and campaigns per organization through the upstream; shared inboxes and personal numbers; STOP/HELP enforced; MMS media in B2; Photon's own campaign for suite notifications; in the PhotonVox app too |
+| **Team chat** | R3 | Built in, one conversation model with texting; presence from registrations; in the PhotonVox app too |
 | **PhotonEdge service** | later | Optional call-quality probes and phone discovery on sites that have a PhotonEdge; survivability only if a customer pays |
+
+---
+
+## 18a. The PhotonVox app (phase A)
+
+**Connor (2026-11-13):** a custom, branded PhotonVox softphone app, as its own phase. Teams Phone is not a good enough experience for clients
+who are mobile-first or softphone-first, and customers on traditional desk phones should have a nice, integrated, branded companion. This
+replaces revision 1's "white-label softphone first" and moves the mobile softphone out of R3. Design only: nothing is built.
+
+### What it is
+
+**One PhotonVox app** on iOS, Android, macOS and Windows, and the same calling in the browser (the web app's softphone). They share one
+**calling engine**, so a fix or a feature lands everywhere at once.
+
+| Now (phase A) | When R3 lands |
+|---|---|
+| Make and receive calls (one number or several lines), hold, mute, speaker and Bluetooth, DTMF; blind and attended transfer; park and pick up; call waiting | Texting from the user's numbers and shared inboxes |
+| Voicemail (play, delete, greetings), call history, the company directory and the phone's own contacts, favorites | Team chat |
+| Presence (on a call, available, do not disturb) for the user and colleagues | |
+| Do not disturb, forwarding within the call class, "ring my desk phone only" | |
+| 911 with a confirmed location (below) | |
+
+**Companion to a desk phone.** A user's desk phone and their apps are registrations of the **same extension** (decision 13: one SIP login per
+extension, held by the server, never by the app). FreeSWITCH rings every registration of an extension at once, so the desk phone and the app
+ring together; whichever answers first takes the call. A user with no desk phone has only the app. The user chooses where calls ring
+(everywhere, app only, desk only) and the compiler (§8) writes it.
+
+### Signaling and media: WebRTC, with PhotonVox's own signaling (decision 21)
+
+| | **WebRTC + PhotonVox signaling (recommended)** | Native SIP stack on the device |
+|---|---|---|
+| Engine | libwebrtc on every platform: the browser's own, Electron's (Chromium), and `react-native-webrtc` on iOS and Android | PJSIP (GPLv2, or a commercial license from Teluu) or liblinphone (GPLv3, or a commercial license from Belledonne) |
+| Licenses | BSD (libwebrtc), MIT (`react-native-webrtc`) | **GPL code cannot practically ship through the App Store** (Apple's terms add restrictions the GPL forbids), so in practice a **commercial license** per stack; liblinphone's is a yearly fee |
+| One engine with the browser | **Yes**: the browser softphone must be WebRTC anyway | No: two calling stacks to build and keep working |
+| SIP password on the device | **None**: the device has a device key; the gateway (below) holds the extension's credential | Yes, in the device's keychain (or a per-device credential FusionPBX does not model) |
+| Media security and NAT | DTLS-SRTP and ICE built in, always | SRTP and ICE optional, often misconfigured |
+| Wake for incoming calls | Push from PhotonVox's call gateway (below) | RFC 8599 push through a SIP proxy (Kamailio) that holds the INVITE, pushes, and waits for the device to re-register |
+| Works with any SIP server | No (PhotonVox's gateway is required) | Yes (not needed: PhotonVox only talks to its own engines) |
+
+**Recommended: WebRTC with PhotonVox's own signaling**: one engine across browser, desktop and mobile; no GPL or commercial SIP license; no SIP
+passwords on devices; encryption and NAT traversal always on.
+
+**The pieces:**
+- **`@photonvox/calling`**: a TypeScript package (in this repo) holding the call state machine and the signaling client. The web app,
+  the desktop app and the mobile app all use it unchanged; `react-native-webrtc` gives the same `RTCPeerConnection` interface as the browser.
+- **`vox-gateway`** (the calling gateway): a small service on each engine instance, beside FreeSWITCH, with a public WSS address
+  (`gw-a.<infra>`). Towards devices it speaks PhotonVox's signaling (JSON over a WebSocket, authenticated by the device key); towards FreeSWITCH
+  it is a SIP user agent: it **registers each enrolled device** to the extension's account (over SIP/TLS, using the extension's credential, which
+  stays on the gateway, encrypted), receives the INVITEs, and passes the SDP through. It handles push (below) and keeps working when vox-api is
+  down (it holds a copy of the device registry, pushed to it by vox-api). Written in **Go** (the suite's language for long-running network
+  services; a maintained SIP library such as `sipgo`, BSD-licensed, to confirm in the spike). Calls never depend on vox-api, as before.
+- **FreeSWITCH terminates the WebRTC media itself** (its WebRTC-capable SIP profile: ICE, DTLS-SRTP, Opus). No media goes through the gateway.
+  FreeSWITCH already anchors media and transcodes, so the app speaks **Opus** (wideband, loss-tolerant, low bit rate) and the PSTN and desk
+  phones keep G.711 or G.722; FreeSWITCH converts. Transcoding costs CPU on the instance, counted in its capacity (§5).
+- **NAT and TURN:** FreeSWITCH has a public address, so ICE succeeds directly from almost every network. For networks that block UDP, a
+  **coturn** server on each instance offers TURN over TCP and TLS on 443, with short-lived credentials the gateway makes per call. **No separate
+  SBC:** the gateway and FreeSWITCH's WebRTC profile are the edge for apps; desk phones keep their direct SIP/TLS path.
+- **Transfer, park, conference:** the app asks the gateway; the gateway does it with SIP (REFER, REFER with Replaces for attended transfer,
+  FusionPBX's park codes). Presence comes from FreeSWITCH's events through vox-agent and from the apps themselves.
+
+### Calls that ring when the app is closed (decision 22)
+
+| Platform | How |
+|---|---|
+| **iOS** | A **PushKit VoIP push** wakes the app, which must report the call to **CallKit** at once (iOS ends apps that receive a VoIP push and do not); the system's incoming-call screen shows it, on the lock screen too; audio uses CallKit's audio session; calls appear in the phone's Recents |
+| **Android** | An **FCM high-priority data message** wakes the app, which shows the call through the **Telecom framework** (a self-managed `ConnectionService`) with a full-screen incoming-call screen; Android 14+ needs the full-screen-intent permission for that (the app asks and explains) |
+| **Desktop** | The app keeps its WebSocket open while it runs (it starts at login, in the tray or menu bar); system notifications for calls; no push needed |
+| **Browser** | The open tab only (a browser cannot be woken for a call) |
+
+**The server side: the gateway itself, not RFC 8599 through Kamailio.** RFC 8599 is the standard for SIP clients; the app is not a SIP client,
+and the gateway already stands where Kamailio would. When FreeSWITCH sends an INVITE to a device's registration, the gateway:
+1. answers FreeSWITCH with `180 Ringing` at once (the caller hears ringing; the desk phone rings in parallel);
+2. sends the push (APNs VoIP for iOS, FCM high priority for Android) with a short call id, and nothing else (no caller details leave in the
+   push beyond the caller name and number the incoming-call screen needs);
+3. waits for the device to connect and claim the call (target under 3 seconds; it gives up after the extension's ring time);
+4. passes the offer and answer, and answers FreeSWITCH (`200 OK`) when the user picks up. If another registration answers first, the gateway
+   cancels the app's call (the push already shown is ended through CallKit or Telecom).
+
+**Registration model and battery:** the device holds **no standing connection** when the app is in the background: no SIP keep-alives, no
+open socket. The gateway keeps the device's registration to FreeSWITCH alive for it. The phone wakes only for a push, so the battery cost of
+the app at rest is close to nothing. A device that has not been seen for 30 days is unregistered at FreeSWITCH (so it is not rung) until it
+opens the app again. Push credentials (the APNs key, the FCM service account) live only on the gateway hosts.
+
+### 911 from the app (decision 23)
+
+The rules (§11, §19): Kari's Law (911 without a prefix, and notification) applies to every PhotonVox extension; RAY BAUM'S Act needs a
+**dispatchable location** with each 911 call, and for **non-fixed devices** (softphones) an automatic one where technically feasible,
+otherwise one the user gives or confirms. The app fits the locked 911 design like this:
+
+- **Where am I?** At sign-in, and whenever the network changes (another Wi-Fi network, another public address, or the OS location moving
+  by more than a few hundred meters), the app asks the user to confirm their location:
+  - **At a site** of their organization: matched automatically where possible (the site's public address, its Wi-Fi networks, its LAN),
+    so the user taps **Confirm** ("You're at Main office, 2nd floor"); this is the "automatic where feasible" case. The site's emergency
+    location and emergency number are used, exactly as for a desk phone at that site.
+  - **Somewhere else** (home, a hotel): the user enters or picks a street address; PhotonVox validates it with the upstream (MSAG) and keeps it
+    as that user's own emergency location (with a number registered there, where the upstream supports it, §22).
+- **On a phone with cellular service, 911 dialed in the app is handed to the phone's own dialer** (cellular 911 carries the handset's location
+  from the network and works without data). On Wi-Fi-only tablets, on desktops, and on phones without service, 911 goes through PhotonVox with
+  the confirmed location. The app explains this once, plainly.
+- **Notification** (Kari's Law) is sent in every case, including a call handed to the cellular dialer (the app reports it as it hands over).
+- **Never blocked:** an unconfirmed location still lets 911 through, with the user's last confirmed location, or the organization's main site,
+  flagged as unconfirmed in the notification. Where the upstream offers it, a call with no usable location goes to a national emergency call
+  center instead (a question for HTC, §22).
+- **Consent:** the app uses location only for this, asks the OS for "while using" location (never "always"), and keeps only the confirmed
+  emergency location, not a trail.
+
+### Branding (decision 24)
+
+| | **One app, partner branding at sign-in (recommended)** | Per-partner store listings |
+|---|---|---|
+| What the user sees | "PhotonVox" in the store and on the home screen; after sign-in, the partner's logo, colors and support contact inside the app (the suite's `branding` lookup) | The partner's own app name and icon everywhere |
+| Store rules | One app published by Photon, the provider of the service: fine | Apple's guideline 4.2.6 rejects template apps unless **submitted by the provider of the content**, and 4.3 rejects near-identical apps: in practice each partner's app must be published **from the partner's own developer account**. Google Play also restricts duplicate apps |
+| Cost | One build, one review per release, one set of push keys | Per partner: a developer account (Apple $99 a year, organization enrollment with a D-U-N-S number; Google $25 once), its own bundle id, signing and APNs keys, a build and a review for every release, store screenshots and listings. Each one multiplies release work |
+| What cannot change | The incoming-call screen (CallKit, Telecom) shows the app's name, "PhotonVox" | Nothing |
+
+**Recommended: one app**, with per-partner store listings later as a paid option for large partners, under their own developer accounts.
+
+### Sign-in, devices and security (decisions 25, 26)
+
+- **Sign-in with PhotonID** (OIDC with PKCE through the system browser, returning to the app by a universal link / app link). Refresh tokens in
+  the iOS Keychain or Android Keystore-backed storage; on desktop, the OS keychain (macOS Keychain, Windows Credential Manager).
+- **Pairing by QR code** for phone users who have no PhotonID account (decision 15 keeps phone users PhotonVox's own): an admin shows a
+  one-time QR code in PhotonVox (valid 15 minutes, for one user); scanning it enrolls the device for that user's extension. That keeps "deploy
+  in minutes" true for a 30-person office.
+- **Each device has its own key**, made on the device (Secure Enclave on iOS, StrongBox or TEE-backed Keystore on Android, the OS keychain on
+  desktop), never exported. Enrollment registers the public key, the push token, the platform, model and app version with vox-api, which
+  pushes it to the gateways. The device signs its connection to the gateway with that key.
+- **No SIP credentials on any device.** The gateway holds the extension's credential; a stolen phone carries nothing that works elsewhere.
+- **Device list:** users see their devices in the app and the web app; admins see every device of their organization. **Sign out a device**
+  (user or admin) or **remove the user** (the directory says so, or the phone user is deleted): the gateway drops the device at once, its
+  registration at FreeSWITCH and its push token are removed, and the next time the app runs it is told it was signed out and **wipes its local
+  data** (cached history, voicemail, contacts, tokens). This is app-level wipe, not device management; an MDM's managed configuration
+  (AppConfig) is a later option for customers who use one.
+- **Calls placed from the app** obey the extension's call class and the spend breaker (§15) like any phone; the gateway refuses a device that
+  has been signed out within seconds.
+- **Local data** is encrypted by the OS (iOS data protection, readable after first unlock so a locked phone can still show an incoming call).
+
+### The app's technology
+
+| Part | Choice | Why |
+|---|---|---|
+| Calling engine | `@photonvox/calling` (TypeScript) | One engine for every platform |
+| Mobile | **React Native** with `react-native-webrtc` and native modules for PushKit/CallKit and Telecom/ConnectionService (an existing open-source CallKit/ConnectionService bridge, or our own small module) | Same language and much of the same React as the web app; the native parts are small and well known |
+| Desktop | **Electron** wrapping the web app's softphone pages | Chromium's WebRTC; the web app's own React, so the desktop app is mostly packaging |
+| Browser | The PhotonVox web app's softphone | The engine as is |
+
+Flutter was considered (one UI codebase for all four platforms) and set aside: its calling engine would be Dart, not shared with the browser
+softphone, and the web app is React.
+
+### Build and release (decision 27)
+
+- **Android** builds on the runner (Android SDK and JDK 17 are there; React Native's Gradle build needs nothing else).
+- **iOS and macOS** need macOS. Recommended: **Xcode Cloud** (25 compute hours a month are included in the Apple Developer Program; Apple
+  manages the distribution signing; TestFlight is built in). It needs the repo on GitHub (photonvox has no remote yet: Connor's call). **Connor's
+  Mac** stays the fallback for debugging on a tethered iPhone. A hosted macOS runner (GitHub Actions) is the alternative if Xcode Cloud falls
+  short (paid by the minute).
+- **Windows** builds on the runner (Electron). Its code-signing certificate must live in a hardware or cloud key store under current CA rules:
+  a cloud signing service (for example Azure Trusted Signing, a small monthly fee) works from Linux CI. Unsigned Windows apps are blocked or
+  warned about by SmartScreen.
+- **Accounts:** an **Apple Developer Program** membership and a **Google Play Console** account, both as **organizations** (Photon's legal
+  entity, a D-U-N-S number). Google requires new **personal** accounts to run a 14-day closed test with at least 12 testers before
+  production; organization accounts avoid that (to confirm when opening it). Connor is the Account Holder of both; agents never hold his
+  Apple ID or Google password.
+- **Keys and who holds them** (the suite's release-key rules, as for PhotonBoard's):
+  - Google **Play App Signing** holds the app signing key; Photon holds the **upload key** in `~/keys` on the runner (mode 600, never
+    printed), in Bitwarden, and in one other place.
+  - Apple distribution signing is Xcode Cloud's (cloud-managed certificates); an **App Store Connect API key** for uploads is a secret in CI
+    and Bitwarden.
+  - The **APNs auth key** (`.p8`) and the **FCM service account** are secrets on the gateway hosts and in Bitwarden, rotated yearly.
+  - The Windows signing identity in the cloud signing service; macOS Developer ID through Xcode Cloud (or Connor's Mac) with notarization.
+- **Store review:** a demo organization with working extensions for Apple's reviewers; the VoIP background mode justified by CallKit; no account
+  creation in the app (accounts come by invitation), so no in-app account deletion is needed (to confirm against the current guidelines).
+- **Channels:** internal (TestFlight internal testers, Play internal testing) → partners' beta (TestFlight external, Play closed testing) →
+  stores. Desktop: an auto-update channel (Electron's updater, signed).
+
+### Where it sits, and how long (decision 28)
+
+**Phase A runs in R2**, as its first major item after R1 (the app needs R1's instances, numbers and locked 911). It **replaces** R2's
+"browser softphone" and R3's "mobile softphone". The spikes (A0) can run during R1's Steps 3–5 because they need only the staging instance
+and test devices. Chat and texting join the app when R3 lands.
+
+Rough length, for planning only: A0 spikes 2–3 weeks; A1 gateway, engine and browser softphone 5–6 weeks; A2 desktop 2 weeks; A3 mobile
+with push 6–8 weeks; A4 softphone 911 2–3 weeks (overlapping A3); A5 store release 2–4 weeks (reviews, beta). **About 4–5 months** from A0
+to the stores, depending on how fast the gates (accounts, devices, HTC's 911 answers) are passed.
 
 ---
 
@@ -601,7 +795,8 @@ line; state registrations; call-recording consent (R2); 10DLC and TCPA for texti
 
 Product **PhotonVox**; directory key `vox` (in the directory's catalog as "coming"). `vox.photonind.com` (app), `api.vox.photonind.com` (API;
 directory notices to `https://api.vox.photonind.com/directory/v1/notify`, as the catalog assumes). SIP names under the neutral
-infrastructure domain. Repo `photonvox`; database owner `photonvox`, roles `vox_app` and `vox_system`; scope `vox:read`; header
+infrastructure domain, the app's gateways too (`gw-a.<infra>`). The app: store name "PhotonVox", package `@photonvox/calling` for the engine, bundle
+and application ids under Photon's reverse domain (`com.photonind.vox`). Repo `photonvox`; database owner `photonvox`, roles `vox_app` and `vox_system`; scope `vox:read`; header
 `X-PhotonVox-Signature`. PhotonConsole's `photon_pbx`, `pbx_instance` and the shim keep their names until retired.
 
 ---
@@ -633,6 +828,16 @@ infrastructure domain. Repo `photonvox`; database owner `photonvox`, roles `vox_
 11. The first templates to build (which kinds of customers come first), and how many phone systems are expected in year one.
 12. Budget: the PhotonVox VPS; Postmark's paid tier (voicemail to email and alerts); any upstream beyond HTC.
 
+**The PhotonVox app** (phase A, §18a)
+13. Photon's legal entity name and its **D-U-N-S number** (both stores' organization accounts need them; getting one can take weeks). Does Photon
+    already have an Apple Developer or Google Play account?
+14. **911 for people away from a site:** can HTC (or another upstream) take a per-call location, register numbers at a user's home address, or
+    route calls with no usable location to a national emergency call center?
+15. **Test devices:** an iPhone and an Android phone for development, and Connor's Mac with Xcode for tethered debugging when needed.
+16. **Windows** in the first app release, or iOS, Android and macOS first? (Windows needs a code-signing service, a small monthly fee.)
+17. A **GitHub remote for photonvox** (Xcode Cloud builds from it).
+18. The store name **"PhotonVox"**: a trademark search before the first listing (the suite already suggests one for PhotonGuard).
+
 ---
 
 ## 23. Proposed changes to the suite documents (not applied)
@@ -643,6 +848,8 @@ infrastructure domain. Repo `photonvox`; database owner `photonvox`, roles `vox_
 - **§7:** PhotonVox → PhotonConsole feed, replacing "FusionPBX over mgmtnet" once PhotonConsole moves to it; PhotonVox ↔ GDMS (outbound API
   and push callbacks).
 - **§10:** the PhotonVox VPS; instances in the colo and later DC10.
-- **§11 roadmap:** phase **V1** = PhotonVox R1 (BUILD-GUIDE Steps 0–6), after D1.
+- **§11 roadmap:** phase **V1** = PhotonVox R1 (BUILD-GUIDE Steps 0–6), after D1; phase **VA** = the PhotonVox app (BUILD-GUIDE phase A), in R2.
+- **§2 / release keys:** the PhotonVox app's Play upload key, App Store Connect API key, APNs key and FCM service account join the list of
+  release keys kept in `~/keys`, Bitwarden and one other place.
 - **§13:** question 2 answered by decisions 7 and 8 here once Connor agrees.
 - **`photonid`:** make `vox` available in `app/catalogue.py` once PhotonVox publishes its roles (its own session).

@@ -95,6 +95,7 @@ photonvox/
   deploy/       caddy/, compose overlays, backup hooks
   scripts/      test-all.sh, remote-test.sh, dev-tools.sh, inventory/ (read-only SQL for the live engine)
   docs/         ARCHITECTURE.md, BUILD-GUIDE.md, BUILD-LOG.md, DEV.md, SPIKES.md, ENGINE.md, GDMS.md, OPERATIONS.md (from Step 1)
+  (phase A)     packages/calling/, gateway/, apps/mobile/, apps/desktop/, contract/calling/
   docker-compose.yml, docker-compose.test.yml, Makefile, .env.example
 ```
 
@@ -283,8 +284,91 @@ PhotonConsole. **GATE 6: R1 done.**
 | R2 | Take over live customers | ARCHITECTURE §17: import, compile, compare, move with an inter-instance trunk, GDMS for their phones; retire LXC 600 |
 | R2 | Standby at DC10 | Replica, file sync, runbook, drill; GDMS SIP servers list both |
 | R2 | Numbers by API | Ordering, porting and E911 records through an upstream with APIs (if HTC has none, the upstream Connor chooses) |
-| R2 | Browser softphone; voicemail and recordings in the app (B2); metering; queues and supervisors; Yealink | ARCHITECTURE §18 |
-| R3 | Texting and 10DLC; team chat; mobile softphone; billing | ARCHITECTURE §18 |
+| R2 | **The PhotonVox app** (browser, desktop, mobile): phase A below | ARCHITECTURE §18a |
+| R2 | Voicemail and recordings in the app (B2); metering; queues and supervisors; Yealink | ARCHITECTURE §18 |
+| R3 | Texting and 10DLC; team chat (in the web app and the PhotonVox app); billing | ARCHITECTURE §18 |
+
+### Phase A: the PhotonVox app (R2; ARCHITECTURE §18a)
+
+One app on iOS, Android, macOS and Windows, and the browser softphone, on one calling engine. **Design only until Connor answers decisions
+20–28.** A0 may run during R1's Steps 3–5; A1 starts after GATE 6 (R1 done). Each step ends at its gate. Rough lengths are in ARCHITECTURE §18a
+(about 4–5 months in all).
+
+Repo additions: `packages/calling/` (the TypeScript engine), `gateway/` (vox-gateway, Go), `apps/mobile/` (React Native), `apps/desktop/`
+(Electron), `contract/calling/` (the signaling messages, validated from TypeScript and Go).
+
+**A0: spikes** (needs **GATE A0a**: test devices (an iPhone, an Android phone) and, for iOS, Connor's Mac or an Xcode Cloud workflow; **GATE
+A0b**: the staging instance from Step 0.6). Findings with numbers in `docs/SPIKES.md`:
+- FreeSWITCH's WebRTC profile on the staging instance: a browser call with Opus to a desk-phone extension and to a SIPp "PSTN" leg with G.711;
+  transcoding CPU per call measured.
+- A gateway prototype in Go: register one device's contact to an extension, receive an INVITE, pass SDP through to a browser; the desk phone
+  and the browser ring together; whoever answers first wins and the other stops.
+- Push on real devices: an iPhone woken by an APNs VoIP push (development environment) showing CallKit's incoming-call screen with the app
+  killed and the phone locked; an Android phone woken by an FCM high-priority message showing the Telecom incoming-call screen; time from the
+  INVITE to the ringing screen measured, 20 tries each.
+- `react-native-webrtc` with CallKit's audio session on iOS (the known hard part): two-way audio after answering from the lock screen.
+- TURN: a call from a network that blocks UDP, through coturn on 443.
+
+**Done when:** each spike works on real devices or says plainly why not, with measurements. **GATE A0:** Connor reviews them and confirms
+decisions 21–22 (or picks the native SIP stack instead).
+
+**A1: gateway, engine and browser softphone** (needs **GATE A1a**: the gateway's public names and ports on each instance, coturn, and its
+mgmtnet grants: production changes when they reach the live instance).
+- `contract/calling/`: connect (device-signed), call offer/answer/candidates, ring, answer, hang up, hold, DTMF, transfer (blind,
+  attended), park and pick up, presence; validated on both sides.
+- `vox-gateway`: device registry (pushed from vox-api; works when vox-api is down), per-device registration to FreeSWITCH with the extension's
+  credential (encrypted at rest), SIP over TLS to FreeSWITCH, SDP pass-through, TURN credentials per call, transfer and park by SIP, presence
+  from vox-agent, rate limits, metrics; the push sender (used from A3).
+- `@photonvox/calling`: the call state machine and the signaling client, unit-tested without a browser; the browser softphone in the web app
+  (dialer, incoming call, active call, transfer, park, history from the CDR copy, voicemail from R2's voicemail work).
+- Device enrollment in vox-api: device keys, the device list, sign-out, the QR pairing for phone users without a PhotonID account.
+- "Where calls ring" (everywhere / app only / desk only) in the document and the compiler.
+
+**Done when:** on staging, a browser call to and from a desk phone, an outside number (SIPp upstream) and another browser, with blind and
+attended transfer, park and pick up, and the desk phone and the browser ringing together; a signed-out device is refused within seconds; vox-api
+stopped, calls still work; security review of the gateway and the device enrollment done. **GATE A1.**
+
+**A2: desktop** (needs **GATE A2a**: macOS Developer ID through Xcode Cloud or Connor's Mac; a Windows signing service if Windows is in the first
+release (question 16)).
+- Electron app around the web app's softphone pages: starts at login, tray or menu bar, system notifications for calls, OS keychain for tokens
+  and the device key, signed auto-updates; macOS notarized, Windows signed.
+
+**Done when:** the desktop app on macOS (and Windows, if in scope) installs from a signed build, updates itself, and makes and receives calls
+on staging. **GATE A2.**
+
+**A3: mobile, with push** (needs **GATE A3a**: the Apple Developer Program and Google Play Console organization accounts (question 13), the APNs
+key and the FCM project, the GitHub remote for Xcode Cloud (question 17)).
+- React Native app: sign-in (PhotonID, PKCE, universal link / app link) and QR pairing; calls through `@photonvox/calling` and
+  `react-native-webrtc`; CallKit with PushKit on iOS, Telecom (self-managed ConnectionService) with FCM on Android; voicemail, history,
+  directory and phone contacts, favorites, presence, do not disturb; the partner's branding after sign-in; sign-out and data wipe.
+- The gateway's push path: APNs VoIP and FCM high priority, ringing held until the device connects, cancel when another device answers.
+- Android builds on the runner; iOS on Xcode Cloud; internal TestFlight and Play internal testing.
+
+**Done when:** on real devices, with the app killed and the phone locked, an incoming call rings within 3 seconds of the INVITE in 19 of 20
+tries on each platform, together with the user's desk phone; answering from the lock screen gives two-way audio; a call survives switching
+between Wi-Fi and cellular (the app reconnects and ICE restarts) or fails clearly; battery use with the app idle for 24 hours is measured and
+negligible; removing the user wipes the app. **GATE A3.**
+
+**A4: 911 in the app** (needs **GATE A4a**: HTC's answers on per-call location, home addresses and national emergency call center routing,
+question 14).
+- Location confirmation at sign-in and on network change; site matching by the site's public addresses, Wi-Fi networks and LAN; off-site
+  addresses validated with the upstream; handing 911 to the cellular dialer on phones with service; VoIP 911 elsewhere with the confirmed
+  location; Kari's Law notification in every case; the never-blocked fallbacks.
+- Tests: the location state machine as a CRITICAL module; 933 calls from the app at a site and off site (where the upstream supports it);
+  **never a real 911 call**.
+
+**Done when:** every path of ARCHITECTURE §18a's 911 rules is tested, 933 reads back the right address at a site and at a confirmed home
+address (or the upstream's limit is documented), and the notification arrives in every path. **GATE A4.**
+
+**A5: release** (needs **GATE A5a**: Connor's approval of the store listings, privacy labels and the demo organization for Apple's review;
+the trademark answer, question 18).
+- Partner beta (TestFlight external, Play closed testing) with Photon's own staff and one partner; store submission; desktop release channel.
+- `docs/APP-RELEASE.md`: how a release is built, signed, tested and shipped; who holds which key.
+
+**Done when:** the app is live in both stores and the desktop app is downloadable, the pilot customer's users run it beside their desk phones
+for two weeks, and the release runbook has been followed once by someone other than its author (or by Connor). **GATE A5: phase A done.**
+
+R3 adds texting and chat to the app (one conversation model with the web app).
 
 ---
 
@@ -292,13 +376,16 @@ PhotonConsole. **GATE 6: R1 done.**
 
 - Every change ships with tests; a coverage ratchet. **CRITICAL modules at 100% branch coverage:** auth, roles and scopes; RLS; the document's
   validation; the compiler (every outcome, every call class, 911); the adapter's tenant scoping (`domain_uuid` on every query and write); the
-  fraud breaker; GDMS signing and the push receiver; enrollment's steps and their retry; caller-ID choice; vox-agent request signing.
+  fraud breaker; GDMS signing and the push receiver; enrollment's steps and their retry; caller-ID choice; vox-agent request signing;
+  in phase A, device enrollment and sign-out, the gateway's device authentication, and the app's 911 location rules.
 - Every API route has a tenant-isolation test and a site-scope test where scopes apply.
 - **Calls are tested with calls:** each outcome and each routing rule has a SIPp scenario on the staging instance; "911 still passes while
   blocked" and the fraud scenarios are permanent tests.
 - **The compiler has golden tests:** a document in, the exact FusionPBX objects out, reviewed when they change.
 - GDMS is tested against a fake built from the samples captured in Step 0, and against the staging GDMS organization before each gate.
 - Web: Vitest; Playwright screenshots at three sizes for every page changed; the scanner with a fake camera.
+- Phase A: `@photonvox/calling` unit-tested without a browser; the gateway with Go's race detector and SIPp; push and CallKit/Telecom only on
+  real devices, reported with their numbers.
 - **Report honestly:** what was verified on the live engine, on staging, with real phones, or only in unit tests.
 
 ## 8. Security must-haves
@@ -309,6 +396,8 @@ PhotonConsole. **GATE 6: R1 done.**
 - International and premium off by default; the spend breaker on for every organization; **nothing PhotonVox does can block or misroute 911**.
 - Caller ID only from held numbers; partner trunks (R2) only in their own customer's domain.
 - Every change to a phone system, every phone action and every staff view in the audit log.
+- Phase A: no SIP credentials on any device; device keys never leave the device; a signed-out device is refused by the gateway within seconds;
+  push payloads carry only what the incoming-call screen shows.
 - `/security-review` (or an equivalent careful pass) before GATES 2, 3 and 4.
 
 ## 9. What needs Connor
@@ -329,11 +418,17 @@ PhotonConsole. **GATE 6: R1 done.**
 | 4a | The production GDMS organization and API user | Step 4 in production |
 | 5 | The PhotonConsole code change and its deploy | Step 5 |
 | 6a | The pilot customer, its instance, the production write role | Step 6 |
+| A0a | Test devices (iPhone, Android); Connor's Mac or an Xcode Cloud workflow | phase A spikes |
+| A1a | The gateway's names, ports, coturn and mgmtnet grants on each instance | phase A1 in production |
+| A2a | macOS Developer ID; a Windows signing service if Windows is in scope | desktop releases |
+| A3a | Apple and Google organization accounts (D-U-N-S), APNs key, FCM project, the GitHub remote | mobile builds and push |
+| A4a | HTC's answers on off-site 911 | app 911 off site |
+| A5a | Store listings, privacy labels, the review demo organization, the trademark answer | store release |
 | any | Changes to other repos or any production host; spending money; pushing to GitHub | — |
 
 ## 10. Out of scope for R1
 
-Everything in the R2 and R3 rows of §6; replacing FusionPBX; active/active; on-site survivability; fax; video meetings; CRM integrations;
+Everything in the R2 and R3 rows of §6, phase A included; replacing FusionPBX; active/active; on-site survivability; fax; video meetings; CRM integrations;
 international numbers; partner-run FusionPBX instances; partners' own GDMS accounts; billing and charging.
 
 ## 11. Reporting back
