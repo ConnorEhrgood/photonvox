@@ -31,6 +31,12 @@
 .pv-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0 0.75rem; }
 .pv-paste { width: 100%; min-height: 8rem; font-family: var(--font-mono, monospace); }
 
+/* The sidebar's column painted the page's full height (wide screens). The sidebar itself is sticky and one window tall, so a page taller than
+   the window (a full-page screenshot, a tall dashboard) showed the column's background stopping under it. Proposed to photon-ui. */
+@media (min-width: 901px) {
+  .ph-app { background: linear-gradient(to right, var(--surface) calc(15rem - 1px), var(--border) calc(15rem - 1px), var(--border) 15rem, transparent 15rem); }
+}
+
 /* The customer dashboard (pages/Dashboard.tsx). Calls are coloured by kind; status uses photon-ui's severities and edges. */
 :root { --pv-in: #4f8cff; --pv-out: #b48cff; --pv-int: #7d8799; }
 :root[data-theme="light"] { --pv-in: #1f5fd1; --pv-out: #7a3fd6; --pv-int: #687385; }
@@ -39,9 +45,10 @@
 .pv-dash-h3 { font-size: var(--fs-md); margin: 0 0 0.75rem; }
 .pv-dash-sites { margin-bottom: 0.5rem; }
 .pv-dash-card { padding: 1rem 1.1rem; min-width: 0; }
-.pv-dash-now { display: grid; gap: 1rem; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-.pv-dash-side { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; align-content: start; }
-.pv-dash-side .pv-dash-trunk { grid-column: 1 / -1; }
+.pv-dash-now { display: grid; gap: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.6fr); }
+.pv-dash-calls { margin-top: 1rem; }
+.pv-dash-calls .pv-dash-list { margin-top: 0; }
+.pv-dash-calls .pv-dash-list li:first-child { border-top: 0; }
 .pv-dash-big b { display: block; font-size: 2.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .pv-dash-big.pv-dash-small b { font-size: var(--fs-2xl); }
 .pv-dash-big span { color: var(--text-dim); font-size: 0.9rem; }
@@ -90,7 +97,7 @@
 .pv-heat-day, .pv-heat-hour { font-size: 0.72rem; color: var(--text-dim); white-space: nowrap; }
 .pv-heat-hour { text-align: center; }
 @media (max-width: 900px) {
-  .pv-dash-now { grid-template-columns: 1fr; }
+  .pv-dash-now { grid-template-columns: 1fr 1fr; }
   .pv-dash-tiles { grid-template-columns: 1fr 1fr; }
   .pv-dash-pair { grid-template-columns: 1fr; }
 }

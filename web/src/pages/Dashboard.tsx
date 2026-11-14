@@ -98,12 +98,11 @@ export function DashboardPage() {
         <h2 id="now" className="pv-dash-h">Right now</h2>
         <div className="pv-dash-now">
           <CallsNow data={data} unavailable={missing.has('live')} />
-          <div className="pv-dash-side">
-            <Phones data={data} unavailable={missing.has('live')} />
-            <Lines data={data} unavailable={missing.has('live')} />
-            <Trunk data={data} />
-          </div>
+          <Phones data={data} unavailable={missing.has('live')} />
+          <Lines data={data} unavailable={missing.has('live')} />
+          <Trunk data={data} />
         </div>
+        <CallList data={data} />
       </section>
 
       <section aria-labelledby="today" className="pv-dash-section">
@@ -159,29 +158,39 @@ function Emergency({ data }: { data: Dashboard }) {
 
 function CallsNow({ data, unavailable }: { data: Dashboard; unavailable: boolean }) {
   const now = data.now
+  const ringing = now ? now.calls.filter((c) => c.state === 'ringing').length : 0
   return (
-    <div className="ph-card pv-dash-card pv-dash-calls">
-      <div className="pv-dash-big"><b>{now ? now.count : '—'}</b><span>{now && now.count === 1 ? 'call in progress' : 'calls in progress'}</span></div>
+    <div className="ph-card pv-dash-card">
+      <div className="pv-dash-big pv-dash-small"><b>{now ? now.count : '—'}</b><span>{now && now.count === 1 ? 'call in progress' : 'calls in progress'}</span></div>
       {unavailable && <p className="ph-hint">The live view of this phone system isn’t switched on yet.</p>}
-      {now && now.calls.length === 0 && <p className="ph-hint">Nobody is on the phone.</p>}
-      {now && now.calls.length > 0 && (
-        <ul className="pv-dash-list">
-          {now.calls.slice(0, 8).map((c, i) => (
-            <li key={i}>
-              <span className={`pv-dash-kind pv-dash-${c.kind}`}>{KIND[c.kind]}</span>
-              <span className="pv-dash-who">
-                {c.who[0] ? `${c.who[0].name}` : c.kind === 'inbound' ? 'Ringing in' : 'A phone'}
-                <span className="ph-hint">
-                  {c.kind === 'internal' ? (c.other ? ` with ${c.other}` : '') : c.other ? ` ${c.kind === 'inbound' ? 'from' : 'to'} ${c.other}` : ''}
-                  {c.number ? ` on ${phone(c.number)}` : ''}
-                </span>
+      {now && now.count === 0 && <p className="ph-hint">Nobody is on the phone.</p>}
+      {now && now.count > 0 && <p className="ph-hint">{now.count - ringing} talking{ringing ? `, ${ringing} ringing` : ''}</p>}
+    </div>
+  )
+}
+
+/** Who is on the phone, one line per call: only when there are calls, so the page stays short when it is quiet. */
+function CallList({ data }: { data: Dashboard }) {
+  const now = data.now
+  if (!now || now.calls.length === 0) return null
+  return (
+    <div className="ph-card pv-dash-card pv-dash-calls" aria-label="Calls in progress">
+      <ul className="pv-dash-list">
+        {now.calls.slice(0, 12).map((c, i) => (
+          <li key={i}>
+            <span className={`pv-dash-kind pv-dash-${c.kind}`}>{KIND[c.kind]}</span>
+            <span className="pv-dash-who">
+              {c.who[0] ? `${c.who[0].name}` : c.kind === 'inbound' ? 'Ringing in' : 'A phone'}
+              <span className="ph-hint">
+                {c.kind === 'internal' ? (c.other ? ` with ${c.other}` : '') : c.other ? ` ${c.kind === 'inbound' ? 'from' : 'to'} ${c.other}` : ''}
+                {c.number ? ` on ${phone(c.number)}` : ''}
               </span>
-              <span className="pv-dash-time">{c.state === 'ringing' ? 'ringing' : length(c.seconds)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {now && now.calls.length > 8 && <p className="ph-hint">and {now.calls.length - 8} more</p>}
+            </span>
+            <span className="pv-dash-time">{c.state === 'ringing' ? 'ringing' : length(c.seconds)}</span>
+          </li>
+        ))}
+      </ul>
+      {now.calls.length > 12 && <p className="ph-hint">and {now.calls.length - 12} more</p>}
     </div>
   )
 }
