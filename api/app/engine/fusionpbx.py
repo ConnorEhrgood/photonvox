@@ -39,7 +39,7 @@ SHARED_BOX_BASE = 9900          # shared voicemail boxes are 9901, 9902, … (ex
 HANGUP = "photonvox-hangup"     # where "unreachable: none" forwards: a one-line dial plan that hangs up
 
 # FusionPBX's route orders run 100–300 (after its standard dial plans, before call forwarding's loop guard).
-ORDER = {"synthetic": 1, "emergency": 100, "block": 105, "service": 110, "national": 120, "toll_free": 130, "international": 140, "group": 101, "menu": 101,
+ORDER = {"synthetic": 1, "door": 2, "emergency": 100, "block": 105, "service": 110, "national": 120, "toll_free": 130, "international": 140, "group": 101, "menu": 101,
          "hangup": 102, "hours": 300, "inbound": 100}
 # Tables, parents before children: the writer inserts in this order and deletes in reverse.
 AUDIT = ("insert_date", "insert_user", "update_date", "update_user")     # FusionPBX's own bookkeeping columns: never written by PhotonVox
@@ -272,6 +272,9 @@ class _Builder:
         for n in self.p["inbound"]:
             self.begin("inbound:" + n["number"], n)
             self.inbound(n)
+        for d in self.p.get("doors", []):
+            self.begin("door:" + d["key"], d)
+            self.door(d)
         self.obj = None
         if not self.a:
             for name, enabled in self.p["features"].items():
@@ -342,10 +345,11 @@ class _Builder:
                  outbound_caller_id_number=x["caller_id_number"], emergency_caller_id_name=None,
                  emergency_caller_id_number=x["emergency_caller_id_number"], directory_first_name=x["name"], directory_visible=False,
                  directory_exten_visible=False, limit_max="5", limit_destination="!USER_BUSY", user_context=self.domain,
-                 toll_allow=":".join(x["toll_allow"]), call_timeout=30, call_screen_enabled=False, extension_dialect="us",
+                 toll_allow=f"door:{ext}" if x.get("door") else ":".join(x["toll_allow"]), call_timeout=30, call_screen_enabled=False, extension_dialect="us",
                  extension_voice="callie", extension_type="default", enabled=True, description="PhotonVox", force_ping=False,
                  forward_user_not_registered_enabled=none, forward_user_not_registered_destination=HANGUP if none else None)
-        self.voicemail(ext, x["name"], x.get("email"), "extension:" + ext, x.get("voicemail", True))
+        if not x.get("door"):                       # a door station has no voicemail box at all
+            self.voicemail(ext, x["name"], x.get("email"), "extension:" + ext, x.get("voicemail", True))
         self.cache(f"directory.{ext}@{self.domain}")
 
     def voicemail(self, box: str, name: str, email: Optional[str], key: str, enabled: bool = True) -> None:
@@ -480,6 +484,28 @@ class _Builder:
         body += f'\t<condition field="destination_number" expression={_exact(number)}>\n' + _act(ca, cd) + "\t</condition>\n"
         self.dialplan("hours:" + key, f"photonvox.hours.{key}", ORDER["hours"], TIME_APP, body, number=number, details=details)
 
+    def door(self, d: Mapping[str, Any]) -> None:
+        """A door station's calls: whatever it dials goes to its flow, once (the transfer comes back through the dial plan; the variable set
+        here lets it pass the second time), except 911 and 933 with or without an outside-line prefix, which go on to the emergency route.
+        Its toll_allow ("door:<extension>", from the directory, which a phone cannot change) is what recognizes it: another phone dialing
+        anything never comes here, and the door reaches nothing but its flow and 911. Ordered right after the synthetic check, before any
+        hand-built route of an adopted domain. Nothing here touches the call's DTMF: the "#" the person answering presses reaches the
+        intercom as RFC 2833 (PhotonEntry's unlock code). Two log lines say when the call started and who answered it (vox-agent reads them
+        for PhotonEntry's door-calls); the second runs on the answering leg and is expanded there (its variables are escaped once)."""
+        ext, key = d["extension"], d["key"]
+        app, data = self.transfer(d["to"])
+        started = f"NOTICE PhotonVox-door domain={self.domain} door={ext} call=${{uuid}} started=${{strepoch()}}"
+        answered = (f"nolocal:api_on_answer=log NOTICE PhotonVox-door domain={self.domain} door={ext} call=${{uuid}} answered=\\${{strepoch()}} "
+                    "user=\\${dialed_user} dest=\\${destination_number}")
+        actions = [("set", f"photonvox_door={key}", True), ("log", started, False), ("export", answered, False),
+                   ("unset", "bridge_terminate_key", False), ("set", "hangup_after_bridge=true", False), (app, data, False)]
+        conds = [("${toll_allow}", "^door:" + ext + "$"), ("${photonvox_door}", "^$"), ("destination_number", DOOR_NOT_EMERGENCY)]
+        body = ("".join(f"\t<condition field={quoteattr(f)} expression={quoteattr(e)}/>\n" for f, e in conds[:-1])
+                + f"\t<condition field={quoteattr(conds[-1][0])} expression={quoteattr(conds[-1][1])}>\n"
+                + "".join(_act(a, v, i) for a, v, i in actions) + "\t</condition>\n")
+        details = [("condition", f, e, None) for f, e in conds] + [("action", a, v, i or None) for a, v, i in actions]
+        self.dialplan("door:" + key, f"photonvox.door.{key}", ORDER["door"], None, body, details=details)
+
     def inbound(self, n: Mapping[str, Any]) -> None:
         """The destination row and its public dial plan describe the same number, in every form a carrier may send it: +1NXXNXXXXXX,
         1NXXNXXXXXX or NXXNXXXXXX (FusionPBX's single mode matches prefix + number, + prefix + number, or the number alone)."""
@@ -499,6 +525,13 @@ class _Builder:
                  destination_data=data, destination_order=100, destination_enabled=True, destination_description="PhotonVox")
         for form in (number, number[1:], ten):
             self.cache(f"dialplan.public.{form}")
+
+
+# Every number a door may dial except an emergency one (911 or 933, with an 8 or 9 in front or not): those go on to the emergency route.
+DOOR_NOT_EMERGENCY = r"^(?![89]?(?:911|933)$)"
+# The one command a PhotonVox dial plan has the engine run on an event: a door call's answering leg logs who it is (checked in check_xml).
+DOOR_ANSWERED = re.compile(r"^nolocal:api_on_answer=log NOTICE PhotonVox-door domain=[a-z0-9.-]+ door=[1-8][0-9]{1,4} call=\$\{uuid\} "
+                           r"answered=\\\$\{strepoch\(\)\} user=\\\$\{dialed_user\} dest=\\\$\{destination_number\}$")
 
 
 def _exact(number: str) -> str:
@@ -522,6 +555,10 @@ def check_xml(xml: str) -> None:
             raise ValueError(f"dial plan application {app!r} is not one PhotonVox writes")
         if app == "lua" and el.get("data") != "app.lua ring_groups":
             raise ValueError("the only Lua a PhotonVox dial plan runs is FusionPBX's ring groups")
+        if app in ("set", "export"):
+            var = el.get("data", "").split("=", 1)[0].removeprefix("nolocal:")
+            if re.match(r"^(api_|execute_on_|exec_after_bridge|bridge_pre_execute)", var) and not DOOR_ANSWERED.match(el.get("data", "")):
+                raise ValueError(f"a PhotonVox dial plan never sets {var!r} (it would run a command), except the door's own answer log")
         if app == "bridge" and not re.match(r"^sofia/gateway/[0-9a-f-]{36}/\$\{photonvox_dial\}$", el.get("data", "")):
             raise ValueError("a PhotonVox dial plan bridges only to an upstream gateway")
 

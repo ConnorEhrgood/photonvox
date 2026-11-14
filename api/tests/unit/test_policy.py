@@ -79,6 +79,10 @@ def test_site_limited_people_change_only_their_sites():
     d = copy.deepcopy(SAMPLE)
     d["numbers"].pop("+17245550110")
     assert policy.touched_sites(BASE, PhoneSystem.model_validate(d)) == {S2}
+    d = copy.deepcopy(SAMPLE)                                       # a door is its site's (PhotonEntry's intercom there)
+    d["doors"] = {"front": {"name": "Front door", "site": S2, "extension": "701", "open": {"user": "u-cy"}}}
+    door = PhoneSystem.model_validate(d)
+    assert policy.touched_sites(BASE, door) == {S2} and "another site" in policy.refusal(BASE, door, OWNER, False, {S1})
 
 
 @pytest.mark.parametrize("path,value", [

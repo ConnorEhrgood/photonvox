@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://photonind.com/contract/vox/entry/door-call.schema.json",
+  "title": "GET https://api.vox.photonind.com/integrations/entry/v1/door-calls?station=<id>&at=<ISO 8601 UTC>&window_s=<1..600> (PhotonVox, for PhotonEntry; docs/VOX.md)",
+  "description": "The call from a door station that was in progress at `at` (or, if none, the one that ended last within `window_s` seconds before it), and who answered it: PhotonEntry names the person who opened a door from a call. From PhotonVox's call records; null when there is none (yet). Same token as door-stations (scope vox:entry); a station of another organization is 404.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["organization_id", "station_id", "call"],
+  "properties": {
+    "organization_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "station_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+    "call": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "started_at", "answered_at", "ended_at", "answered_by"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1, "maxLength": 128, "description": "PhotonVox's call record id."},
+            "started_at": {"type": "string", "format": "date-time"},
+            "answered_at": {"type": ["string", "null"], "format": "date-time"},
+            "ended_at": {"type": ["string", "null"], "format": "date-time", "description": "null while the call is in progress."},
+            "answered_by": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object", "additionalProperties": false, "required": ["extension", "name", "person_id"],
+                  "properties": {
+                    "extension": {"type": "string", "maxLength": 32, "description": "The extension that answered, or the outside number's last digits for a mobile in the call flow (never the whole number)."},
+                    "name": {"type": "string", "maxLength": 128},
+                    "person_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "The directory person the extension belongs to, if any."}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

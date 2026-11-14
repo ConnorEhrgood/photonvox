@@ -25,6 +25,7 @@ CAPABILITIES: Dict[str, bool] = {
     "vox.calling.policy": False,        # call classes and the spend limit, within the platform's ceiling
     "vox.forwarding.external": True,    # forward an extension to a number outside the organization
     "vox.console.manage": False,        # the PhotonConsole connection token
+    "vox.entry.manage": True,           # the PhotonEntry connection token (it reads the door stations' SIP passwords)
     "vox.members.view": False,          # who has access, with their roles
     "vox.audit.view": False,
     "vox.self.manage": False,           # your own voicemail, greetings, forwarding inside the organization, your phones' status
@@ -33,7 +34,7 @@ CAPABILITIES: Dict[str, bool] = {
 _USER = ["vox.self.manage"]
 _ADMIN = _USER + [
     "vox.phone_system.view", "vox.phone_system.build", "vox.phone.enroll", "vox.phone.control", "vox.site.emergency", "vox.number.manage",
-    "vox.forwarding.external", "vox.console.manage", "vox.members.view",
+    "vox.forwarding.external", "vox.console.manage", "vox.entry.manage", "vox.members.view",
 ]
 _OWNER = _ADMIN + ["vox.number.port", "vox.number.release", "vox.calling.policy", "vox.audit.view"]
 

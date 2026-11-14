@@ -1,0 +1,8 @@
+{
+  "organization_id": "0b7c6d1e-6f3a-4c2b-9d8e-1a2b3c4d5e6f",
+  "stations": [
+    {"id": "front-door", "name": "Front door", "site_id": "5a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "extension": "901",
+     "sip": {"server": "cedar-works.pbx.photonind.com", "port": 5060, "transport": "udp", "username": "901", "password": "Rk2v9QpL4xT7mW1z", "outbound_proxy": null},
+     "updated_at": "2026-11-14T15:00:00Z"}
+  ]
+}

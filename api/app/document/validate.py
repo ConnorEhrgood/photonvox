@@ -148,5 +148,28 @@ def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str
         if u.caller_id and u.caller_id not in held:
             out.append(Problem(f"{p}.caller_id", "not_held", "What a user's calls show must be one of the organization's numbers."))
 
+    for did, d in doc.doors.items():
+        p = f"doors.{did}"
+        if d.site not in doc.sites:
+            out.append(Problem(f"{p}.site", "unknown_site", "This door's site is not in the phone system."))
+        elif doc.sites[d.site].outside_prefix and d.extension.startswith(doc.sites[d.site].outside_prefix):
+            out.append(Problem(f"{p}.extension", "extension_prefix", f"At this site {doc.sites[d.site].outside_prefix} starts an outside call, so no extension may start with it."))
+        if d.extension in SERVICE_CODES:
+            out.append(Problem(f"{p}.extension", "extension_reserved", f"{d.extension} is a service number (911, 988, 311…) and can't be an extension."))
+        if d.extension in by_ext:
+            out.append(Problem(f"{p}.extension", "extension_taken", f"Extension {d.extension} is already {by_ext[d.extension]}'s."))
+        else:
+            by_ext[d.extension] = did
+        for name, t in (("open", d.open), ("closed", d.closed)):
+            if t is not None:
+                prob = _target_problem(doc, t, f"{p}.{name}")
+                if prob:
+                    out.append(prob)
+        hours = d.hours or (doc.sites[d.site].hours if d.site in doc.sites else None)
+        if d.hours is not None and d.hours not in doc.hours:
+            out.append(Problem(f"{p}.hours", "unknown_hours", f"There are no hours called {d.hours!r}."))
+        if d.closed is not None and hours is None:
+            out.append(Problem(f"{p}.closed", "no_hours", "A door with an after-hours outcome needs hours (its own, or its site's)."))
+
     out.extend(_loops(doc))
     return sorted(out)

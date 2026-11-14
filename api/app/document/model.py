@@ -124,6 +124,18 @@ class User(Strict):
     caller_id: Optional[str] = Field(None, pattern=E164)
 
 
+class Door(Strict):
+    """A door station (a SIP intercom, PhotonEntry's: docs/VOX.md in photonaccess): an extension with no voicemail that can call only its own
+    flow. Whatever it dials goes to `open` (or `closed` outside its hours); 911 and 933 still go to the emergency route. Its flow rings
+    people (a user or a ring group), never a menu (the menu would take the "#" that opens the door) or voicemail."""
+    name: Label
+    site: SiteId
+    extension: str = Field(pattern=r"^[1-8][0-9]{1,4}$")
+    open: Union[ToUser, ToGroup]
+    closed: Optional[Union[ToUser, ToGroup]] = None
+    hours: Optional[str] = Field(None, pattern=NAME)   # defaults to the site's hours
+
+
 class Box(Strict):
     """A shared voicemail box ("general"), separate from users' own."""
     name: Label
@@ -173,6 +185,7 @@ class PhoneSystem(Strict):
     groups: Dict[Key, Group] = Field(default_factory=dict, max_length=200)
     users: Dict[Key, User] = Field(default_factory=dict, max_length=2000)
     boxes: Dict[Key, Box] = Field(default_factory=dict, max_length=100)
+    doors: Dict[Key, Door] = Field(default_factory=dict, max_length=200)
     calling: Calling = Field(default_factory=Calling)
     features: Features = Field(default_factory=Features)
 

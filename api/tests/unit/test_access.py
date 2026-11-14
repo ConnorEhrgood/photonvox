@@ -21,7 +21,7 @@ def g(role, sites=None, **kw):
 # What ARCHITECTURE §7 says each role can do, written out independently of app/roles.py so a slip there is caught.
 EXPECTED = {"user": {"vox.self.manage"}}
 EXPECTED["admin"] = EXPECTED["user"] | {"vox.phone_system.view", "vox.phone_system.build", "vox.phone.enroll", "vox.phone.control", "vox.site.emergency",
-                                        "vox.number.manage", "vox.forwarding.external", "vox.console.manage", "vox.members.view"}
+                                        "vox.number.manage", "vox.forwarding.external", "vox.console.manage", "vox.entry.manage", "vox.members.view"}
 EXPECTED["owner"] = EXPECTED["admin"] | {"vox.number.port", "vox.number.release", "vox.calling.policy", "vox.audit.view"}
 
 

@@ -9,7 +9,7 @@ import hmac
 import json
 import secrets
 import time
-from typing import Any, Dict, Optional, Protocol, Sequence
+from typing import Any, Dict, List, Optional, Protocol, Sequence
 
 import httpx
 
@@ -33,6 +33,9 @@ class Agent(Protocol):
     def check(self, kind: str, number: str, domain_name: str, domain_uuid: str, token: str) -> Optional[str]:
         """Place one synthetic call (the post-publish check) and say what it found: "reached <destination>" for an inbound number, "<route>
         <gateways> <number sent>" or "blocked <category>" for a dialed one; None if it found nothing. No phone rings and nothing leaves the engine."""
+
+    def door_calls(self, domain_name: str, extension: str, since: int) -> List[Dict[str, Any]]:
+        """A door station's calls since then, as its dial plan logged them: {"call", "started", "answered", "user", "dest"} (read only)."""
 
 
 class AgentError(Exception):
@@ -80,6 +83,9 @@ class HttpAgent:
 
     def put_sound(self, domain_name: str, name: str, audio: bytes) -> None:
         self.call("POST", "/v1/sound", {"domain_name": domain_name, "name": name, "data": base64.b64encode(audio).decode()})
+
+    def door_calls(self, domain_name: str, extension: str, since: int) -> List[Dict[str, Any]]:
+        return self.call("POST", "/v1/door-calls", {"domain_name": domain_name, "extension": extension, "since": since})["calls"]
 
     def check(self, kind: str, number: str, domain_name: str, domain_uuid: str, token: str) -> Optional[str]:
         return self.call("POST", "/v1/check", {"kind": kind, "number": number, "domain_name": domain_name, "domain_uuid": domain_uuid,

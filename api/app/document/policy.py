@@ -4,7 +4,7 @@
 - a change that widens what may be dialed (an international country, a blocked category or number let through, a block removed, national or
   toll-free switched back on, a higher spend limit) or switches on eavesdrop or intercept needs `vox.calling.policy` (owners);
 - a change to the organization's numbers needs `vox.number.manage`;
-- someone limited to some sites may change only those sites' people, numbers and site settings, nothing organization-wide (hours, menus,
+- someone limited to some sites may change only those sites' people, numbers, doors and site settings, nothing organization-wide (hours, menus,
   groups, mailboxes, calling, features, voice).
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ def touched_sites(old: PhoneSystem, new: PhoneSystem) -> Set[str]:
     out: Set[str] = set()
     if any(getattr(old, part) != getattr(new, part) for part in ORG_WIDE):
         out.add("*")
-    for part, site_of in (("users", lambda x: x.site), ("numbers", lambda x: x.site)):
+    for part, site_of in (("users", lambda x: x.site), ("numbers", lambda x: x.site), ("doors", lambda x: x.site)):
         a, b = getattr(old, part), getattr(new, part)
         for key in set(a) | set(b):
             if a.get(key) != b.get(key):

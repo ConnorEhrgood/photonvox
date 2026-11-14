@@ -155,6 +155,7 @@ class PbxInstance(Base):
     dial_formats: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)
     # Outgoing mail (voicemail to email): {host, port, secure, username, from, from_name}; Postmark's SMTP with a voicemail server's token.
     email: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
+    sip_access: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)  # devices' SIP: {"port", "transport", "outbound_proxy"}; empty = 5060/udp
     email_password_sealed: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (CheckConstraint("role in ('active', 'standby', 'draining')", name="ck_pbx_instance_role"),)
@@ -299,3 +300,19 @@ class HeldNumber(Base):
     carrier: Mapped[str] = mapped_column(String(40), default="htc")
     note: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IntegrationToken(Base):
+    """A per-organization token another Photon product uses to read PhotonVox (scope `vox:entry`: PhotonEntry's door stations, with their SIP
+    passwords, and who answered a door's call). Made by the organization's admins, shown once, kept only as a SHA-256 hash, revocable."""
+    __tablename__ = "integration_token"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    scope: Mapped[str] = mapped_column(String(40))
+    label: Mapped[str] = mapped_column(String(100), default="")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    hint: Mapped[str] = mapped_column(String(8), default="")              # the token's last four characters, to tell tokens apart
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

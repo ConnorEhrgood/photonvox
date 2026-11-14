@@ -1,0 +1,6 @@
+{
+  "organization_id": "0b7c6d1e-6f3a-4c2b-9d8e-1a2b3c4d5e6f",
+  "station_id": "front-door",
+  "call": {"id": "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f", "started_at": "2026-11-14T15:02:12Z", "answered_at": "2026-11-14T15:02:17Z", "ended_at": null,
+           "answered_by": {"extension": "101", "name": "Front desk (Ann Lee)", "person_id": "3c2b1a0f-9e8d-4c7b-a6f5-e4d3c2b1a0f9"}}
+}

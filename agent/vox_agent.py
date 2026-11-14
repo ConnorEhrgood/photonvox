@@ -9,6 +9,8 @@ Operations (JSON over HTTP, on the management network only):
     POST /v1/reloadacl       {}
     POST /v1/seed-domain     {}: FusionPBX's own `upgrade.php --defaults` (a new domain's standard dial plans)
     POST /v1/sound           {"domain_name", "name": "photonvox-<hash>.wav", "data": base64 WAV}: a spoken greeting into the domain's recordings
+    POST /v1/door-calls      {"domain_name", "extension", "since": unix seconds}: what a door station's calls logged since then (read only):
+                             {"calls": [{"call", "started", "answered", "user", "dest"}]} (PhotonEntry's door-calls, through PhotonVox)
     POST /v1/check           {"kind": "inbound"|"route", "number", "domain_name", "domain_uuid", "token"}: one synthetic call of the
                              post-publish check; answers {"found": "reached 301" | "<route> <gateways> <number sent>" | "blocked <category>" | null}
 
@@ -220,6 +222,29 @@ def parse(log: str, token: str) -> Optional[str]:
     return None
 
 
+DOOR_LINE = re.compile(r"PhotonVox-door domain=(\S+) door=([0-9]+) call=([0-9a-f-]{36}) (?:started=([0-9]+)|answered=([0-9]+) user=(\S*) dest=(\S*))")
+EXTENSION = re.compile(r"^[1-8][0-9]{1,4}$")
+
+
+def door_calls(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
+    """The door station's calls since `since`, from the lines its dial plan logs (FreeSWITCH's log; the newest 32 MB, minutes on a busy
+    engine): when each started, and when it was answered and by whom (the answering leg's user, or the number it was sent to). Read only."""
+    domain, ext = _str(body, "domain_name", DOMAIN), _str(body, "extension", EXTENSION)
+    since = body.get("since")
+    if not isinstance(since, int) or isinstance(since, bool) or since < 0:
+        raise Refused("since: unix seconds")
+    calls: Dict[str, Dict[str, Any]] = {}
+    for m in DOOR_LINE.finditer(_tail(cfg.log, 32 * 1024 * 1024)):
+        if m.group(1) != domain or m.group(2) != ext:
+            continue
+        c = calls.setdefault(m.group(3), {"call": m.group(3), "started": None, "answered": None, "user": None, "dest": None})
+        if m.group(4):
+            c["started"] = int(m.group(4))
+        elif c["answered"] is None:             # the first leg to answer is the one bridged
+            c["answered"], c["user"], c["dest"] = int(m.group(5)), m.group(6) or None, m.group(7) or None
+    return {"calls": [c for c in calls.values() if max(c["started"] or 0, c["answered"] or 0) >= since]}
+
+
 def _tail(path: str, size: int = 512 * 1024) -> str:
     with open(path, "rb") as f:
         f.seek(0, os.SEEK_END)
@@ -246,7 +271,7 @@ def check(cfg: Config, body: Dict[str, Any], wait_s: float = 3.0) -> Dict[str, A
 
 ROUTES: Dict[Tuple[str, str], Callable[[Config, Dict[str, Any]], Dict[str, Any]]] = {
     ("GET", "/v1/status"): status, ("POST", "/v1/cache/delete"): cache_delete, ("POST", "/v1/rescan"): rescan,
-    ("POST", "/v1/reloadacl"): reloadacl, ("POST", "/v1/seed-domain"): seed_domain, ("POST", "/v1/check"): check, ("POST", "/v1/sound"): sound,
+    ("POST", "/v1/reloadacl"): reloadacl, ("POST", "/v1/seed-domain"): seed_domain, ("POST", "/v1/check"): check, ("POST", "/v1/door-calls"): door_calls, ("POST", "/v1/sound"): sound,
 }
 
 

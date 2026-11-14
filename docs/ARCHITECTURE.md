@@ -280,12 +280,13 @@ directory organization ──1:1── phone_system ── on one pbx_instance; 
 | Role | Site-limitable | Can |
 |---|---|---|
 | `owner` | no | Everything for the organization, including numbers and emergency addresses |
-| `admin` | yes | Build and change the phone system: users, phones, flows, hours, numbers' outcomes, enrollment; for their sites when limited |
+| `admin` | yes | Build and change the phone system: users, phones, doors, flows, hours, numbers' outcomes, enrollment; for their sites when limited; the PhotonConsole and PhotonEntry connection tokens |
 | `user` | yes | Their own voicemail settings and greetings, forwarding within the allowed class, their phones' status |
 
   A partner technician typically holds `admin` through the partner grant; a partner owner or admin holds `owner`. A customer's office
   manager is a direct `admin`. `supervisor` arrives with call queues (R2).
-- **Sensitive capabilities** (suite §5): `vox.number.port`, `vox.number.release`, `vox.e911.edit`, `vox.forwarding.external`, later
+- **Sensitive capabilities** (suite §5): `vox.number.port`, `vox.number.release`, `vox.e911.edit`, `vox.forwarding.external`, `vox.entry.manage`
+  (the PhotonEntry token reads the door stations' SIP passwords), later
   `vox.recording.listen` and `vox.call.monitor`.
 - **Templates belong to partners** (and Photon's to everyone); clone works only within a partner's own customers.
 - **White-label:** nothing customers see names the carrier, the engine or GDMS; phone screens show the partner's or Photon's name through the
@@ -565,6 +566,21 @@ configuration or credential problem (PhotonVox offers "re-provision"); GDMS offl
 **Built-in alerts** (a fixed small set, not a rule engine): a site's phones all offline; an instance or an upstream down; the fraud breaker
 tripped; a 911 call; an emergency address invalid; a phone offline more than a set time (per site, off by default). Sent to the partner's
 contacts for the customer by email (Postmark) and shown on the pane.
+
+### PhotonEntry (door stations; photonaccess docs/VOX.md, contract/vox/, agreed with a1 2026-11-14)
+
+- **Doors** in the document (`doors`): a name, a site, an extension and a flow (a user or a ring group, open and after hours on the site's
+  calendar; never a menu, which would take the "#", nor voicemail). The engine gives a door no voicemail and the toll_allow `door:<extension>`
+  (from the directory, which a device cannot change); the door's dial plan (order 2, before any hand-built route) sends whatever it dials to its
+  flow, once, except 911 and 933 with or without 8/9, which go on to the emergency route. A door's SIP account reaches nothing else.
+- **"#" opens the door:** nothing in the door's path takes DTMF (no digit bindings, no call screening, no confirm key on PhotonVox's ring
+  groups; `bridge_terminate_key` unset), so the answerer's "#" reaches the intercom as RFC 2833. There is no outside-number outcome yet; when
+  one comes, the same rule holds for a trunk leg.
+- **The token:** `vox:entry`, per organization, made by its admins (`vox.entry.manage`), shown once, kept as a SHA-256 hash, revocable.
+  `GET /integrations/entry/v1/door-stations` (the published doors and their SIP accounts: server = the phone system's SIP domain, username =
+  the extension, port/transport/outbound proxy from the engine's `sip_access`), `GET /integrations/entry/v1/door-calls` (who answered: the
+  door's dial plan logs when its call starts and, on the answering leg, who answered; vox-agent's read-only `door-calls` reads those lines;
+  the end comes from FusionPBX's call records). An outside number that answered is named by its last four digits only.
 
 ### PhotonConsole
 

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://photonind.com/contract/vox/entry/door-stations.schema.json",
+  "title": "GET https://api.vox.photonind.com/integrations/entry/v1/door-stations (PhotonVox, for PhotonEntry; docs/VOX.md)",
+  "description": "An organization's door stations in PhotonVox: the extensions of kind door_station, each with the SIP account an intercom registers with. Authorized by a per-organization token with scope vox:entry, made in PhotonVox and pasted into PhotonEntry. PhotonEntry refuses a document naming another organization than the one the token was connected for, and puts a station's SIP account on its intercom by provisioning (it is never shown to people).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["organization_id", "stations"],
+  "properties": {
+    "organization_id": {"$ref": "#/$defs/uuid", "description": "The organization's id in the PhotonID directory."},
+    "stations": {
+      "type": "array", "maxItems": 2000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "site_id", "extension", "sip", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Stable while the station exists."},
+          "name": {"type": "string", "minLength": 1, "maxLength": 64},
+          "site_id": {"oneOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}], "description": "The directory site it is at, if any."},
+          "extension": {"type": "string", "pattern": "^[0-9]{2,8}$"},
+          "sip": {
+            "type": "object", "additionalProperties": false,
+            "required": ["server", "port", "transport", "username", "password"],
+            "properties": {
+              "server": {"type": "string", "minLength": 1, "maxLength": 255},
+              "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+              "transport": {"enum": ["udp", "tcp", "tls"]},
+              "username": {"type": "string", "minLength": 1, "maxLength": 64, "description": "Both the register name and the auth name."},
+              "password": {"type": "string", "minLength": 1, "maxLength": 128},
+              "outbound_proxy": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}$"}],
+                                 "description": "host:port the intercom sends its SIP through, when the SIP domain does not resolve to the engine from the customer's network (set by PhotonVox per engine; usually null). Optional; PhotonVox always sends it."}
+            }
+          },
+          "updated_at": {"type": "string", "format": "date-time", "description": "When anything above last changed (a new SIP password included)."}
+        }
+      }
+    }
+  },
+  "$defs": {"uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"}}
+}

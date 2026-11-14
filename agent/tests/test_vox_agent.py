@@ -207,6 +207,25 @@ def test_an_adopted_engine_allows_only_status_the_cache_and_checks(agent):
     assert len(va.Config({"VOX_AGENT_SECRET": SECRET, "VOX_AGENT_ESL_PASSWORD": "pw"}).operations) == len(va.ROUTES)
 
 
+def test_a_door_stations_calls_are_read_from_its_own_log_lines(agent, tmp_path):
+    log = agent["cfg"].log
+    A, B = "0b5e8c1a-0000-4000-8000-00000000c001", "0b5e8c1a-0000-4000-8000-00000000c002"
+    with open(log, "a") as f:
+        f.write(f"{A} 2026-11-14 [NOTICE] PhotonVox-door domain=x.test door=701 call={A} started=1000\n"
+                f"{A} 2026-11-14 [NOTICE] PhotonVox-door domain=x.test door=701 call={A} answered=1005 user=101 dest=101\n"
+                f"{A} 2026-11-14 [NOTICE] PhotonVox-door domain=x.test door=701 call={A} answered=1006 user=102 dest=102\n"
+                f"{B} 2026-11-14 [NOTICE] PhotonVox-door domain=x.test door=701 call={B} started=2000\n"
+                f"{B} 2026-11-14 [NOTICE] PhotonVox-door domain=y.test door=701 call={B} answered=2001 user= dest=2125550123\n"
+                f"{B} 2026-11-14 [NOTICE] PhotonVox-door domain=x.test door=702 call={B} answered=2002 user= dest=2125550123\n")
+    code, r = call(agent, "POST", "/v1/door-calls", {"domain_name": "x.test", "extension": "701", "since": 0})
+    assert code == 200 and r["calls"] == [{"call": A, "started": 1000, "answered": 1005, "user": "101", "dest": "101"},
+                                          {"call": B, "started": 2000, "answered": None, "user": None, "dest": None}]
+    assert call(agent, "POST", "/v1/door-calls", {"domain_name": "x.test", "extension": "701", "since": 1500})[1]["calls"][0]["call"] == B
+    for bad in ({"domain_name": "x.test", "extension": "701", "since": "1"}, {"domain_name": "x.test", "extension": "701", "since": True},
+                {"domain_name": "x.test", "extension": "9; x", "since": 0}, {"domain_name": "x.test", "extension": "701", "since": -1}):
+        assert call(agent, "POST", "/v1/door-calls", bad)[0] == 400
+
+
 def test_a_wrong_event_socket_password_is_an_error(agent):
     agent["cfg"].esl_password = "wrong"
     assert call(agent, "POST", "/v1/reloadacl", {}) == (500, {"error": "ConnectionError"})

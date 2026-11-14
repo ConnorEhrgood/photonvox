@@ -102,6 +102,14 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
             "unreachable": f"voicemail:{u.extension}" if site.unreachable == "voicemail" else "hangup",
             **({} if u.voicemail else {"voicemail": False}),       # only when off, so the plans of documents that never say stay as they were
         })
+    for did in sorted(doc.doors, key=lambda d: doc.doors[d].extension):
+        d = doc.doors[did]
+        site = doc.sites[d.site]
+        # A door station: no voicemail, no call class (it reaches only its own flow), and 911 shows the site's emergency number.
+        extensions.append({"extension": d.extension, "door": did, "name": d.name, "site": d.site, "email": None,
+                           "caller_id_number": site.caller_id, "emergency_caller_id_number": site.emergency_number, "toll_allow": [],
+                           "unreachable": "hangup", "voicemail": False})
+    extensions.sort(key=lambda x: x["extension"])
     boxes = [{"key": k, "name": b.name, "email": b.email} for k, b in sorted(doc.boxes.items())]
     groups = [{"key": k, "strategy": g.strategy, "ring_seconds": g.ring_seconds, "members": [doc.users[m].extension for m in g.members],
                "then": _dest(doc, g.then) if g.then else "hangup"} for k, g in sorted(doc.groups.items())]
@@ -120,6 +128,19 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         time_conditions.append({"key": key, "hours": hours_name, "week": {d: list(h.week[d]) for d in sorted(h.week)}, "holidays": h.holidays,
                                 "timezone": ctx.timezones.get(n.site, "America/New_York"), "open": _dest(doc, n.open), "closed": _dest(doc, n.closed)})
         inbound.append({"number": num, "site": n.site, "to": f"time_condition:{key}"})
+
+    doors = []
+    for did, d in sorted(doc.doors.items()):
+        if d.closed is None:
+            doors.append({"key": did, "extension": d.extension, "name": d.name, "site": d.site, "to": _dest(doc, d.open)})
+            continue
+        hours_name = d.hours or doc.sites[d.site].hours
+        h = doc.hours[hours_name]
+        key = f"door-{did}"
+        time_conditions.append({"key": key, "hours": hours_name, "week": {w: list(h.week[w]) for w in sorted(h.week)}, "holidays": h.holidays,
+                                "timezone": ctx.timezones.get(d.site, "America/New_York"), "open": _dest(doc, d.open), "closed": _dest(doc, d.closed)})
+        doors.append({"key": did, "extension": d.extension, "name": d.name, "site": d.site, "to": f"time_condition:{key}"})
+    time_conditions.sort(key=lambda t: t["key"])
 
     prefixes = sorted({s.outside_prefix for s in doc.sites.values() if s.outside_prefix})
     routes = [
@@ -150,6 +171,7 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         "ivr_menus": menus,
         "time_conditions": time_conditions,
         "inbound": inbound,
+        **({"doors": doors} if doors else {}),       # only when there are doors, so the plans of documents without stay as they were
         "outbound_routes": routes,
         "outside_prefixes": prefixes,
         "voice": doc.voice,

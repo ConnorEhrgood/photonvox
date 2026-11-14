@@ -8,7 +8,7 @@ from sqlalchemy.exc import DataError
 
 from app.config import settings
 from app.db import engine, system_engine
-from app.routes import directory_notify, me, phone_system, platform, summary, tenants
+from app.routes import directory_notify, integrations, me, phone_system, platform, summary, tenants
 
 problem = settings.production_safe()
 if problem:
@@ -22,6 +22,8 @@ app.include_router(phone_system.router)
 app.include_router(platform.router)
 app.include_router(directory_notify.router)
 app.include_router(summary.router)
+app.include_router(integrations.manage)
+app.include_router(integrations.entry)
 
 # Every verb the web app uses; a verb missing here fails in the browser only, as a preflight the API never answers.
 CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
