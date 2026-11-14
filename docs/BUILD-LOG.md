@@ -578,3 +578,12 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   (`-i wg-mgmt -s 10.2.1.5/32`), persisted as one line inserted into rules.v4 (backup rules.v4.bak-vox-8781; `iptables-restore --test`
   passes; never iptables-save: fail2ban's chains, the operator's rule). Unsigned 401 on CT 600 and from the Vultr host; registered on
   live-a after a signed status (FreeSWITCH 1.11.1, 7 registrations); signed seed-domain, reloadacl and door-calls answer 404.
+- **B** (about 04:44–04:47 UTC): drift 0; HTC set to ten digits; readopt proved the no-op (15 objects, 47 rows, 72 hand-built rows). Drift
+  then showed extension 701 (outbound and 911 caller ID): the published version 1's document came from step 4's importer (701 without a
+  caller ID of its own), the readopted adoption from the deployed one (701 showing …2300). The engine had not changed; but version 1 had
+  stopped being a safe undo (republishing it, or the put-back after a failed check, would have changed 701). **B.5** (the operator's go):
+  the readopted draft published as version 2, writing nothing (the domain's fingerprints identical before and after); drift 0; version 1
+  superseded. The protections' undo is now "republish 2". (Staging could not show this: its adoption was made with the current importer.)
+- **C**: HUEPC's site 911 address 210 Main St, Hickory, PA 15340 (on file with HTC; Connor), validated with `set-911`; drift 0.
+- **D** (about 04:49 UTC): the dry run, nothing written: blocking nothing; 75 new rows, 15 changed (dial plans switched off; extensions'
+  toll_allow and 911 caller ID); calls as rehearsed; table in `~/vox-takeover/data/dryrun-table.txt` for the operator before E and F.
