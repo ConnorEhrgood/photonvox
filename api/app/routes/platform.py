@@ -62,11 +62,13 @@ class InstanceIn(BaseModel):
     # The engine's own gateways, hand-built (the live engine, decision 32): routing then names them by key, PhotonVox writes no upstream and
     # Apply refuses the instance. Key -> the existing gateway's id.
     own_gateways: Dict[str, uuid.UUID] = Field(default_factory=dict)
+    # Its phones and calls are simulated (staging, for the demo organization only): set when it is registered, never changed after.
+    simulated: bool = False
 
 
 def _instance_json(i: PbxInstance) -> Dict[str, Any]:
     return {"id": str(i.id), "name": i.name, "region": i.region, "role": i.role, "hostname": i.hostname, "agent_kind": (i.agent or {}).get("kind"),
-            "upstreams": i.upstreams, "own_gateways": i.own_gateways or {}, "routing": i.routing, "emergency_upstream": i.emergency_upstream, "versions": i.versions,
+            "upstreams": i.upstreams, "own_gateways": i.own_gateways or {}, "simulated": bool(i.simulated), "routing": i.routing, "emergency_upstream": i.emergency_upstream, "versions": i.versions,
             "email": {k: v for k, v in (i.email or {}).items()}, "email_password_set": bool(i.email_password_sealed)}
 
 
@@ -89,7 +91,7 @@ def add_instance(body: InstanceIn, who: Who = Depends(platform_admin), db: Sessi
                     agent={"kind": "http", "url": body.agent_url} if body.agent_url else {"kind": "none"},
                     agent_secret_sealed=crypto.seal(body.agent_secret) if body.agent_secret else "",
                     upstreams=[u.model_dump() for u in body.upstreams], routing=body.routing, emergency_upstream=body.emergency_upstream,
-                    own_gateways={k: str(v) for k, v in body.own_gateways.items()})
+                    own_gateways={k: str(v) for k, v in body.own_gateways.items()}, simulated=body.simulated)
     db.add(i)
     db.flush()
     audit.record(db, actor_id=who.id, actor_label=who.label, actor_source="platform", action="instance.added", target_type="pbx_instance", target_id=i.id,

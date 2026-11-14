@@ -93,7 +93,9 @@ def create_phone_system(ctx: Ctx = Depends(require(BUILD)), db: Session = Depend
         raise HTTPException(status.HTTP_409_CONFLICT, {"code": "exists", "detail": "This organization already has a phone system."})
     tenant = db.get(Tenant, ctx.tenant_id)
     with SystemSession() as s:        # instances are Photon's: the integrator may not read them, only be placed on one
-        rows = s.execute(select(PbxInstance).where(PbxInstance.role == "active").order_by(PbxInstance.created_at)).scalars().all()
+        # The demo organization goes on a simulated engine, and nobody else does (docs/DEMO.md).
+        rows = s.execute(select(PbxInstance).where(PbxInstance.role == "active", PbxInstance.simulated == bool(tenant.demo))
+                         .order_by(PbxInstance.created_at)).scalars().all()
         chosen = next((i for i in rows if i.region == tenant.home_region), rows[0] if rows else None)
         instance_id = chosen.id if chosen else None
     if instance_id is None:

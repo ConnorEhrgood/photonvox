@@ -70,3 +70,15 @@ def test_secrets_are_sealed_with_the_key_and_need_one(monkeypatch):
     monkeypatch.setattr(settings, "secrets_key", "")
     with pytest.raises(RuntimeError):
         crypto.seal("pw")
+
+
+def test_connections_to_an_engine_are_never_kept_idle(monkeypatch):
+    """The engine's roles allow 4 connections each: a connection closes as soon as it is released (no pool), so a long-running worker never
+    holds them (2026-11-14: a worker's undisposed engines filled photonvox_rw's four)."""
+    from sqlalchemy.pool import NullPool
+    from app import crypto
+    from app.engine import service
+    from app.models import PbxInstance
+    monkeypatch.setattr(crypto, "unseal", lambda s: "postgresql+psycopg://u:p@engine.invalid/fusionpbx")
+    eng, agent = service.connect(PbxInstance(database_url_sealed="x", agent={"kind": "none"}))
+    assert isinstance(eng.pool, NullPool) and agent.available is False

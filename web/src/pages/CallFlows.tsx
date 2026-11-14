@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../auth/TenantContext'
-import { VOICES, type Draft, type DraftDoor, type DraftGroup, type DraftHours, type DraftMenu } from '../api/types'
+import { VOICES, type Draft, type DraftDoor, type DraftGroup, type DraftHours, type DraftMenu, type DraftPage } from '../api/types'
 import { rename, slug, TargetPicker, targetText, targetValue, toTarget, useDraft, useSiteNames } from '../components/draft'
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui'
 
-type Kind = 'group' | 'menu' | 'box' | 'hours' | 'door'
+type Kind = 'group' | 'menu' | 'box' | 'hours' | 'door' | 'page'
 const DAYS = [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'], ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']] as const
 const SPAN = /^([01][0-9]|2[0-3]):[0-5][0-9]-(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$/
 const DIGITS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
@@ -26,6 +26,7 @@ export function CallFlowsPage() {
   const boxes = Object.entries(draft.boxes ?? {})
   const hours = Object.entries(draft.hours ?? {})
   const doors = Object.entries(draft.doors ?? {})
+  const pages = Object.entries(draft.pages ?? {})
   return (
     <>
       <PageHeader title="Call flows">{canBuild && <CloneFrom onDone={() => ps.reload()} />}</PageHeader>
@@ -92,6 +93,16 @@ export function CallFlowsPage() {
           ))}</ul>
         )}
       </section>
+      <section aria-label="Paging">
+        <div className="ph-page-header"><h2>Paging</h2><div className="ph-actions">{add('page')}</div></div>
+        {pages.length === 0 ? <p className="ph-hint">None yet. A paging group speaks through several phones and overhead speakers at once: dial its extension and talk.</p> : (
+          <ul className="pv-plain">{pages.map(([k, x]) => (
+            <li key={k}><strong>{x.name}</strong> ({x.extension}): <span className="ph-hint">{names[x.site] ?? 'a site'};{' '}
+              {x.members.map((m) => draft.users?.[m]?.name ?? m).join(', ')}</span> {edit('page', k)}</li>
+          ))}</ul>
+        )}
+      </section>
+      {editing?.kind === 'page' && <PageForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} siteNames={names} />}
       {editing?.kind === 'door' && <DoorForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} siteNames={names} />}
       {editing?.kind === 'group' && <GroupForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} />}
       {editing?.kind === 'menu' && <MenuForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} />}
@@ -163,6 +174,49 @@ function DoorForm({ draft, k, saving, error, onClose, save, siteNames }: FormPro
       <ErrorText>{error}</ErrorText>
       <Footer k={k} saving={saving} ok={ok} onSave={() => void save((d) => ({ ...d, doors: put(d.doors, k, key, value) }))}
         onRemove={() => void save((d) => ({ ...d, doors: put(d.doors, k, k, null) }))} />
+    </Modal>
+  )
+}
+
+function PageForm({ draft, k, saving, error, onClose, save, siteNames }: FormProps & { siteNames: Record<string, string> }) {
+  const was: DraftPage | undefined = draft.pages?.[k]
+  const sites = Object.keys(draft.sites ?? {})
+  const [name, setName] = useState(was?.name ?? '')
+  const [site, setSite] = useState(was?.site ?? sites[0] ?? '')
+  const [extension, setExtension] = useState(was?.extension ?? '')
+  const [members, setMembers] = useState<string[]>(was?.members ?? [])
+  const key = k || slug(name)
+  const taken = !k && !!draft.pages?.[key]
+  const used = [...Object.values(draft.users ?? {}), ...Object.values(draft.doors ?? {}),
+    ...Object.entries(draft.pages ?? {}).filter(([p]) => p !== k).map(([, x]) => x)].some((x) => x.extension === extension)
+  const ok = !!key && !taken && !!name.trim() && !!site && /^[1-8][0-9]{1,4}$/.test(extension) && !used && members.length > 0
+  const value: DraftPage = { name: name.trim(), site, extension, members }
+  const here = Object.entries(draft.users ?? {}).filter(([, u]) => u.site === site)
+  return (
+    <Modal title={k ? `Paging ${was?.name ?? k}` : 'New paging group'} onClose={onClose}>
+      <div className="ph-field"><label htmlFor="pv-page-name">Name</label>
+        <input id="pv-page-name" className="ph-input" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} aria-invalid={taken} placeholder="Warehouse paging" />
+        {taken && <small className="ph-error">That name is taken.</small>}</div>
+      <div className="pv-row">
+        <div className="ph-field"><label htmlFor="pv-page-site">Site</label>
+          <select id="pv-page-site" className="ph-input" value={site} onChange={(e) => { setSite(e.target.value); setMembers([]) }}>
+            {sites.map((id) => <option key={id} value={id}>{siteNames[id] ?? 'Site'}</option>)}
+          </select></div>
+        <div className="ph-field"><label htmlFor="pv-page-ext">Extension to dial</label>
+          <input id="pv-page-ext" className="ph-input" inputMode="numeric" value={extension} onChange={(e) => setExtension(e.target.value.trim())} aria-invalid={used} />
+          {used && <small className="ph-error">That extension is taken.</small>}</div>
+      </div>
+      <fieldset className="ph-field"><legend>Phones and speakers it speaks through</legend>
+        {here.length === 0 && <p className="ph-hint">No phones at this site yet.</p>}
+        {here.map(([id, u]) => (
+          <label key={id} className="ph-check"><input type="checkbox" checked={members.includes(id)}
+            onChange={(e) => setMembers(e.target.checked ? [...members, id] : members.filter((m) => m !== id))} /> {u.name} ({u.extension})</label>
+        ))}
+      </fieldset>
+      <p className="ph-hint">Each phone answers by itself on its speaker; it only listens. An overhead speaker is added as a user with its voicemail off.</p>
+      <ErrorText>{error}</ErrorText>
+      <Footer k={k} saving={saving} ok={ok} onSave={() => void save((d) => ({ ...d, pages: put(d.pages, k, key, value) }))}
+        onRemove={() => void save((d) => ({ ...d, pages: put(d.pages, k, k, null) }))} />
     </Modal>
   )
 }

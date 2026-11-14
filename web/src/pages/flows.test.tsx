@@ -413,3 +413,28 @@ describe('doors', () => {
     expect(saved[1].doors).toEqual({})
   })
 })
+
+describe('paging', () => {
+  it('adds a paging group of one site’s phones, refuses a taken extension, changes and removes it', async () => {
+    const { saved } = withServer(<CallFlowsPage />)
+    expect(await screen.findByText(/A paging group speaks through several phones/)).toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('region', { name: 'Paging' })).getByRole('button', { name: 'Add' }))
+    const dialog = await screen.findByRole('dialog', { name: 'New paging group' })
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Office paging')
+    await userEvent.type(within(dialog).getByLabelText('Extension to dial'), '101')
+    expect(within(dialog).getByText('That extension is taken.')).toBeInTheDocument()               // Ben's
+    await userEvent.clear(within(dialog).getByLabelText('Extension to dial'))
+    await userEvent.type(within(dialog).getByLabelText('Extension to dial'), '290')
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()                    // speaks through nobody yet
+    expect(within(dialog).queryByLabelText(/Cy Annex/)).toBeNull()                                 // only this site's phones
+    await userEvent.click(within(dialog).getByLabelText(/Ada Front/))
+    await userEvent.click(within(dialog).getByLabelText(/Ben Office/))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(saved[0].pages).toEqual({ 'office-paging': { name: 'Office paging', site: 's1', extension: '290', members: ['u-ada', 'u-ben'] } })
+    expect(await screen.findByText(/Ada Front, Ben Office/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Change office-paging' }))
+    const again = await screen.findByRole('dialog', { name: 'Paging Office paging' })
+    await userEvent.click(within(again).getByRole('button', { name: 'Remove office-paging' }))
+    expect(saved[1].pages).toEqual({})
+  })
+})

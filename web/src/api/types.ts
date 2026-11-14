@@ -84,6 +84,8 @@ export interface DraftGroup { members: string[]; strategy?: 'simultaneous' | 'se
 export interface DraftMenu { greeting: string; options: Record<string, DraftTarget>; timeout?: DraftTarget }   // none: the call ends (an adopted menu, decision 32)
 export interface DraftHours { week: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', string[]>>; holidays?: 'none' | 'us-federal' }
 /** A door station (PhotonEntry's intercom): whatever it dials rings `open` (or `closed` after hours); never a menu or voicemail. */
+/** A paging group: dialing its extension speaks one way through every member's phone at once. */
+export interface DraftPage { name: string; site: string; extension: string; members: string[] }
 export interface DraftDoor { name: string; site: string; extension: string; open: DraftTarget; closed?: DraftTarget | null; hours?: string | null }
 export interface DraftSite { emergency_location: string; emergency_number: string; caller_id: string; hours?: string | null; unreachable?: 'voicemail' | 'none'; outside_prefix?: '8' | '9' | null }
 export interface Draft {
@@ -97,6 +99,7 @@ export interface Draft {
   users?: Record<string, DraftUser>
   boxes?: Record<string, { name: string; email?: string | null }>
   doors?: Record<string, DraftDoor>
+  pages?: Record<string, DraftPage>
   calling?: Record<string, unknown>
   features?: Record<string, boolean>
 }

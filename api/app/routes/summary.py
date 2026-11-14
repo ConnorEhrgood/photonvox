@@ -75,9 +75,12 @@ def summary(response: Response, organization: Optional[uuid.UUID] = Query(None),
 
     def across() -> Dict[str, Any]:
         with SystemSession() as s:
-            systems = s.execute(select(PhoneSystem).where(PhoneSystem.tenant_id.in_(reachable))).scalars().all() if reachable else []
+            # The demo organization is not counted across organizations (docs/DEMO.md): its own line above still answers.
+            demos = set(s.execute(select(Tenant.id).where(Tenant.id.in_(reachable), Tenant.demo.is_(True))).scalars()) if reachable else set()
+            counted = [t for t in reachable if t not in demos]
+            systems = s.execute(select(PhoneSystem).where(PhoneSystem.tenant_id.in_(counted))).scalars().all() if counted else []
         states = [_line(ps)[0] for ps in systems]
-        n, orgs = len(systems), len(reachable)
+        n, orgs = len(systems), len(counted)
         if not orgs:
             st, line = "unknown", "No organizations in PhotonVox"
         elif n == 0:

@@ -31,7 +31,7 @@ from app.engine.compare import norm
 from app.engine.agent import Agent, HttpAgent
 from app.speech import DEFAULT_VOICE, Speech, audio_key, file_name
 from app.speech.google import GoogleSpeech
-from app.models import (EmergencyLocation, EngineObject, EngineSecret, HeldNumber, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, SpeechAudio, utcnow)
+from app.models import (EmergencyLocation, EngineObject, EngineSecret, HeldNumber, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, SpeechAudio, Tenant, utcnow)
 
 Connect = Callable[[PbxInstance], Tuple[Engine, Agent]]
 log = logging.getLogger("photonvox.publish")
@@ -56,7 +56,10 @@ class NoAgent:
 def connect(instance: PbxInstance) -> Tuple[Engine, Agent]:
     """The instance's engine database (as PhotonVox's adapter role) and its agent (NoAgent when the instance has none)."""
     from sqlalchemy import create_engine
-    eng = create_engine(crypto.unseal(instance.database_url_sealed), pool_pre_ping=True, connect_args={"client_encoding": "utf8"})
+    from sqlalchemy.pool import NullPool
+    # No pool: every connection to the engine closes when it is released. The engine's roles allow 4 connections each, and a long-running worker
+    # whose engines were never disposed kept idle ones open until garbage collection, filling them (found 2026-11-14: "too many connections").
+    eng = create_engine(crypto.unseal(instance.database_url_sealed), poolclass=NullPool, connect_args={"client_encoding": "utf8"})
     a = instance.agent or {}
     if a.get("kind") != "http" or not instance.agent_secret_sealed:
         return eng, NoAgent()       # type: ignore[return-value]
@@ -178,6 +181,11 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
     instance = db.get(PbxInstance, ps.instance_id)
     v.state, ps.status = "publishing", "publishing"
     db.commit()
+    tenant = db.get(Tenant, ps.tenant_id)
+    if bool(tenant is not None and tenant.demo) != bool(instance.simulated):
+        # Never a demo on a live engine, never a customer on a simulated one (docs/DEMO.md): refused before anything is compiled or connected.
+        return _fail(db, ps, v, "not publishable: a demo organization is published only to a simulated engine, and a simulated engine takes only "
+                     "demo organizations", None)
     try:
         plan = compile_plan(Document.model_validate(v.document), context(db, ps, instance))
     except CompileError as e:
@@ -357,10 +365,13 @@ def check_drift(db: Session, ps: PhoneSystem, connect: Connect = connect) -> Dic
     plan = compile_plan(Document.model_validate(v.document), context(db, ps, instance))
     b = fusionpbx.build(plan, target(ps, instance, get_speech() is not None))
     eng, _agent = connect(instance)
-    with eng.connect() as conn:
-        found = compare(conn, b, str(ps.domain_uuid))
-        if ps.adoption and ps.adoption.get("extras"):
-            found["hand_built_changed"] = watch_extras(conn, ps.adoption["extras"], str(ps.domain_uuid))
+    try:
+        with eng.connect() as conn:
+            found = compare(conn, b, str(ps.domain_uuid))
+            if ps.adoption and ps.adoption.get("extras"):
+                found["hand_built_changed"] = watch_extras(conn, ps.adoption["extras"], str(ps.domain_uuid))
+    finally:
+        eng.dispose()
     result = {"checked_at": utcnow().isoformat(), "version": v.number, **found}
     ps.drift = result
     if ps.status in ("ready", "changed"):

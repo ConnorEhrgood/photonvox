@@ -46,6 +46,8 @@ class Tenant(Base):
     home_region: Mapped[str] = mapped_column(String(40), default="us-east")
     # The keys of every product the organization has switched on (the directory's `products`, sorted).
     products: Mapped[List[str]] = mapped_column(JSONB, default=list)
+    # The suite's demo organization (the directory's `demo`): placed on a simulated engine only, and left out of usage, billing and alerts.
+    demo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     __table_args__ = (CheckConstraint("status in ('active', 'suspended', 'removed')", name="ck_tenant_status"),)
@@ -155,6 +157,8 @@ class PbxInstance(Base):
     dial_formats: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)
     # Outgoing mail (voicemail to email): {host, port, secure, username, from, from_name}; Postmark's SMTP with a voicemail server's token.
     email: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # An engine whose phones and calls are simulated (staging, for the demo organization): it takes demo organizations only, and they nothing else.
+    simulated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     sip_access: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)  # devices' SIP: {"port", "transport", "outbound_proxy"}; empty = 5060/udp
     email_password_sealed: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -101,6 +101,7 @@ class DbProjection(Projection):
         row.slug, row.former_slugs = doc.get("slug") or None, sorted(doc.get("former_slugs") or [])
         row.partner_id = _uuid(doc["partner_id"]) if doc.get("partner_id") else None
         row.products = sorted(doc.get("products") or [])
+        row.demo = doc.get("demo") is True            # documents from before the directory sent it are not demos
         # An archived organization is not ours to serve: its access is kept but the tenant is "removed" like one that lost its entitlement.
         row.status = {"active": "active", "suspended": "suspended"}.get(doc["status"], "removed")
         self.db.flush()
