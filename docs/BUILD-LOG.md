@@ -553,3 +553,16 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
 - **Not expressible yet:** an outside number (a mobile) as a door's outcome; when it comes, the trunk leg needs the same "#" proof.
   **For the live engine, later:** its vox-agent allows status, cache/delete and check only (protections.sh); doors there need `door-calls`
   added to `VOX_AGENT_OPERATIONS`, and the read role must read `v_xml_cdr.caller_id_number` (call history columns; to verify then).
+
+## 2026-11-14: a dev PhotonVox for PhotonEntry's integration tests (Connor's go; not production)
+
+- LXC 800, `/root/vox-dev`, compose project `photonvox-dev` (`docker-compose.dev-lxc.yml`, `scripts/dev-stack.sh up|seed|status|down`):
+  database, migration and API only, containers labeled `com.photonvox.owner=photonvox-dev`, API on 10.10.0.80:8113. Dev PhotonID (the dev
+  Zitadel) as issuer; no directory sync, no worker, no web app; `.env` made there (secrets never printed). Nothing global pruned.
+- Seeded (`api/scripts/dev_entry_seed.py`): organization e0e0e0e0-…-a1 "PhotonEntry test (dev)", two doors (150 → Front desk, 151 → a
+  group) on the staging engine (CT 610) in domain `entry.vox.test`, published with 4 of 4 checks; the instance's `sip_access` names the
+  outbound proxy 10.10.0.60:5060 (the test domain does not resolve). A token went to a1 directly; the seed output is in
+  `~/keys/photonvox-dev-entry-seed.json` (mode 600).
+- Found: staging's adapter could not read `v_xml_cdr`; it now reads six columns of it (ENGINE.md), and door-calls logs why when the engine
+  does not answer. Checked: door-stations and a real door call's door-calls (answered by 100, "#" pressed), both valid against PhotonEntry's
+  schemas; 401 without a token.
