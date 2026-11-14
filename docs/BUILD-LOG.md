@@ -512,3 +512,23 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   PhotonConsole's docs). The push itself is the operator's (this session's permissions do not allow it).
 - **Connor:** HUEPC's 911 addresses for …4424 and …2300 are confirmed on file with HTC; extension 701 (the elevator) is as intended ("dials the
   number it needs"): the importer's one "decide" item is closed. Both in §17a.
+- **The protections version, rehearsed on staging's copy of HUEPC (export 2) and prepared for Connor (`~/vox-takeover/protections.sh`, not
+  run).** The first rehearsal failed one check (the premium route: nothing found): the hand-built `Block-premium-and-Caribbean` still ran
+  ahead of PhotonVox's block, because the retire list never arrived. `scripts/remote-test.sh` wrote the staging settings unquoted and the
+  test container sourced them, so `a|b|c` became a shell pipe (a password with `$` or a space would have broken the same way); each value is
+  now shell-quoted. Then: **published with 7 of 7 checks** (four inbound numbers, the premium block, 911 and 933 read, never called), drift
+  empty, the five retired routes switched off and kept. **46 calls** (`engine/staging/protect-calls.sh`): the takeover's 22 again, then
+  national numbers dialed as +1, 1 or ten digits reached the carrier as ten digits, toll-free, 988 and 711 went out, 1900/900 premium and
+  1876/809 Caribbean refused with nothing sent to the carrier. (The takeover script leaves LXC 800 in FreeSWITCH's loaded providers ACL; the
+  new script resets it first, or the phones' calls land in the public context.) **The undo** (`app.manage republish <org> 1`, new): all 559
+  rows of the domain equal the takeover's (FusionPBX's bookkeeping columns aside), and the takeover's 22 calls pass.
+- For the live engine: vox-agent gains `VOX_AGENT_OPERATIONS` (CT 600: status, cache/delete and check only; seeding a domain, rescans, ACL
+  reloads and greetings answer "no such operation") and a systemd drop-in that lets it write only FusionPBX's cache; `app.manage set-agent`
+  keeps an agent's secret only after a signed status call succeeds (`set-agent … off` removes it). `test_calls.sh` never dials 988 or an N11
+  code, its carrier loop carries the calling extension's toll_allow (PhotonVox's routes check it; tried on the protected copy), and it reads
+  each extension's classes and 911 number. Retiring the two specific HTC routes changes no call (same carrier, same ten digits; one only
+  matches caller 400, which no extension has). The emergency caller ID stays what Emergency-911 sends today (…4424; 701 …2300).
+- `protections.sh` (for Connor's go, part by part): P deploy main (home briefs, migration 0008; backup first; two `.env` values), A vox-agent
+  on CT 600 port 8781 (the mgmtnet grant gains tcp/8781: the mgmtnet repo's change, for Connor), B ten-digit format and readopt, C the 911
+  address (Connor), D the dry run (read), E dump and fingerprints, F protect-apply and publish, G drift, fingerprints, test calls. Rollback
+  written first: U0 `republish 1` (rehearsed), R1 the domain's rows from E's dump, R2 the vzdump with Connor; the agent's removal.
