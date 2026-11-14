@@ -503,3 +503,12 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   NAS). Hand edits are found by the drift check (on PhotonVox's rows and the 72 hand-built ones) and nothing locks Hickory Church out of
   FusionPBX's screens; putting a hand edit back needs vox-agent on CT 600 (a later step: until then such a publish is refused before it commits).
   Next, with Connor: extension 701's caller ID, the protections version, vox-agent on CT 600 (port 8781).
+
+## 2026-11-14: after the takeover
+
+- **Connor:** the GitHub repository ConnorEhrgood/photonvox exists (origin). Before the first push the history was checked: no `.env`, dump,
+  export, inventory report or `~/vox-takeover` data was ever tracked; no private key; none of the real passwords or secrets appears in any
+  commit; no HUEPC phone number. The HUEPC domain name appears only in ARCHITECTURE (a design fact since the first revision; also in
+  PhotonConsole's docs). The push itself is the operator's (this session's permissions do not allow it).
+- **Connor:** HUEPC's 911 addresses for …4424 and …2300 are confirmed on file with HTC; extension 701 (the elevator) is as intended ("dials the
+  number it needs"): the importer's one "decide" item is closed. Both in §17a.
