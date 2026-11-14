@@ -5,10 +5,15 @@
 #   test_calls.sh loop     <domain> <from extension> <10-digit number> <caller ID number>
 #        a call out through the domain's own outbound route to one of its own numbers, which the carrier sends back in: both legs are shown
 # Each call is placed with `originate` over a loopback channel (as if the extension dialed it), watched for a few seconds, then hung up.
-# NEVER 911, 933, 9911 or anything that could reach an emergency service: refused below, whatever is asked.
+# NEVER 911, 933, 9911 or anything that could reach an emergency service: refused below, whatever is asked; nor 988 or an N11 service code
+# (311, 411, 511, 611, 711, 811): a real person or line answers those.
 set -euo pipefail
 fs() { fs_cli -x "$1"; }
-refuse() { case "$1" in *911*|*933*|1911|9911) echo "refused: $1 is never dialed in a test" >&2; exit 2;; esac; }
+refuse() {
+  case "$1" in *911*|*933*|1911|9911) echo "refused: $1 is never dialed in a test" >&2; exit 2;; esac
+  [[ "$1" =~ ^[+]?[19]?(988|[2-8]11)$ ]] && { echo "refused: $1 is a service number, never dialed in a test" >&2; exit 2; }
+  return 0
+}
 legs() {   # the channels now: name, state, application, destination (one per line)
   fs "show channels as delim |" | awk -F'|' 'NR==1 { for (i = 1; i <= NF; i++) h[$i] = i; next } NF > 5 && $1 != "" {
     print "   " $h["name"] " | " $h["callstate"] " | " $h["application"] " " $h["application_data"] " | dest " $h["dest"] }' \
@@ -36,14 +41,18 @@ case "${1:-}" in
     D=$2 FROM=$3 NUM=$4 CID=$5; refuse "$NUM"
     [[ "$NUM" =~ ^[2-9][0-9]{2}[2-9][0-9]{6}$ ]] || { echo "refused: $NUM is not a 10-digit North American number" >&2; exit 2; }
     U=$(cat /proc/sys/kernel/random/uuid)
-    echo "== $FROM calls …${NUM: -4} out through the carrier, and it comes back in"
-    place "$U" "origination_caller_id_number=$FROM,origination_caller_id_name='PhotonVox test',outbound_caller_id_number=$CID,outbound_caller_id_name='PhotonVox test'" "loopback/$NUM/$D"
+    # The calling extension's own toll_allow, as its phone would carry it (PhotonVox's routes check it; a hand-built route may not). Commas escaped.
+    TA=$( ( cd / && runuser -u postgres -- psql -d fusionpbx -tAX -c "select coalesce(toll_allow, '') from v_extensions e join v_domains d using (domain_uuid) where d.domain_name = '$D' and extension = '$FROM'" ) )
+    echo "== $FROM calls …${NUM: -4} out through the carrier, and it comes back in (toll_allow: ${TA:-none})"
+    place "$U" "origination_caller_id_number=$FROM,origination_caller_id_name='PhotonVox test',outbound_caller_id_number=$CID,outbound_caller_id_name='PhotonVox test'${TA:+,toll_allow=${TA//,/\\,}}" "loopback/$NUM/$D"
     sleep 8; legs | sed -E "s/$NUM/…${NUM: -4}/g; s/$CID/…${CID: -4}/g"; finish "$U" ;;
   state)      # read-only: registrations of the domain, channels, PhotonConsole's status shim
     echo "   registrations of the domain: $(fs 'show registrations' | grep -c "$2" || true); channels: $before; shim: $(systemctl is-active photon-fpbx-shim 2>/dev/null || true)" ;;
   records)    # read-only: the domain's call records of the last 10 minutes (numbers shortened to their last four digits)
     ( cd / && runuser -u postgres -- psql -d fusionpbx -tA -F ' | ' -c "select start_stamp::time(0), direction, right(coalesce(caller_id_number, ''), 4), right(coalesce(destination_number, ''), 4), hangup_cause from v_xml_cdr where domain_name = '$2' and start_stamp > now() - interval '10 minutes' order by start_stamp" ) | sed 's/^/   /' ;;
+  extensions) # read-only: each extension, what it may dial (toll_allow), and the last four digits of the numbers it sends out and to 911
+    ( cd / && runuser -u postgres -- psql -d fusionpbx -tA -F ' | ' -c "select extension, coalesce(toll_allow, '(any)'), right(coalesce(outbound_caller_id_number, ''), 4), right(coalesce(emergency_caller_id_number, ''), 4) from v_extensions e join v_domains d using (domain_uuid) where d.domain_name = '$2' order by extension" ) | sed 's/^/   /' ;;
   route911)   # read-only: the domain's dial plans that mention 911 (never called), with a fingerprint of each
     ( cd / && runuser -u postgres -- psql -d fusionpbx -tA -F ' | ' -c "select dialplan_name, dialplan_order, dialplan_enabled, md5(dialplan_xml) from v_dialplans p join v_domains d using (domain_uuid) where d.domain_name = '$2' and dialplan_xml ~ '911' order by dialplan_order" ) | sed 's/^/   /' ;;
-  *) echo "usage: test_calls.sh internal <domain> <from> <to> | menu <domain> <menu> | loop <domain> <from> <10-digit number> <caller ID> | state|records|route911 <domain>" >&2; exit 2 ;;
+  *) echo "usage: test_calls.sh internal <domain> <from> <to> | menu <domain> <menu> | loop <domain> <from> <10-digit number> <caller ID> | state|records|extensions|route911 <domain>" >&2; exit 2 ;;
 esac
