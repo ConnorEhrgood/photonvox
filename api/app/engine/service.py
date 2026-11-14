@@ -186,7 +186,8 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
         _write(db, ps, instance, plan, eng, agent)
         db.commit()
         # An adopted domain has none of PhotonVox's check gates (decision 32): its first publish is proven by the compare and by test calls.
-        results = [] if plan.get("adopted") else run_checks(agent, plan, target(ps, instance, get_speech() is not None))
+        t = target(ps, instance, get_speech() is not None)
+        results = [] if plan.get("adopted") and not plan.get("protected") else run_checks(agent, plan, t) + fusionpbx.emergency_read(plan, t)
     except Exception as e:  # noqa: BLE001 - the engine refused or failed: record it, put the previous version back
         db.rollback()
         # The details (SQL, addresses) go to the log for Photon staff; integrators read a sentence (security review L4).

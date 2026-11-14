@@ -2,7 +2,8 @@
 # Staging never reaches a carrier (Connor, 2026-11-13; BUILD-GUIDE Step 0.6). Run from the runner; read-only apart from two test packets that
 # the staging guard drops on the way out. Fails if:
 #   - Connor's guard (nftables table inet vox_guard) is missing a rule;
-#   - FusionPBX or FreeSWITCH has any gateway other than the SIPp upstream on LXC 800 (named sipp-upstream, proxy 10.10.0.80);
+#   - FusionPBX or FreeSWITCH has any gateway that does not point at LXC 800 (10.10.0.80, where only SIPp answers: the upstream stand-in, also
+#     for the takeover rehearsal's copy, whose gateway keeps the live one's id);
 #   - a SIP INVITE from FreeSWITCH to a public address, or a packet to the HTC trunk's network, is not dropped by the guard.
 set -euo pipefail
 STAGING="${STAGING:-root@10.10.0.60}"
@@ -17,14 +18,15 @@ for c in "HTC trunk: never from staging" "no SIP to public addresses" "no SIP ov
   grep -qF "\"$c\"" <<<"$guard" && ok "guard rule: $c" || bad "guard rule missing: $c"
 done
 
-# Gateways, in FusionPBX's table and in FreeSWITCH itself (which names them by FusionPBX's gateway uuid). The only one allowed is the SIPp upstream.
+# Gateways, in FusionPBX's table and in FreeSWITCH itself (which names them by FusionPBX's gateway uuid). Only ones pointing at the SIPp stand-in on
+# LXC 800 are allowed, whatever their name: where a gateway sends calls is what keeps staging away from every carrier.
 db="$(on "sudo -u postgres psql -d fusionpbx -qtAX -F'|' -c \"select gateway_uuid, gateway, proxy from v_gateways\"")"
-allowed="$(awk -F'|' '$2 == "sipp-upstream" && $3 ~ /^10\.10\.0\.80(:[0-9]+)?$/ { print $1 }' <<<"$db")"
-others="$(awk -F'|' 'NF && !($2 == "sipp-upstream" && $3 ~ /^10\.10\.0\.80(:[0-9]+)?$/) { print $2 }' <<<"$db")"
-[ -z "$others" ] && ok "FusionPBX gateways: $(grep -c . <<<"$db" || true) (only the SIPp upstream allowed)" || bad "FusionPBX has a gateway other than the SIPp upstream: $(paste -sd, - <<<"$others")"
+allowed="$(awk -F'|' '$3 ~ /^10\.10\.0\.80(:[0-9]+)?$/ { print $1 }' <<<"$db")"
+others="$(awk -F'|' 'NF && $3 !~ /^10\.10\.0\.80(:[0-9]+)?$/ { print $2 " (" $3 ")" }' <<<"$db")"
+[ -z "$others" ] && ok "FusionPBX gateways: $(grep -c . <<<"$db" || true), all to the SIPp stand-in on LXC 800" || bad "FusionPBX has a gateway other than the SIPp upstream: $(paste -sd, - <<<"$others")"
 fsgw="$(on "fs_cli -x 'sofia status gateway'" | awk 'NF >= 2 && $1 ~ /::/ && $1 != "Profile::Gateway-Name" { sub(/^[^:]*::/, "", $1); print $1 }' \
         | grep -vxF -f <(printf '%s\n' $allowed none-allowed) || true)"
-[ -z "$fsgw" ] && ok "FreeSWITCH gateways: none but the SIPp upstream" || bad "FreeSWITCH has gateways that are not the SIPp upstream: $(paste -sd, - <<<"$fsgw")"
+[ -z "$fsgw" ] && ok "FreeSWITCH gateways: none but those to the SIPp stand-in" || bad "FreeSWITCH has gateways that are not the SIPp upstream: $(paste -sd, - <<<"$fsgw")"
 
 # The blocked INVITE. 198.51.100.10 is a documentation address (RFC 5737): public as far as the guard is concerned, routed nowhere.
 count() { on "nft list table inet vox_guard" | grep -F "\"$1\"" | grep -oE 'packets [0-9]+' | awk '{print $2}'; }

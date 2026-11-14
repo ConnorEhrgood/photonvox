@@ -64,9 +64,8 @@ class FakeAgent:
                     xml = self._xml(c, domain_uuid, "photonvox.hours." + first[len("hours-"):])
                     first = re.findall(r'transfer" data="(\S+) XML', xml)[-1]       # closed, as at night
                 return f"reached {first}"
-            if number.endswith(("911", "933")):
-                gws = re.search(r"gateways=([^\s\"]+)", self._xml(c, domain_uuid, "photonvox.emergency")).group(1)
-                return f"emergency {gws} {number[-3:]}"
+            # The operator's rule (2026-11-14): no test ever calls 911, 933 or 9911, not even a synthetic call (the route is read instead).
+            assert "911" not in number and "933" not in number, f"a call to {number} was placed"
             return "blocked premium" if "photonvox_blocked=premium" in self._xml(c, domain_uuid, "photonvox.block") else None
 
 
@@ -188,7 +187,7 @@ def test_publish_writes_checks_and_records_it(client, world, built, connect, age
     ps = ps_row(world)
     assert ps.status == "ready" and ps.published_version == 1
     v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
-    assert v["state"] == "ready" and v["checks"]["passed"] == v["checks"]["total"] == 4 and v["checks"]["failed"] == []   # 1 number, 911, 933, premium
+    assert v["state"] == "ready" and v["checks"]["passed"] == v["checks"]["total"] == 4 and v["checks"]["failed"] == []   # 1 number, premium; 911 and 933 read
     assert agent.calls[0] == "seed"
     with SystemSession() as s:
         objs = s.execute(select(EngineObject).where(EngineObject.phone_system_id == ps.id)).scalars().all()
@@ -206,11 +205,11 @@ def test_a_failed_check_puts_the_previous_version_back(client, world, built, con
     d["users"]["u-ben-office"]["name"] = "Ben Renamed"
     client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": d})
     client.post(f"{built}/phone-system/publish", headers=auth("tech"))
-    agent.answers["911"] = "national htc"            # 911 would leave by the wrong route
+    agent.answers["19005550100"] = "national htc"    # a premium number would leave instead of being blocked
     run(connect)
     v2, v1 = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()
     assert v2["state"] == "failed" and "1 of 4 checks failed" in v2["error"] and "version 1 restored" in v2["error"]
-    assert v2["checks"]["failed"] == [{"kind": "route", "number": "911", "expected": [v2["checks"]["failed"][0]["expected"][0]], "got": "national htc"}]
+    assert v2["checks"]["failed"] == [{"kind": "route", "number": "19005550100", "expected": ["blocked premium"], "got": "national htc"}]
     assert v1["state"] == "ready"
     ps = ps_row(world)
     assert ps.status == "failed" and ps.published_version == 1
@@ -406,7 +405,7 @@ def test_an_instance_must_route_through_its_own_upstreams(client, world):
 
 def test_if_putting_the_previous_version_back_fails_too_it_says_so(client, world, built, connect, agent):
     client.post(f"{built}/phone-system/publish", headers=auth("tech"))
-    agent.answers["911"] = None
+    agent.answers["19005550100"] = None
     agent.fail_cache_after = 1                        # the publish clears the cache; the restore's clear fails
     run(connect)
     v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
@@ -645,10 +644,10 @@ def test_a_failed_publish_says_so_without_the_engines_details_and_test_calls_hid
     assert v["error"].startswith("publish failed: the engine did not take the change") and "unreachable" not in v["error"]
     agent.fail_seed = False
     client.post(f"{built}/phone-system/publish", headers=auth("tech"))
-    agent.answers["911"] = "national 0b5e8c1a-0000-4000-8000-0000000000a1 911"
+    agent.answers["+17245550100"] = "reached 0b5e8c1a-0000-4000-8000-0000000000a1"
     run(connect)
     failed = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["checks"]["failed"][0]
-    assert failed["got"] == "national … 911" and all("…" in x for x in failed["expected"])
+    assert failed["got"] == "reached …" 
 
 
 def test_a_number_assigned_to_a_new_organization_takes_its_911_registration_with_it(client, world, built, connect):

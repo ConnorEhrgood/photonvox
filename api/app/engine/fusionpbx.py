@@ -115,8 +115,9 @@ def build(plan: Mapping[str, Any], target: Target) -> Build:
 
 def checks(plan: Mapping[str, Any], target: Target) -> List[Dict[str, Any]]:
     """The post-publish check (ARCHITECTURE §5): one synthetic call per inbound number (it must reach its outcome; a time condition either of
-    its two) and through the emergency route's selection for 911 and 933 (and with each outside-line prefix), plus one premium number, which
-    the block route must refuse. Each lists what the call may find, in the agent's words (app/engine/agent.py); anything else fails."""
+    its two), plus one premium number, which the block route must refuse. Each lists what the call may find, in the agent's words
+    (app/engine/agent.py); anything else fails. **No call is ever placed to 911, 933 or 9911, not even a synthetic one** (operator's rule,
+    2026-11-14): the emergency route is verified by reading what was built (`emergency_read`)."""
     b = _Builder(plan, target)
     hours = {tc["key"]: tc for tc in plan["time_conditions"]}
     out: List[Dict[str, Any]] = []
@@ -125,15 +126,29 @@ def checks(plan: Mapping[str, Any], target: Target) -> List[Dict[str, Any]]:
         dests = [hours[key]["open"], hours[key]["closed"]] if kind == "time_condition" else [n["to"]]
         expect = sorted({"reached " + b.transfer(d)[1].split(" ")[0] for d in dests})      # a number's outcomes are never "hang up"
         out.append({"kind": "inbound", "number": n["number"], "expect": expect})
-    emergency = next(r for r in plan["outbound_routes"] if r["key"] == "emergency")
-    gws = ",".join(target.gateways[g] for g in emergency["gateways"])
-    prefixes = [""] + list(plan["outside_prefixes"])
-    for p in prefixes:
-        for code in ("911", "933"):
-            out.append({"kind": "route", "number": p + code, "expect": [f"emergency {gws} {code}"]})    # the route, its gateways, the number sent
     block = next(r for r in plan["outbound_routes"] if r["key"] == "block")
     if any(c["category"] == "premium" for c in block["categories"]):
         out.append({"kind": "route", "number": "19005550100", "expect": ["blocked premium"]})
+    return out
+
+
+def emergency_read(plan: Mapping[str, Any], target: Target) -> List[Dict[str, Any]]:
+    """The emergency route, verified by reading the plan as built, never by calling: 911 and 933, with and without each outside-line prefix,
+    are matched first by the emergency route (it is ordered before every other route), which sends the number dialed through the instance's
+    911 upstream; and no blocked category matches them. One result per number, in the checks' shape (kind "emergency, read")."""
+    routes = plan["outbound_routes"]
+    emergency = next(r for r in routes if r["key"] == "emergency")
+    gws = [target.gateways.get(g) for g in emergency["gateways"]]
+    first = min(routes, key=lambda r: ORDER.get(r["key"], ORDER["international"]))
+    blocked = [c["pattern"] for r in routes if r.get("reject") for c in r["categories"]]
+    out: List[Dict[str, Any]] = []
+    for p in [""] + list(plan["outside_prefixes"]):
+        for code in ("911", "933"):
+            m = re.search(emergency["pattern"], p + code)
+            ok = (first is emergency and m is not None and m.group(1) == code and all(gws) and gws == [target.gateways.get(plan_gw) for plan_gw in emergency["gateways"]]
+                  and not any(re.search(b, p + code) for b in blocked))
+            out.append({"kind": "emergency, read", "number": p + code, "expect": [f"emergency {','.join(map(str, gws))} {code}"],
+                        "got": f"emergency {','.join(map(str, gws))} {m.group(1)}" if m else None, "ok": ok})
     return out
 
 

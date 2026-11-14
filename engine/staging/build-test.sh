@@ -4,7 +4,8 @@
 #    people, two sites, four numbers, a ring group per site), publish it to the staging engine through vox-agent with the post-publish check,
 #    then find a hand edit and put it back (api/tests/api/test_staging_build.py).
 # 2. SIPp proves the result with calls: each number by its schedule, the menu's key, both groups, a direct line; calls out showing each site's
-#    number or a user's direct line; 911 from each site with that site's number; international and premium refused, toll-free allowed.
+#    number or a user's direct line; international and premium refused, toll-free allowed. 911 is never dialed (the operator's rule,
+#    2026-11-14): each site's emergency route is read instead.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 DOMAIN=build.vox.test
@@ -40,8 +41,8 @@ for c in "100:+12125550400:the main office's number" "120:+12125550401:the annex
 done
 for c in "100:+12125550400:main office" "120:+12125550401:annex"; do
   IFS=: read -r ext shown site <<<"$c"
-  fresh; check "$ext dials 911" "$(out o-911-$ext $ext 911)" 0
-  check "  911 with the $site's emergency number" "$($SIPP log up | grep -c "sip:$shown@")/$($SIPP log up | grep -c '^INVITE sip:911@')" 1/1
+  check "  $ext's 911 caller ID is the $site's emergency number (read, never dialed)" \
+    "$(q "select emergency_caller_id_number from v_extensions where extension = '$ext' and user_context = '$DOMAIN'")" "$shown"
 done
 fresh; check "100 calls toll-free" "$(out o-tf 100 8005550100)" 0
 check "  dialing +1 800" "$($SIPP log up | grep -c '^INVITE sip:+18005550100@')" 1

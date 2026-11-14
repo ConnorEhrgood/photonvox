@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Step 3: PhotonVox's adapter publishes the staging test phone system (engine/staging/system.py) and SIPp proves it with calls from LXC 800.
 #   engine/staging/prove-publish.sh
-# Publishes the full system, calls out (classes, prefixes, 911 and 933 with the emergency caller ID, the block route) and in (every number, in
+# Publishes the full system, calls out (classes, prefixes, the block route; 911 and 933 read, never dialed) and in (every number, in
 # each form a carrier may send it), runs the post-publish check (and breaks a number to see it fail), finds hand edits, checks features and
 # scoping, republishes unchanged (nothing new, secrets kept), then publishes the reduced system (what left is gone). Staging only; the SIPp containers are removed at the end.
 set -uo pipefail
@@ -31,11 +31,10 @@ check "  through the upstream, showing 301's direct number" "$(invites up)/$($SI
 check "  dialing +1 and the ten digits" "$($SIPP log up | grep -c '^INVITE sip:+12125550123@')" 1
 fresh; check "301 dials 9 for an outside line, then the number" "$(out o2 301 92125550123)" 0
 check "  sent as +1 and ten digits" "$($SIPP log up | grep -c '^INVITE sip:+12125550123@')" 1
-for n in 911 9911 933; do
-  fresh; check "301 dials $n" "$(out o-$n 301 $n)" 0
-  check "  it reaches the upstream with the site's emergency number" "$($SIPP log up | grep -c 'sip:+12125550300@')" 1
-  check "  dialing ${n: -3} itself" "$($SIPP log up | grep -c "^INVITE sip:${n: -3}@")" 1
-done
+# 911, 933 and 9911 are never dialed in any test (the operator's rule, 2026-11-14): the emergency route is read instead, as built on the engine.
+EM=$(q "select dialplan_xml from v_dialplans where dialplan_name = 'photonvox.emergency' and domain_uuid = (select domain_uuid from v_domains where domain_name = '$DOMAIN')")
+check "the emergency route, read: 911 and 933, with or without 9, first (order 100), to the emergency upstream, showing the emergency caller ID" \
+  "$(grep -c 'expression="^(?:9)?(911|933)$"' <<<"$EM")$(grep -c 'effective_caller_id_number=${emergency_caller_id_number}' <<<"$EM")$(grep -c 'sofia/gateway/' <<<"$EM")" 111
 fresh; check "301 dials 988 (always allowed)" "$(out o-988 301 988)" 0
 check "  dialing 988" "$($SIPP log up | grep -c '^INVITE sip:988@')" 1
 for n in 9005550100:premium 7249765100:premium 8765560100:high_cost_nanp 2125559990:listed 01133123456789:international 011881234567:satellite; do
@@ -73,7 +72,7 @@ check "  it arrives by email at 304's address, with the recording attached" \
 
 # ---- the post-publish check (synthetic calls: nothing rings, nothing leaves the engine) ----
 checks() { publish engine/staging/.state/adapter.json --check --only --speech | python3 -c 'import json,sys; c=json.load(sys.stdin)["check"]; print(sum(x["ok"] for x in c), len(c), ",".join(x["number"] for x in c if not x["ok"]))'; }
-check "the post-publish check: every number, 911 and 933 with and without 9, a premium number" "$(checks)" "11 11 "
+check "the post-publish check: every number, a premium number; 911 and 933 with and without 9 read" "$(checks)" "11 11 "
 q "delete from v_destinations where destination_number = '2125550305' and domain_uuid = (select domain_uuid from v_domains where domain_name = '$DOMAIN')" > /dev/null
 S "rm -f /var/cache/fusionpbx/dialplan.public.*2125550305"
 check "  a number broken by hand: its check fails, the others pass" "$(checks)" "10 11 +12125550305"

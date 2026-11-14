@@ -258,14 +258,34 @@ def test_detail_rows_mirror_the_gate_in_its_own_group():
     assert [r["dialplan_detail_type"] for r in rows if r["dialplan_detail_group"] == 1][0] == "${photonvox_synthetic}"
 
 
-def test_the_checks_cover_every_number_911_and_933_with_each_prefix_and_a_premium_number():
+def test_the_checks_cover_every_number_and_a_premium_number_and_never_call_911_or_933():
     checks = fusionpbx.checks(plan(), TARGET)
     inbound = {c["number"]: c["expect"] for c in checks if c["kind"] == "inbound"}
     assert inbound == {"+17245550100": ["reached *999901", "reached menu-main"], "+17245550110": ["reached group-annex"],
                        "+17245550123": ["reached 102"]}
     routes = {c["number"]: c["expect"] for c in checks if c["kind"] == "route"}
-    assert set(routes) == {"911", "933", "9911", "9933", "19005550100"}
-    assert routes["9911"] == [f"emergency {GW['htc']} 911"] and routes["19005550100"] == ["blocked premium"]
+    assert routes == {"19005550100": ["blocked premium"]}
+    assert not any("911" in c["number"] or "933" in c["number"] for c in checks)
+
+
+def test_the_emergency_route_is_verified_by_reading_it():
+    read = fusionpbx.emergency_read(plan(), TARGET)
+    assert [(r["number"], r["ok"]) for r in read] == [("911", True), ("933", True), ("9911", True), ("9933", True)]
+    assert read[2]["got"] == f"emergency {GW['htc']} 911" and read[2]["expect"] == [f"emergency {GW['htc']} 911"]
+
+
+def test_an_emergency_route_that_would_not_take_911_first_fails_the_read():
+    p = copy.deepcopy(plan())
+    em = next(r for r in p["outbound_routes"] if r["key"] == "emergency")
+    em["pattern"] = "^(912)$"                                  # no longer matches 911
+    assert [r["ok"] for r in fusionpbx.emergency_read(p, TARGET)] == [False] * 4
+    p = copy.deepcopy(plan())
+    blk = next(r for r in p["outbound_routes"] if r.get("reject"))
+    blk["categories"].append({"category": "oops", "pattern": "^9?911$"})       # a blocked category that would also match 911
+    assert [r["ok"] for r in fusionpbx.emergency_read(p, TARGET)][0] is False
+    p = copy.deepcopy(plan())
+    t = fusionpbx.Target(TARGET.phone_system_id, TARGET.domain_uuid, {}, False)  # 911's upstream not on this instance
+    assert not any(r["ok"] for r in fusionpbx.emergency_read(p, t))
 
 
 def test_with_premium_let_through_by_staff_the_check_does_not_expect_a_block():
