@@ -46,6 +46,14 @@ host's `.env`; then the steps below, in order.
   `is_platform_admin` true (from the directory: platform administrator, partner Photon) and owner of that organization, one
   `directory.staff_flags` audit event, cursor 22, no error. Signed out, a deep link still goes straight to PhotonID at 1440 and 390.
 
+- 2026-11-14 about 04:35 UTC, 6ff13a7 (protections for HUEPC, part P, Connor's go): backup first
+  `/opt/photon/backups-manual/pre-vox-protections-20261114T043315Z/` (vox-db.dump 128 KB, read back: 37 tables of data; vox.env), mode 600.
+  `.env` gained `OIDC_WEB_CLIENT_ID` (copied on the host from `VITE_OIDC_CLIENT_ID`) and `VITE_DIRECTORY_AUDIENCE_PROJECT`. `migrate` ran
+  0007 → 0009; api, worker and web healthy (about 20 s of 503 while the API's container became healthy, as before); Board, the directory,
+  Console and PhotonID 200. Staff count unchanged (1); HUEPC ready, version 1, adopted, drift 0; `/v1/summary` and the door-stations feed
+  401 without a token; signed out, a deep link goes straight to PhotonID at 1440 and 390. id1 told the summary is live.
+  (`signin-prod-check.mjs` takes a screenshot folder and runs from `web/`.)
+
 **Open:**
 - **Connor's first real sign-in:** PhotonVox now has his account and flags (PhotonVox switched on for PhotonConsole's organization,
   2026-11-13), but nobody has signed in yet.
