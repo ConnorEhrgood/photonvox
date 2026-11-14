@@ -18,7 +18,9 @@ passed to FreeSWITCH or to programs as arguments.
 
 Configuration (environment, from /etc/vox-agent.env): VOX_AGENT_SECRET (required, 32+ characters), VOX_AGENT_BIND (default 127.0.0.1:8780),
 and optionally VOX_AGENT_ESL (host:port), VOX_AGENT_ESL_PASSWORD (default: read from FreeSWITCH's event_socket.conf.xml), VOX_AGENT_CACHE,
-VOX_AGENT_LOG, VOX_AGENT_FUSIONPBX, VOX_AGENT_PHP.
+VOX_AGENT_LOG, VOX_AGENT_FUSIONPBX, VOX_AGENT_PHP, and VOX_AGENT_OPERATIONS: the operations this engine allows, comma-separated (default all).
+An engine PhotonVox only adopted (decision 32) allows "status,cache/delete,check": it never seeds a domain, rescans profiles, reloads the ACL or
+takes a greeting; anything else is refused as if it did not exist.
 """
 from __future__ import annotations
 
@@ -73,6 +75,12 @@ class Config:
         self.fusionpbx = e.get("VOX_AGENT_FUSIONPBX", "/var/www/fusionpbx")
         self.php = e.get("VOX_AGENT_PHP", "/usr/bin/php")
         self.recordings = e.get("VOX_AGENT_RECORDINGS", "/var/lib/freeswitch/recordings")
+        names = {path[len("/v1/"):]: key for key in ROUTES for _m, path in [key]}
+        wanted = [w.strip() for w in e.get("VOX_AGENT_OPERATIONS", ",".join(names)).split(",") if w.strip()]
+        unknown = [w for w in wanted if w not in names]
+        if unknown or not wanted:
+            raise SystemExit(f"VOX_AGENT_OPERATIONS: unknown operation {', '.join(unknown) or '(none listed)'}; known: {', '.join(sorted(names))}")
+        self.operations = frozenset(names[w] for w in wanted)
 
 
 def esl_password(path: str) -> str:
@@ -313,7 +321,7 @@ def make_handler(cfg: Config, replay: Replay):
             body = self.rfile.read(length) if length else b""
             if not verify(cfg.secret, self.headers.get("X-PhotonVox-Signature", ""), self.command, self.path, body, replay):
                 return self._send(401, {"error": "bad signature"})
-            op = ROUTES.get((self.command, self.path))
+            op = ROUTES.get((self.command, self.path)) if (self.command, self.path) in cfg.operations else None
             if op is None:
                 return self._send(404, {"error": "no such operation"})
             try:

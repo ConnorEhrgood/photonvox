@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, select, text
 from app.db import SystemSession
 from app.engine import service
 from app.engine.fusionpbx import KEYS
-from app.models import CarrierRequest, EmergencyNumber, EngineObject, HeldNumber, PhoneSystem, PhoneSystemVersion
+from app.models import CarrierRequest, EmergencyNumber, EngineObject, HeldNumber, PbxInstance, PhoneSystem, PhoneSystemVersion
 from app.routes import platform
 from tests import takeover_fixture as F
 from tests.api.conftest import auth
@@ -240,6 +240,45 @@ def test_the_operator_commands_do_the_takeover_without_a_browser(client, world, 
         actions = [a.action for a in s.execute(select(AuditLog).where(AuditLog.actor_label == manage.OPERATOR)).scalars()]
     assert actions == ["instance.added", "phone_system.adopted", "phone_system.publish_requested", "phone_system.published"] or \
         set(actions) >= {"instance.added", "phone_system.adopted", "phone_system.publish_requested"}
+
+
+def test_the_operator_registers_an_engines_agent_only_once_it_answers(client, world):
+    import io
+    from app import crypto, manage
+    from app.engine.agent import AgentError
+    from app.models import AuditLog
+    seen = []
+
+    class Agent:
+        def __init__(self, url, secret):
+            seen.append((url, secret))
+
+        def status(self):
+            if seen[-1][1] != "s" * 64:
+                raise AgentError("vox-agent /v1/status: HTTP 401 bad signature")
+            return {"agent": "0.1.0", "freeswitch": "FreeSWITCH 1.10", "registrations": 7}
+
+    def run_(*a, stdin=""):
+        o = io.StringIO()
+        return manage.main(list(a), io.StringIO(stdin), o, agent=Agent), o.getvalue()
+    run_("add-instance", "live-a", "fusionpbx", f"htc={F.GATEWAY}", stdin="postgresql+psycopg://photonvox_rw:x@10.10.0.21/fusionpbx\n")
+    with pytest.raises(SystemExit, match="standard input"):
+        run_("set-agent", "live-a", "http://10.10.0.21:8781", stdin="short\n")
+    with pytest.raises(AgentError, match="401"):
+        run_("set-agent", "live-a", "http://10.10.0.21:8781", stdin="w" * 64 + "\n")
+    with SystemSession() as s:
+        i = s.execute(select(PbxInstance).where(PbxInstance.name == "live-a")).scalar_one()
+        assert i.agent == {"kind": "none"} and i.agent_secret_sealed == ""        # a secret the agent refused is never kept
+    rc, out = run_("set-agent", "live-a", "http://10.10.0.21:8781", stdin="s" * 64 + "\n")
+    assert rc == 0 and json.loads(out) == {"instance": "live-a", "agent": "http://10.10.0.21:8781", "agent_version": "0.1.0",
+                                           "freeswitch": "FreeSWITCH 1.10", "registrations": 7}
+    assert "s" * 32 not in out
+    with SystemSession() as s:
+        i = s.execute(select(PbxInstance).where(PbxInstance.name == "live-a")).scalar_one()
+        assert i.agent == {"kind": "http", "url": "http://10.10.0.21:8781"} and crypto.unseal(i.agent_secret_sealed) == "s" * 64
+        _eng, agent = service.connect(i)
+        assert getattr(agent, "available", True) and type(agent).__name__ == "HttpAgent"
+        assert "instance.agent_set" in [a.action for a in s.execute(select(AuditLog).where(AuditLog.actor_label == manage.OPERATOR)).scalars()]
 
 
 class EngineAgent:

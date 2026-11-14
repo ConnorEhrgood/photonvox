@@ -3,6 +3,7 @@ Platform, as the system, each written to the audit log with the operator's name;
 decision 32), where no browser sign-in is involved. Secrets come on standard input, never on a command line, and are never printed.
 
     add-instance <name> <hostname> <own gateway key>=<gateway id> < database-url    an engine with its own gateways and no vox-agent
+    set-agent <instance name> <agent url> < agent-secret                            its vox-agent, proved by a signed status call first
     adopt <instance name> <organization id> <site id> <domain>                      read, import, prove a no-op, keep (writes nothing to the engine)
     publish <organization id> <note>                                                queue the draft and publish it now (the worker's own code)
     drift <organization id>                                                         compare the engine with what is published
@@ -24,6 +25,7 @@ from sqlalchemy import select
 from app import audit, crypto
 from app.db import SystemSession
 from app.engine import service, takeover
+from app.engine.agent import HttpAgent
 from app.models import PbxInstance, PhoneSystem, PhoneSystemVersion
 
 OPERATOR = "operator (app.manage)"
@@ -36,7 +38,7 @@ def _ps(s, tenant: str) -> PhoneSystem:
     return ps
 
 
-def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Connect = service.connect) -> int:
+def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Connect = service.connect, agent=None) -> int:
     if not argv:
         out.write(__doc__ or "")
         return 2
@@ -56,6 +58,19 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
                          target_id=i.id, name=name)
             s.commit()
             json.dump({"instance": str(i.id), "name": name, "own_gateways": i.own_gateways}, out)
+        elif cmd == "set-agent":
+            name, url = args
+            secret = stdin.readline().strip()
+            if len(secret) < 32 or not url.startswith(("http://", "https://")):
+                raise SystemExit("the agent's URL is http(s)://host:port, and its secret (32+ characters) goes on standard input")
+            i = s.execute(select(PbxInstance).where(PbxInstance.name == name)).scalar_one()
+            st = (agent or HttpAgent)(url, secret).status()        # reached, and the secret is the agent's: before anything is kept
+            i.agent, i.agent_secret_sealed = {"kind": "http", "url": url}, crypto.seal(secret)
+            audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="instance.agent_set", target_type="pbx_instance",
+                         target_id=i.id, url=url, agent_version=st.get("agent"))
+            s.commit()
+            json.dump({"instance": name, "agent": url, "agent_version": st.get("agent"), "freeswitch": st.get("freeswitch"),
+                       "registrations": st.get("registrations")}, out)
         elif cmd == "adopt":
             name, tenant, site, domain = args
             i = s.execute(select(PbxInstance).where(PbxInstance.name == name)).scalar_one()

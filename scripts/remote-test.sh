@@ -18,10 +18,10 @@ trap 'rm -rf "$TMP"' EXIT
 tar --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.coverage' --exclude='.env' -czf "$TMP/vox-test.tgz" api contract docker-compose.test.yml
 # The staging build test's connection details travel in a file only root can read, removed after the run (never on a command line).
 if [ "${VOX_STAGING_E2E:-}" = 1 ]; then
-  (umask 077; { echo "VOX_STAGING_E2E=1"; echo "VOX_STAGING_DB_URL=$VOX_STAGING_DB_URL"; echo "VOX_STAGING_AGENT_URL=${VOX_STAGING_AGENT_URL:-}";
-                echo "VOX_STAGING_AGENT_SECRET=${VOX_STAGING_AGENT_SECRET:-}"; echo "VOX_STAGING_TAKEOVER=${VOX_STAGING_TAKEOVER:-}";
-                echo "VOX_STAGING_DOMAIN=${VOX_STAGING_DOMAIN:-}"; echo "VOX_STAGING_GATEWAY=${VOX_STAGING_GATEWAY:-}"; echo "VOX_STAGING_RW_URL=${VOX_STAGING_RW_URL:-}";
-                echo "VOX_STAGING_PROTECT=${VOX_STAGING_PROTECT:-}"; echo "VOX_STAGING_RETIRE=${VOX_STAGING_RETIRE:-}"; } > "$TMP/staging.env")
+  # Shell-quoted (%q): the file is sourced over there, and a value may hold "|", "$" or spaces (the retire list does).
+  (umask 077; for v in VOX_STAGING_E2E VOX_STAGING_DB_URL VOX_STAGING_AGENT_URL VOX_STAGING_AGENT_SECRET VOX_STAGING_TAKEOVER VOX_STAGING_DOMAIN \
+                       VOX_STAGING_GATEWAY VOX_STAGING_RW_URL VOX_STAGING_PROTECT VOX_STAGING_RETIRE VOX_STAGING_UNDO; do
+     printf '%s=%q\n' "$v" "${!v:-}"; done > "$TMP/staging.env")
 fi
 cat > "$TMP/run.sh" <<RUN
 #!/bin/bash

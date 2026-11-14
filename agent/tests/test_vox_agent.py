@@ -192,6 +192,21 @@ def test_configuration(tmp_path):
     assert cfg.bind == ("127.0.0.1", 8780) and cfg.esl_password == "pw" and cfg.cache == "/var/cache/fusionpbx"
 
 
+def test_an_adopted_engine_allows_only_status_the_cache_and_checks(agent):
+    agent["cfg"].operations = va.Config({"VOX_AGENT_SECRET": SECRET, "VOX_AGENT_ESL_PASSWORD": "pw",
+                                         "VOX_AGENT_OPERATIONS": "status, cache/delete,check"}).operations
+    assert call(agent, "GET", "/v1/status")[0] == 200
+    assert call(agent, "POST", "/v1/cache/delete", {"keys": ["dialplan.x.test"]})[0] == 200
+    for path, body in (("/v1/seed-domain", {}), ("/v1/rescan", {"profiles": ["external"], "kill": []}), ("/v1/reloadacl", {}),
+                       ("/v1/sound", {"domain_name": "x.test", "name": "a.wav", "data": ""})):
+        assert call(agent, "POST", path, body) == (404, {"error": "no such operation"})
+    assert not (agent["tmp"] / "php.ran").exists()
+    for bad in ("status,reboot", " , "):
+        with pytest.raises(SystemExit, match="VOX_AGENT_OPERATIONS"):
+            va.Config({"VOX_AGENT_SECRET": SECRET, "VOX_AGENT_ESL_PASSWORD": "pw", "VOX_AGENT_OPERATIONS": bad})
+    assert len(va.Config({"VOX_AGENT_SECRET": SECRET, "VOX_AGENT_ESL_PASSWORD": "pw"}).operations) == len(va.ROUTES)
+
+
 def test_a_wrong_event_socket_password_is_an_error(agent):
     agent["cfg"].esl_password = "wrong"
     assert call(agent, "POST", "/v1/reloadacl", {}) == (500, {"error": "ConnectionError"})

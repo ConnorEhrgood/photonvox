@@ -53,6 +53,7 @@ services:
       VOX_STAGING_RW_URL: ${VOX_STAGING_RW_URL:-}
       VOX_STAGING_PROTECT: ${VOX_STAGING_PROTECT:-}
       VOX_STAGING_RETIRE: ${VOX_STAGING_RETIRE:-}
+      VOX_STAGING_UNDO: ${VOX_STAGING_UNDO:-}
     volumes:
       - ./api:/app
       - ./contract:/contract:ro      # the phone-system schema and samples the unit tests read
