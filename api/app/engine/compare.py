@@ -135,3 +135,78 @@ def as_rows(b: Build) -> Dict[str, Dict[str, Any]]:
 
 def summary(diff: List[Dict[str, Any]]) -> Tuple[int, int]:
     return sum(1 for d in diff if d["kind"] == "new row"), sum(1 for d in diff if d["kind"] == "changed")
+
+
+# ---- calls out, evaluated by reading the dial plans (never by calling) -----------------------------------------------------------------------
+
+PROBES = ("2125550123", "12125550123", "+12125550123", "8005550100", "18005550100", "9005550100", "7249765100", "8765550100", "2425550100",
+          "8095550100", "3405550100", "7875550100", "411", "611", "711", "988", "311", "011442079460000", "911", "933", "9911")
+
+
+def _cond_value(field: str, number: str, caller: str, toll_allow: str) -> str:
+    return {"destination_number": number, "caller_id_number": caller, "${user_exists}": "false", "${call_direction}": "",
+            "${toll_allow}": toll_allow, "${photonvox_synthetic}": "", "${loopback_leg}": ""}.get(field, "")
+
+
+def _evaluate(xml: str, number: str, caller: str, toll_allow: str) -> Optional[str]:
+    """What one FusionPBX dial plan (extension XML) does with a call out, or None when it does not take it: conditions in order, a failing one
+    ends the extension unless break="never"; break="on-true" ends it at the first that holds (the block route's categories)."""
+    import xml.etree.ElementTree as ET
+    try:
+        ext = ET.fromstring(xml)
+    except ET.ParseError:
+        return None
+    if ext.get("continue") == "true":
+        return None                                 # sets variables and lets the call go on (call_direction)
+    done: List[str] = []
+    variables: Dict[str, str] = {}
+    for cond in ext.findall("condition"):
+        field, expr, brk = cond.get("field"), cond.get("expression"), cond.get("break", "on-false")
+        m = None
+        if field is None and expr is None:
+            ok = True
+        else:
+            try:
+                m = re.search(expr or "", _cond_value(field or "", number, caller, toll_allow))
+            except re.error:
+                m = None
+            ok = m is not None
+        if ok:
+            for a in cond.findall("action"):
+                # As FreeSWITCH does: $1… are this condition's captures; ${name} a variable an earlier action set.
+                data = re.sub(r"\$(\d)", lambda g: (m.group(int(g.group(1))) or "") if m and int(g.group(1)) <= (m.re.groups or 0) else "", a.get("data") or "")
+                data = re.sub(r"\$\{(\w+)\}", lambda g: variables.get(g.group(1), g.group(0)), data)
+                if a.get("application") in ("set", "export") and "=" in data:
+                    k, _, v = data.partition("=")
+                    variables[k] = v
+                done.append(f"{a.get('application')} {data}".strip())
+            if brk == "on-true":
+                break
+        elif brk == "on-false":
+            return None
+    effect = [d for d in done if d.split(" ")[0] in ("bridge", "hangup", "transfer", "respond")]
+    if not effect:
+        return None
+    e = effect[0]
+    if e.startswith("bridge"):
+        return "bridge " + re.sub(r"sofia/gateway/[0-9a-f-]{36}/", "gateway/…/", e.split(" ", 1)[1])
+    return e
+
+
+def outbound(rows: Rows, domain_uuid: str, domain_name: str, caller: str, numbers: Tuple[str, ...] = PROBES) -> Dict[str, str]:
+    """For each number, the dial plan that takes a call to it from extension `caller` (with that extension's call classes) and what it does,
+    from the domain's enabled dial plans in their order. Read only."""
+    plans = sorted((r for k, r in rows.items() if k.startswith("v_dialplans:") and r.get("domain_uuid") == domain_uuid
+                    and r.get("dialplan_context") == domain_name and r.get("dialplan_enabled") in (True, "true", "t")),
+                   key=lambda r: (int(r.get("dialplan_order") or 0), r.get("dialplan_name") or ""))
+    ext = next((r for k, r in rows.items() if k.startswith("v_extensions:") and r.get("extension") == caller and r.get("domain_uuid") == domain_uuid), {})
+    toll = ext.get("toll_allow") or ""
+    out: Dict[str, str] = {}
+    for n in numbers:
+        out[n] = "no route (the call fails)"
+        for p in plans:
+            got = _evaluate(p.get("dialplan_xml") or "", n, caller, toll)
+            if got:
+                out[n] = f"{p.get('dialplan_name')} (order {p.get('dialplan_order')}): {got}"
+                break
+    return out

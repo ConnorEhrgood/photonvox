@@ -53,8 +53,8 @@ def test_every_row_is_claimed_by_an_object_or_listed_as_hand_built():
 def test_the_report_names_what_could_not_be_expressed():
     r = report(imported())
     assert r["911 caller ID"][0] == "different"
-    elevator = [(i.outcome, i.detail) for i in imported().report if i.what == "extension 701"]
-    assert ("decide" in [o for o, _ in elevator]) and any("911" in d for o, d in elevator if o == "decide")
+    assert not [i for i in imported().report if i.what == "extension 701" and i.outcome == "decide"]     # its own number: expressed
+    assert imported().document["users"]["u-701"]["caller_id"] == "+1" + F.SECOND
     assert "keys * do something" in r["menu 900"][1] and "dial an extension directly" in r["menu 900"][1] and "short greeting" in r["menu 900"][1]
     assert "destination_hold_music" in r[f"number {F.MAIN[-4:]} (…{F.MAIN[-4:]})"][1]
     assert r["dial plan 'old route' (order 70, disabled)"][0] == "extra"
@@ -109,10 +109,12 @@ def test_the_first_publish_is_identical_to_the_live_rows():
     proof = takeover.prove(F.hand_built(), PS, SITE, "htc")
     assert proof["objects"] == 8 and proof["extras"] == 4            # three hand-built dial plans and one's detail
     # Regenerating would change only what the report already says needs deciding: the elevator's second number.
-    # Regenerating would change only what the report already names: the direct line's and the elevator's 911 caller ID, and the menu's * key.
-    assert [u.split(":")[0] for u in proof["understanding"]] == ["extensions 102", "extensions 701", "menus the menu"]
-    assert '"*": "menu-top "' in proof["understanding"][2]
-    assert sorted(i["what"] for i in proof["report"] if i["outcome"] == "decide") == ["extension 102", "extension 701"]
+    # Regenerating would change only what the report already names: the direct line's 911 caller ID, and the menu's * key. The elevator shows
+    # its own number (caller_id), regenerated exactly.
+    assert [u.split(":")[0] for u in proof["understanding"]] == ["extensions 102", "menus the menu"]
+    assert '"*": "menu-top "' in proof["understanding"][1]
+    assert sorted(i["what"] for i in proof["report"] if i["outcome"] == "decide") == ["extension 102"]
+    assert set(proof["adoption"]["fresh"]) >= {f"v_extensions:{F._u(1)}", f"v_ivr_menus:{F.MENU}"}
 
 
 def test_a_proof_that_is_not_a_no_op_adopts_nothing(monkeypatch):
@@ -228,3 +230,89 @@ def test_a_recorded_greeting_is_named_as_it_is_and_never_spoken():
             raise AssertionError("a recording is never spoken")
 
     assert service.speak(None, Speaker(), None, {"ivr_menus": [{"greeting": "recording:MainMenu.wav"}], "domain": F.DOMAIN}) == 0
+
+
+# ---- the protections version and later changes (column by column) ----
+
+def adopted(meanings_from=None):
+    imp = imported()
+    proof = takeover.prove(F.hand_built(), PS, SITE, "htc")
+    a = proof["adoption"]
+    return imp, fusionpbx.Adoption(imp.objects, imp.rows, imp.ids, a["meanings"], fresh=a["fresh"])
+
+
+def test_a_later_change_writes_only_the_columns_the_document_now_gives_differently():
+    imp, a = adopted()
+    doc = copy.deepcopy(imp.document)
+    doc["users"]["u-701"]["name"] = "Elevator Car"
+    b = build_with(doc, a)
+    ext = next(r for r in b.rows["v_extensions"] if r["extension"] == "701")
+    assert ext["effective_caller_id_name"] == "Elevator Car" and ext["directory_first_name"] == "Elevator Car"
+    assert ext["call_timeout"] == 120 and ext["description"] is None and ext["limit_max"] == "5"      # not the document's to say: kept
+    assert ext["outbound_caller_id_number"] == F.SECOND                                                 # unchanged in the document: the live form kept
+
+
+def test_the_protections_version_sets_classes_and_911_numbers_and_retires_what_it_is_told():
+    imp, a = adopted()
+    pa = fusionpbx.Adoption(a.objects, a.rows, a.ids, a.meanings, fresh=a.fresh, protected=True, retire=[F._u(36)])
+    b = build_with(imp.document, pa, protected=True)
+    ext = {r["extension"]: r for r in b.rows["v_extensions"]}
+    assert ext["100"]["toll_allow"] == "national:service:toll_free" and ext["701"]["emergency_caller_id_number"] == "+1" + F.SECOND
+    assert ext["701"]["call_timeout"] == 120 and b.remove == [("v_dialplans", F._u(36))]
+    assert {"photonvox.emergency", "photonvox.block", "photonvox.synthetic"} <= {r["dialplan_name"] for r in b.rows["v_dialplans"]}
+    assert f"dialplan.{F.DOMAIN}" in b.cache and f"directory.701@{F.DOMAIN}" in b.cache
+    # Protected again with the classes already on the engine: nothing more to write on those rows.
+    rows2 = {k: ({**r, "toll_allow": "national:service:toll_free", "emergency_caller_id_number": ext[r["extension"]]["emergency_caller_id_number"]}
+                 if k.startswith("v_extensions:") else r) for k, r in a.rows.items()}
+    pa2 = fusionpbx.Adoption(a.objects, rows2, a.ids, a.meanings, fresh=a.fresh, protected=True)
+    b2 = build_with(imp.document, pa2, protected=True)
+    assert f"directory.701@{F.DOMAIN}" not in b2.cache and b2.remove == []
+
+
+def build_with(document, adoption, protected=False):
+    doc = PhoneSystem.model_validate(document)
+    plan = compile_plan(doc, Context(domain=F.DOMAIN, timezones={SITE: "America/New_York"}, upstreams={"national": ["htc"]}, emergency_gateway="htc",
+                                     assigned_numbers=set(doc.numbers), adopted=True, validated_locations={SITE: {"main"}} if protected else {},
+                                     protected=protected))
+    return fusionpbx.build(plan, fusionpbx.Target(PS, F.D, {"htc": F.GATEWAY}, adoption=adoption))
+
+
+def test_values_from_json_and_from_the_engine_compare_the_same_in_the_builder():
+    assert fusionpbx.norm(5) == "5" and fusionpbx.norm("[1]") == [1] and fusionpbx.norm("[x") == "[x" and fusionpbx.norm(True) is True
+
+
+def test_the_outbound_reading_handles_unusual_dial_plans():
+    assert compare._evaluate("<not xml", "2125550123", "100", "") is None
+    assert compare._evaluate('<extension><condition><action application="hangup" data="X"/></condition></extension>', "1", "100", "") == "hangup X"
+    assert compare._evaluate('<extension><condition field="destination_number" expression="(("><action application="hangup"/></condition></extension>',
+                             "1", "100", "") is None
+    assert compare._evaluate('<extension><condition field="destination_number" expression="^1$"><action application="set" data="x=1"/></condition>'
+                             '</extension>', "1", "100", "") is None                                   # sets something, routes nothing
+
+
+def test_a_non_compiling_document_stops_the_dry_run():
+    with pytest.raises(takeover.TakeoverError, match="the phone system has no site"):
+        takeover.readopt(None, type("PS", (), {"domain_name": F.DOMAIN, "draft": {}, "adoption": {}})(), type("I", (), {"emergency_upstream": "htc", "routing": {}})(),
+                         _Conn(F.hand_built()))
+
+
+class _Conn:
+    """Answers takeover.read_domain from an export (enough for the error paths)."""
+    def __init__(self, export):
+        self.export = export
+
+    def execute(self, *_a, **_k):
+        e = self.export
+
+        class R:
+            domain_uuid, domain_name, domain_enabled = e["domain"]["domain_uuid"], e["domain"]["domain_name"], True
+
+            def first(self):
+                return self
+
+            def __iter__(self):
+                return iter([])
+
+            def mappings(self):
+                return []
+        return R()

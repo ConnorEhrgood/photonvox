@@ -7,6 +7,7 @@ read of the domain's rows, the dial plans of its own, public and global contexts
 """
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import decimal
 import uuid
@@ -15,7 +16,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.compiler.compile import Context, compile_plan
+from app.compiler.compile import CompileError, Context, compile_plan
 from app.document.model import PhoneSystem as Document
 from app.engine import compare, fusionpbx, importer
 from app.models import HeldNumber, PbxInstance, PhoneSystem
@@ -89,7 +90,9 @@ def prove(export: Mapping[str, Any], ps_id: str, site_id: str, upstream: str, ti
     extras = {f"{t}:{u}": extra_hash(by_key[f"{t}:{u}"]) for t, u in imp.extras if f"{t}:{u}" in by_key}
     return {"document": doc.model_dump(mode="json"),
             "adoption": {"objects": {k: [list(x) for x in v] for k, v in imp.objects.items()}, "rows": imp.rows, "ids": imp.ids,
-                         "meanings": regenerated.meanings, "extras": extras},
+                         "meanings": regenerated.meanings, "extras": extras,
+                         # the regenerated rows, without the secret columns (the build only names their kind; nothing secret is kept)
+                         "fresh": {k: {c: v for c, v in r.items() if not isinstance(v, fusionpbx.Secret)} for k, r in compare.as_rows(regenerated).items()}},
             "objects": len(first.adopted), "rows": sum(len(first.rows[t]) for t in fusionpbx.TABLES), "extras": len(extras),
             "understanding": understanding,
             "report": [{"what": i.what, "outcome": i.outcome, "detail": i.detail} for i in imp.report]}
@@ -122,3 +125,81 @@ def adopt(db: Session, instance: PbxInstance, tenant_id: uuid.UUID, site_id: uui
     db.flush()
     return {"phone_system_id": str(ps.id), "objects": proof["objects"], "rows": proof["rows"], "extras": proof["extras"],
             "understanding": proof["understanding"], "report": proof["report"]}
+
+
+def readopt(db: Session, ps: PhoneSystem, instance: PbxInstance, conn: Any) -> Dict[str, Any]:
+    """Prove the takeover again with this build's importer (the engine read again; nothing written there) and keep the new adoption and document:
+    still a no-op, or nothing changes. For a domain adopted by an earlier importer (one without the regenerated rows, or a document field
+    it lacked). Its protections, if any were set, stay set."""
+    export = read_domain(conn, ps.domain_name)
+    site = next(iter((ps.draft or {}).get("sites") or {}), None)
+    upstream = instance.emergency_upstream or (instance.routing or {}).get("national", [None])[0]
+    if not site or not upstream:
+        raise TakeoverError("the phone system has no site, or the instance no upstream")
+    proof = prove(export, str(ps.id), site, upstream)
+    kept = {k: v for k, v in (ps.adoption or {}).items() if k in ("protected", "retire")}
+    ps.adoption, ps.draft = {**proof["adoption"], **kept}, proof["document"]
+    db.flush()
+    return {"objects": proof["objects"], "rows": proof["rows"], "extras": proof["extras"], "understanding": proof["understanding"],
+            "report": proof["report"]}
+
+
+def retire_ids(ps: PhoneSystem, export: Mapping[str, Any], names: List[str]) -> List[str]:
+    """The ids of the hand-built dial plans named (each must be one of the adoption's extras: PhotonVox never retires its own or another domain's)."""
+    extras = {k.split(":", 1)[1] for k in (ps.adoption or {}).get("extras", {}) if k.startswith("v_dialplans:")}
+    by_name = {r["dialplan_name"]: r["dialplan_uuid"] for r in export["tables"].get("v_dialplans") or []
+               if r.get("domain_uuid") == export["domain"]["domain_uuid"] and r["dialplan_uuid"] in extras}
+    missing = [n for n in names if n not in by_name]
+    if missing:
+        raise TakeoverError(f"not a hand-built dial plan of this domain: {', '.join(missing)}")
+    return [by_name[n] for n in names]
+
+
+def protect_preview(db: Session, ps: PhoneSystem, instance: PbxInstance, conn: Any, names: List[str], caller: str) -> Dict[str, Any]:
+    """The protections version, as a dry run against the engine as it is now (read): every row it would add or change, the hand-built dial plans
+    it would retire, and where a call out to each test number goes now and after (read from the dial plans, never called). Nothing is written,
+    here or on the engine."""
+    from app.engine import service
+    export = read_domain(conn, ps.domain_name)
+    ids = retire_ids(ps, export, names)
+    real = ps.adoption
+    ps.adoption = {**(real or {}), "protected": True, "retire": ids}       # for this build only; restored below
+    blocking: List[Dict[str, str]] = []
+    try:
+        ctx = service.context(db, ps, instance)
+        try:
+            plan = compile_plan(Document.model_validate(ps.draft), ctx)
+        except CompileError as e:
+            # The dry run still shows what would change; what stops the real publish is listed (a 911 address not yet validated, typically).
+            blocking = [{"path": p.path, "code": p.code, "message": p.message} for p in e.problems]
+            if any(p.code != "emergency_location_unvalidated" for p in e.problems):
+                raise TakeoverError(f"the document does not compile: {blocking[0]['message']}")
+            plan = compile_plan(Document.model_validate(ps.draft), dataclasses.replace(ctx, protected=False))
+        b = fusionpbx.build(plan, service.target(ps, instance))
+    finally:
+        ps.adoption = real
+    live = compare.live_rows(export)
+    diff = compare.rows_diff(b, live)
+    after = {k: v for k, v in live.items()}
+    for t in fusionpbx.TABLES:
+        for r in b.rows[t]:
+            after[f"{t}:{r[fusionpbx.KEYS[t]]}"] = {**after.get(f"{t}:{r[fusionpbx.KEYS[t]]}", {}), **r}
+    gone = set(ids) | {r["dialplan_detail_uuid"] for r in export["tables"].get("v_dialplan_details") or [] if r["dialplan_uuid"] in ids}
+    after = {k: v for k, v in after.items() if k.split(":", 1)[1] not in gone}
+    D, name = export["domain"]["domain_uuid"], export["domain"]["domain_name"]
+    before_calls, after_calls = compare.outbound(live, D, name, caller), compare.outbound(after, D, name, caller)
+    new, changed = compare.summary(diff)
+    return {"blocking_the_publish": blocking, "new_rows": new, "changed_rows": changed,
+            "changes": sorted({f"{d['table']} {', '.join(d.get('columns') or [])}".strip() for d in diff if d["kind"] == "changed"}),
+            "new": sorted({f"{d['table']}" for d in diff if d["kind"] == "new row"}),
+            "new_dialplans": sorted(r["dialplan_name"] for r in b.rows["v_dialplans"] if f"v_dialplans:{r['dialplan_uuid']}" not in live),
+            "retired": sorted(n for n in names), "retired_rows": len(gone),
+            "calls_out": {n: {"now": before_calls[n], "after": after_calls[n]} for n in before_calls},
+            "checks": [c["number"] for c in fusionpbx.checks(plan, service.target(ps, instance))]}
+
+
+def protect_apply(ps: PhoneSystem, export: Mapping[str, Any], names: List[str]) -> Dict[str, Any]:
+    """Mark the adoption protected, with the dial plans to retire: the next publish is the protections version. Nothing is written to the engine."""
+    ids = retire_ids(ps, export, names)
+    ps.adoption = {**(ps.adoption or {}), "protected": True, "retire": ids}
+    return {"protected": True, "retire": names}

@@ -158,10 +158,12 @@ def import_domain(export: Mapping[str, Any], site_id: str, location_key: str = "
                                    "regenerated, they would show the site's emergency number. Kept exactly as it is; decide with the "
                                    "protections version (§11)", [("v_extensions", x["extension_uuid"])]))
         elif cid and cid != site_caller_id:
-            report.append(Item(f"extension {ext}", "decide", "its outside calls, and so its 911 calls (no emergency caller ID is set), show "
-                               f"…{cid[-4:]}, a number that rings the menu, not this extension: the document cannot say that yet, so the "
-                               "engine keeps it exactly as it is; regenerating this user would change what 911 sees. Decide before the "
-                               "protections version (one registered 911 number per site or per phone, §11)", [("v_extensions", x["extension_uuid"])]))
+            if cid in numbers:
+                u["caller_id"] = cid            # its own caller ID, one of the organization's numbers: outside and 911 calls show it (Connor, 2026-11-14)
+            else:
+                report.append(Item(f"extension {ext}", "decide", f"its outside calls, and so its 911 calls (no emergency caller ID is set), show "
+                                   f"…{cid[-4:]}, which is not one of the domain's numbers: the engine keeps it exactly as it is; regenerating "
+                                   "this user would change what 911 sees", [("v_extensions", x["extension_uuid"])]))
         box = boxes.get(ext)
         if box and box.get("voicemail_mail_to"):
             u["email"] = box["voicemail_mail_to"]
@@ -175,7 +177,7 @@ def import_domain(export: Mapping[str, Any], site_id: str, location_key: str = "
             claim(obj, "v_voicemails", box)
             ids["voicemail:extension:" + ext] = box["voicemail_uuid"]
         diffs = []
-        if cid != (u.get("direct_number") or site_caller_id):
+        if cid != (u.get("direct_number") or u.get("caller_id") or site_caller_id):
             diffs.append("its outside calls show a number that is neither the site's nor a number ringing only this user")
         if x.get("emergency_caller_id_number") and _e164(x["emergency_caller_id_number"]) != site_emergency:
             diffs.append("its 911 caller ID differs from the site's")

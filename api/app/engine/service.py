@@ -93,7 +93,8 @@ def context(db: Session, ps: PhoneSystem, instance: PbxInstance) -> Context:
     assigned = set(db.execute(select(HeldNumber.number).where(HeldNumber.tenant_id == ps.tenant_id)).scalars())
     return Context(domain=ps.domain_name, timezones={str(s.id): s.timezone for s in sites}, upstreams=dict(instance.routing or {}),
                    emergency_gateway=instance.emergency_upstream, validated_locations=validated, assigned_numbers=assigned,
-                   adopted=ps.adoption is not None)
+                   adopted=ps.adoption is not None, protected=bool((ps.adoption or {}).get("protected")),
+                   dial_formats=dict(instance.dial_formats or {}))
 
 
 def get_speech() -> Optional[Speech]:
@@ -106,7 +107,8 @@ def adoption(ps: PhoneSystem) -> Optional[fusionpbx.Adoption]:
     if not a:
         return None
     return fusionpbx.Adoption(objects={k: [tuple(x) for x in v] for k, v in a["objects"].items()}, rows=a["rows"], ids=a["ids"],
-                              meanings=a["meanings"])
+                              meanings=a["meanings"], fresh=a.get("fresh") or {}, protected=bool(a.get("protected")),
+                              retire=list(a.get("retire") or []))
 
 
 def target(ps: PhoneSystem, instance: PbxInstance, speech_on: bool = False) -> fusionpbx.Target:

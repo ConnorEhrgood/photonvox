@@ -75,7 +75,7 @@ export interface Problem { path: string; code: string; message: string }
 
 export type PhoneSystemStatus = 'new' | 'publishing' | 'ready' | 'failed' | 'changed'
 
-export interface DraftUser { name: string; site: string; extension: string; email?: string; direct_number?: string; show?: 'site' | 'direct'; voicemail?: boolean }
+export interface DraftUser { name: string; site: string; extension: string; email?: string; direct_number?: string; show?: 'site' | 'direct'; voicemail?: boolean; caller_id?: string | null }
 
 /** The document being built (api/app/document/model.py). A target is one of {user}, {group}, {menu}, {voicemail}. */
 export type DraftTarget = Record<string, string>

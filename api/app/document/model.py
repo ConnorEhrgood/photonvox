@@ -119,6 +119,9 @@ class User(Strict):
     show: Literal["site", "direct"] = "site"
     email: Optional[Email] = None
     voicemail: bool = True                       # the user's own voicemail box answers; False: the box is kept but switched off
+    # What this user's outside calls AND 911 calls show, when it is not the site's: one of the organization's numbers (its 911 address on file
+    # with the carrier). An elevator or a second line, for example. A direct number shown (show "direct") takes precedence for outside calls.
+    caller_id: Optional[str] = Field(None, pattern=E164)
 
 
 class Box(Strict):

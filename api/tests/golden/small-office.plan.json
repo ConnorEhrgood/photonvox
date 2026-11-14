@@ -187,6 +187,7 @@
   "outside_prefixes": [
     "9"
   ],
+  "protected": false,
   "ring_groups": [
     {
       "key": "annex",

@@ -154,3 +154,8 @@ def test_a_group_that_forwards_to_itself_is_a_loop_and_a_chain_into_a_loop_is_re
 def test_menu_options_are_choices_not_loops_and_a_chain_to_a_person_ends():
     d = doc(**{"menus__main__options__1": {"menu": "main"}, "menus__main__timeout": {"group": "annex"}})
     assert problems(d, VALID) == []
+
+
+def test_a_users_own_caller_id_must_be_one_of_the_organizations_numbers():
+    assert ("users.u-cy.caller_id", "not_held") in codes(doc(**{"users__u-cy__caller_id": "+17245557777"}))
+    assert ("users.u-cy.caller_id", "not_held") not in codes(doc(**{"users__u-cy__caller_id": "+17245550123"}))

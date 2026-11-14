@@ -115,8 +115,8 @@ def test_adopting_proves_a_no_op_keeps_the_document_and_assigns_the_numbers(clie
     r = adopt(client, world, instance)
     assert r.status_code == 201, r.text
     out = r.json()
-    assert out["objects"] == 8 and out["extras"] == 4 and len(out["understanding"]) == 3
-    assert {i["what"] for i in out["report"] if i["outcome"] == "decide"} == {"extension 102", "extension 701"}
+    assert out["objects"] == 8 and out["extras"] == 4 and len(out["understanding"]) == 2
+    assert {i["what"] for i in out["report"] if i["outcome"] == "decide"} == {"extension 102"}
     assert snapshot(eng) == before                                            # adopting reads only
     got = client.get(f"/tenants/{world.a}/phone-system", headers=auth("a-owner")).json()
     assert got["status"] == "new" and got["draft"]["menus"]["main"]["greeting"] == "recording:MainMenu.wav"
@@ -240,3 +240,77 @@ def test_the_operator_commands_do_the_takeover_without_a_browser(client, world, 
         actions = [a.action for a in s.execute(select(AuditLog).where(AuditLog.actor_label == manage.OPERATOR)).scalars()]
     assert actions == ["instance.added", "phone_system.adopted", "phone_system.publish_requested", "phone_system.published"] or \
         set(actions) >= {"instance.added", "phone_system.adopted", "phone_system.publish_requested"}
+
+
+class EngineAgent:
+    """Answers the post-publish check from what is on the (test) engine, and records the cache it was asked to clear. Never 911 or 933."""
+    available = True
+
+    def __init__(self, eng):
+        self.eng, self.cleared = eng, []
+
+    def clear_cache(self, entries):
+        self.cleared += list(entries)
+
+    def check(self, kind, number, domain, domain_uuid, token):
+        assert "911" not in number and "933" not in number
+        with self.eng.connect() as c:
+            if kind == "inbound":
+                data = c.execute(text("select destination_data from v_destinations where domain_uuid = :d and destination_number = :n"),
+                                 {"d": domain_uuid, "n": number[-10:]}).scalar()
+                return f"reached {data.split(' ')[0]}" if data else None
+            xml = c.execute(text("select dialplan_xml from v_dialplans where domain_uuid = :d and dialplan_name = 'photonvox.block'"), {"d": domain_uuid}).scalar()
+            return "blocked premium" if xml and "photonvox_blocked=premium" in xml else None
+
+
+def test_the_protections_version_dry_run_then_published(client, world, instance, eng):
+    import io
+    from app import manage
+    agent = EngineAgent(eng)
+    conn = lambda i: (eng, agent)            # noqa: E731
+    def run_(*a):
+        o = io.StringIO()
+        rc = manage.main(list(a), io.StringIO(), o, conn)
+        return rc, json.loads(o.getvalue())
+    assert adopt(client, world, instance).status_code == 201
+    client.post(f"/tenants/{world.a}/phone-system/publish", headers=auth("a-owner"))
+    with SystemSession() as s:
+        service.publish_queued(s, lambda i: (eng, service.NoAgent()))
+    rc, again = run_("readopt", world.a)
+    assert rc == 0 and again["objects"] == 8
+    before = snapshot(eng)
+    with pytest.raises(SystemExit, match="e164 or nanp10"):
+        run_("set-format", "live-a", "htc=10")
+    rc, fmt = run_("set-format", "live-a", "htc=nanp10")                # as the hand-built routes send HTC today: ten digits
+    assert fmt["dial_formats"] == {"htc": "nanp10"}
+    rc, dry = run_("protect", world.a, "101", "Outbound NANP", "Block-premium")
+    assert dry["blocking_the_publish"][0]["code"] == "emergency_location_unvalidated"         # the 911 address is not validated yet
+    assert dry["changes"] == ["v_extensions emergency_caller_id_number, toll_allow"] and dry["retired"] == ["Block-premium", "Outbound NANP"]
+    assert {"photonvox.emergency", "photonvox.block", "photonvox.national", "photonvox.service", "photonvox.toll_free"} <= set(dry["new_dialplans"])
+    calls = dry["calls_out"]
+    assert calls["9005550100"]["now"].startswith("Block-premium") and calls["9005550100"]["after"].startswith("photonvox.block")
+    assert calls["2125550123"]["now"].startswith("Outbound NANP") and calls["2125550123"]["after"].startswith("photonvox.national")
+    assert calls["2125550123"]["after"].endswith("gateway/…/2125550123") and calls["+12125550123"]["after"].endswith("gateway/…/2125550123")
+    assert calls["988"]["now"] == "no route (the call fails)" and calls["988"]["after"].startswith("photonvox.service")
+    assert calls["911"]["after"].startswith("photonvox.emergency") and "911" not in "".join(dry["checks"])
+    assert snapshot(eng) == before                                                             # a dry run writes nothing
+    with pytest.raises(Exception, match="not a hand-built dial plan"):
+        run_("protect", world.a, "101", "photonvox.national")
+    loc = client.post(f"/tenants/{world.a}/sites/{world.a1}/emergency-locations", headers=auth("a-owner"),
+                      json={"key": "main", "street": "1 Church St", "city": "Hickory", "state": "PA", "zip": "15340"}).json()
+    assert client.post(f"/platform/emergency-locations/{loc['id']}/validate", headers=auth("staff"), json={"ok": True}).status_code == 200
+    rc, applied = run_("protect-apply", world.a, "Outbound NANP", "Block-premium")
+    assert applied == {"protected": True, "retire": ["Outbound NANP", "Block-premium"]} and snapshot(eng) == before
+    rc, published = run_("publish", world.a, "the protections version")
+    assert published["state"] == "ready", published
+    assert all(c["ok"] for c in published["checks"]) and {c["kind"] for c in published["checks"]} == {"inbound", "route", "emergency, read"}
+    with eng.connect() as c:
+        names = set(c.execute(text("select dialplan_name from v_dialplans where domain_uuid = :d"), {"d": F.D}).scalars())
+        ext = {r.extension: r for r in c.execute(text("select extension, toll_allow, emergency_caller_id_number, hold_music, call_timeout, password "
+                                                      "from v_extensions"))}
+        details = c.execute(text("select count(*) from v_dialplan_details where dialplan_uuid = :u"), {"u": F._u(36)}).scalar()
+    assert "Outbound NANP" not in names and "Block-premium" not in names and details == 0 and "old route" in names     # retired; the rest left
+    assert ext["701"].toll_allow == "national:service:toll_free" and ext["701"].emergency_caller_id_number == "+1" + F.SECOND
+    assert ext["100"].emergency_caller_id_number == "+1" + F.MAIN and str(ext["701"].call_timeout) == "120"          # what the document doesn't say stays
+    assert ext["100"].hold_music == f"/{F.DOMAIN}/Music.wav" and ext["101"].password == "sip-secret-101"
+    assert f"dialplan.{F.DOMAIN}" in agent.cleared and f"directory.701@{F.DOMAIN}" in agent.cleared

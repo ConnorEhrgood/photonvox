@@ -218,3 +218,11 @@ def test_eavesdrop_and_intercept_are_off_unless_switched_on():
     d = copy.deepcopy(SAMPLE)
     d["features"] = {"eavesdrop": True}
     assert plan(d)["features"] == {"eavesdrop": True, "intercept": False}
+
+
+def test_an_upstream_that_wants_ten_digits_gets_ten_digits():
+    import dataclasses
+    p = plan(ctx=dataclasses.replace(CTX, dial_formats={g: "nanp10" for gs in CTX.upstreams.values() for g in gs}))
+    assert route(p, "national")["send"] == "$1" and route(p, "toll_free")["send"] == "$1"
+    p = plan(ctx=dataclasses.replace(CTX, dial_formats={"nobody": "nanp10"}))
+    assert route(p, "national")["send"] == "+1$1"

@@ -82,6 +82,13 @@ def write(conn: Connection, b: Build, domain_uuid: str, previous: Sequence[Mappi
     for m in sorted(gone, key=lambda m: -TABLES.index(m["table"])):
         res.removed += conn.execute(text(f"delete from {m['table']} where {KEYS[m['table']]} = :u and domain_uuid = :d"),
                                     {"u": m["uuid"], "d": domain_uuid}).rowcount
+    # Hand-built dial plans a protected adoption retires (decision 32, stage 5): each with its details, only this domain's, in this transaction.
+    for table, uid in b.remove:
+        if table != "v_dialplans":
+            raise ValueError(f"only dial plans are retired, not {table}")
+        found = conn.execute(text("delete from v_dialplans where dialplan_uuid = :u and domain_uuid = :d"), {"u": uid, "d": domain_uuid}).rowcount
+        if found:
+            res.removed += found + conn.execute(text("delete from v_dialplan_details where dialplan_uuid = :u"), {"u": uid}).rowcount
 
     for table in TABLES:
         have = _existing(conn, table, b.rows[table], domain_uuid)

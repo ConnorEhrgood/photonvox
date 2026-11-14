@@ -6,6 +6,10 @@ decision 32), where no browser sign-in is involved. Secrets come on standard inp
     adopt <instance name> <organization id> <site id> <domain>                      read, import, prove a no-op, keep (writes nothing to the engine)
     publish <organization id> <note>                                                queue the draft and publish it now (the worker's own code)
     drift <organization id>                                                         compare the engine with what is published
+    set-format <instance name> <upstream key>=<e164|nanp10>                         how an upstream wants North American numbers
+    readopt <organization id>                                                       prove the takeover again with this build's importer (no engine write)
+    protect <organization id> <caller extension> [<dial plan to retire> ...]       the protections version as a dry run (reads only)
+    protect-apply <organization id> [<dial plan to retire> ...]                     mark it protected (the next publish is the protections version)
     show <organization id>                                                          the phone system's state, versions and last drift check
 """
 from __future__ import annotations
@@ -76,6 +80,38 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
             state = service.publish_version(s, v.id, connect)
             v = s.get(PhoneSystemVersion, v.id)
             json.dump({"version": v.number, "state": state, "error": v.error, "checks": (v.check or {}).get("results", [])}, out)
+        elif cmd == "set-format":
+            name, kv = args
+            key, _, fmt = kv.partition("=")
+            if fmt not in ("e164", "nanp10"):
+                raise SystemExit("the format is e164 or nanp10")
+            i = s.execute(select(PbxInstance).where(PbxInstance.name == name)).scalar_one()
+            i.dial_formats = {**(i.dial_formats or {}), key: fmt}
+            audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="instance.dial_format", target_type="pbx_instance",
+                         target_id=i.id, upstream=key, format=fmt)
+            s.commit()
+            json.dump({"instance": name, "dial_formats": i.dial_formats}, out)
+        elif cmd in ("readopt", "protect", "protect-apply"):
+            ps = _ps(s, args[0])
+            i = s.get(PbxInstance, ps.instance_id)
+            eng, _agent = connect(i)
+            try:
+                with eng.connect() as conn:
+                    if cmd == "readopt":
+                        res = takeover.readopt(s, ps, i, conn)
+                    elif cmd == "protect":
+                        res = takeover.protect_preview(s, ps, i, conn, list(args[2:]), args[1])
+                    else:
+                        res = takeover.protect_apply(ps, takeover.read_domain(conn, ps.domain_name), list(args[1:]))
+            finally:
+                eng.dispose()
+            if cmd == "protect":
+                s.rollback()                        # a dry run: nothing kept
+            else:
+                audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action=f"phone_system.{cmd.replace('-', '_')}",
+                             tenant_id=ps.tenant_id, target_type="phone_system", target_id=ps.id, **({"retire": args[1:]} if cmd == "protect-apply" else {}))
+                s.commit()
+            json.dump(res, out, indent=1, default=str)
         elif cmd == "drift":
             ps = _ps(s, args[0])
             json.dump(service.check_drift(s, ps, connect), out, indent=1, default=str)

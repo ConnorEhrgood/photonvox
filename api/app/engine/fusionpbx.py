@@ -21,7 +21,7 @@ import re
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from xml.sax.saxutils import quoteattr
 
 from app import speech
@@ -43,6 +43,20 @@ ORDER = {"synthetic": 1, "emergency": 100, "block": 105, "service": 110, "nation
          "hangup": 102, "hours": 300, "inbound": 100}
 # Tables, parents before children: the writer inserts in this order and deletes in reverse.
 AUDIT = ("insert_date", "insert_user", "update_date", "update_user")     # FusionPBX's own bookkeeping columns: never written by PhotonVox
+def norm(v: Any) -> Any:
+    """Values compared the same however they were read (numbers as text, JSON text parsed): as app/engine/compare.py's norm."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return str(v)
+    if isinstance(v, str) and v[:1] in "[{":
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v
+    return v
+
+
+# What the protections version writes on every adopted extension, whatever else stays as it was: its call classes, and what its 911 calls show.
+PROTECTED = {"v_extensions": ("toll_allow", "emergency_caller_id_number")}
 TABLES = ("v_extensions", "v_voicemails", "v_ring_groups", "v_ring_group_destinations", "v_ivr_menus", "v_ivr_menu_options", "v_dialplans",
           "v_dialplan_details", "v_destinations")
 KEYS = {"v_extensions": "extension_uuid", "v_voicemails": "voicemail_uuid", "v_ring_groups": "ring_group_uuid",
@@ -86,6 +100,14 @@ class Adoption:
     rows: Mapping[str, Mapping[str, Any]]
     ids: Mapping[str, str]
     meanings: Mapping[str, str]
+    # The rows a fresh build of the adopted document gave ("table:id" -> row): when an object changes later, only the columns whose value the
+    # document now gives differently are written; every other column keeps what is on the engine (hold music, a ring time the document has
+    # no word for).
+    fresh: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    # The protections version (ARCHITECTURE §15, §17 stage 5): PhotonVox's routes, block route, gates and checks are generated; every adopted
+    # extension takes the call classes and the 911 caller ID (PROTECTED); the hand-built dial plans in `retire` are removed in the same write.
+    protected: bool = False
+    retire: Sequence[str] = ()          # v_dialplans ids (their details go with them)
 
 
 @dataclass
@@ -94,6 +116,7 @@ class Build:
     secrets: Dict[Tuple[str, str], str] = field(default_factory=dict)   # (table, uuid) -> column holding a Secret
     meanings: Dict[str, str] = field(default_factory=dict)              # object key -> what it means (a hash of its part of the plan)
     adopted: List[str] = field(default_factory=list)                    # objects emitted exactly as they are on the engine
+    remove: List[Tuple[str, str]] = field(default_factory=list)          # hand-built rows the writer removes (a protected adoption's `retire`)
     row_cache: Dict[Tuple[str, str], List[str]] = field(default_factory=dict)   # (table, uuid) -> its object's cache entries, for a row rewritten alone
     features: Dict[str, bool] = field(default_factory=dict)             # standard dial plan app_uuid -> enabled
     cache: List[str] = field(default_factory=list)                      # /var/cache/fusionpbx file names to delete
@@ -120,11 +143,16 @@ def checks(plan: Mapping[str, Any], target: Target) -> List[Dict[str, Any]]:
     2026-11-14): the emergency route is verified by reading what was built (`emergency_read`)."""
     b = _Builder(plan, target)
     hours = {tc["key"]: tc for tc in plan["time_conditions"]}
+    # Where each number sends a call, as built (an adopted number keeps its live destination, which may name its menu or a person by extension).
+    built = {r["destination_number"][-10:]: r["destination_data"] for r in _Builder(plan, target).run().rows["v_destinations"]}
     out: List[Dict[str, Any]] = []
     for n in plan["inbound"]:
         kind, _, key = n["to"].partition(":")
         dests = [hours[key]["open"], hours[key]["closed"]] if kind == "time_condition" else [n["to"]]
         expect = sorted({"reached " + b.transfer(d)[1].split(" ")[0] for d in dests})      # a number's outcomes are never "hang up"
+        first = built[n["number"][-10:]].split(" ")[0]
+        if kind != "time_condition" and not first.startswith("hours-"):
+            expect = ["reached " + first]
         out.append({"kind": "inbound", "number": n["number"], "expect": expect})
     block = next(r for r in plan["outbound_routes"] if r["key"] == "block")
     if any(c["category"] == "premium" for c in block["categories"]):
@@ -225,8 +253,8 @@ class _Builder:
             self.begin("box:" + box["key"], box)
             self.voicemail(self.box_id[box["key"]], box["name"], box.get("email"), f"box:{box['key']}")
         self.obj = None
-        if not self.a:
-            # An adopted domain keeps its own outside calls, 911 and blocking (hand-built) until the protections version: none generated.
+        if not self.a or self.a.protected:
+            # An adopted domain keeps its own outside calls, 911 and blocking (hand-built) until the protections version: none generated before.
             self.direction()
             self.hangup()
             self.synthetic()
@@ -264,28 +292,43 @@ class _Builder:
 
     def adopt(self) -> None:
         """Objects whose meaning is what it was when adopted: their live rows, exactly. Changed or new objects: as built, over the live columns of
-        rows that keep their id (what the document does not say stays as it was). Only changed objects' cache entries are cleared."""
+        rows that keep their id, writing only the columns whose value the document now gives differently from when it was adopted (what the
+        document does not say stays as it was). Protected: the PROTECTED columns as built on every adopted row too. Only the cache entries of
+        what changed are cleared."""
         assert self.a
         keep: List[str] = []
+        prot = {t: cols for t, cols in PROTECTED.items()} if self.a.protected else {}
         for obj, built in self.obj_rows.items():
             live = self.a.objects.get(obj)
             if live is not None and self.a.meanings.get(obj) == self.b.meanings[obj]:
+                by_id = {(t, c[KEYS[t]]): c for t, c in built}
                 for table, cols in built:
                     self.b.rows[table].remove(cols)
                 for table, uid in live:
-                    self.b.rows[table].append({**self.a.rows[f"{table}:{uid}"]})
+                    row = {**self.a.rows[f"{table}:{uid}"]}
+                    for c in prot.get(table, ()):
+                        if (table, uid) in by_id and norm(row.get(c)) != norm(by_id[(table, uid)].get(c)):
+                            row[c] = by_id[(table, uid)][c]
+                            keep += self.obj_cache.get(obj, [])
+                    self.b.rows[table].append(row)
                 self.b.adopted.append(obj)
                 continue
             for table, cols in built:
                 base = self.a.rows.get(f"{table}:{cols[KEYS[table]]}")
                 if base:
+                    fresh = self.a.fresh.get(f"{table}:{cols[KEYS[table]]}")
                     merged = {k: v for k, v in base.items() if k not in AUDIT}
-                    merged.update(cols)
+                    for c, v in cols.items():
+                        if fresh is None or c not in fresh or c in prot.get(table, ()) or norm(fresh[c]) != norm(v) or isinstance(v, Secret):
+                            merged[c] = v
                     cols.clear()
                     cols.update(merged)
             keep += self.obj_cache.get(obj, [])
         changed = set(self.obj_rows) - set(self.b.adopted)
-        self.b.cache = sorted(set(keep) | ({f"dialplan.{self.domain}"} if changed else set()))
+        if self.a.protected:
+            self.b.remove = [("v_dialplans", uid) for uid in self.a.retire]
+        domain_wide = changed or self.a.protected
+        self.b.cache = sorted(set(keep) | ({f"dialplan.{self.domain}"} if domain_wide else set()))
         for table in TABLES:
             self.b.rows[table].sort(key=lambda r: r[KEYS[table]])
 

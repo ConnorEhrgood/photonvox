@@ -151,6 +151,8 @@ class PbxInstance(Base):
     versions: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)   # FusionPBX, FreeSWITCH, as last reported
     # The engine's own, hand-built gateways by key -> gateway id (the live engine, decision 32): routing may name them; PhotonVox never writes them.
     own_gateways: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)
+    # How each upstream wants North American numbers: "e164" (the default) or "nanp10" (ten digits; HTC as HUEPC's routes send it today).
+    dial_formats: Mapped[Dict[str, str]] = mapped_column(JSONB, default=dict)
     # Outgoing mail (voicemail to email): {host, port, secure, username, from, from_name}; Postmark's SMTP with a voicemail server's token.
     email: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
     email_password_sealed: Mapped[str] = mapped_column(Text, default="")

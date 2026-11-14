@@ -33,6 +33,10 @@ class Context:
     # An adopted, hand-built domain (decision 32, ARCHITECTURE §17): its outside calls, 911 and blocking stay hand-built until the protections
     # version, so the 911 address problem does not stop it (its 911 is the engine's own, unchanged), and the builder generates no routes.
     adopted: bool = False
+    protected: bool = False                     # the adopted domain's protections version: its routes generated, its 911 address must be validated
+    # How an upstream wants North American numbers: "e164" (+1 and ten digits, the default) or "nanp10" (ten digits, as HUEPC's hand-built
+    # routes send HTC today). Upstream key -> format.
+    dial_formats: Mapping[str, str] = field(default_factory=dict)
 
 
 class CompileError(Exception):
@@ -58,9 +62,15 @@ def _prefixed(pattern: str, prefixes: List[str]) -> str:
     return "^(?:" + "|".join(prefixes) + ")?" + pattern[1:]
 
 
+def _send(ctx: Context, cls: str) -> str:
+    """The number a North American route sends: +1 and the ten digits, or the ten digits alone when every upstream of the class wants them so."""
+    gws = list(ctx.upstreams.get(cls) or ctx.upstreams["national"])
+    return "$1" if gws and all(ctx.dial_formats.get(g) == "nanp10" for g in gws) else "+1$1"
+
+
 def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
     found = problems(doc, ctx.validated_locations, ctx.assigned_numbers)
-    if ctx.adopted:
+    if ctx.adopted and not ctx.protected:
         found = [p for p in found if p.code != "emergency_location_unvalidated"]
     if found:
         raise CompileError(found)
@@ -85,8 +95,9 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         site = doc.sites[u.site]
         extensions.append({
             "extension": u.extension, "user": uid, "name": u.name, "site": u.site, "email": u.email,
-            "caller_id_number": u.direct_number if u.show == "direct" else site.caller_id,
-            "emergency_caller_id_number": site.emergency_number,       # what a 911 call from this extension shows: the number registered at its site
+            "caller_id_number": u.direct_number if u.show == "direct" else (u.caller_id or site.caller_id),
+            # What a 911 call from this extension shows: the user's own number when set (its 911 address on file), else the site's emergency number.
+            "emergency_caller_id_number": u.caller_id or site.emergency_number,
             "toll_allow": toll_allow,
             "unreachable": f"voicemail:{u.extension}" if site.unreachable == "voicemail" else "hangup",
             **({} if u.voicemail else {"voicemail": False}),       # only when off, so the plans of documents that never say stay as they were
@@ -125,7 +136,7 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
     for cls in ("national", "toll_free"):
         if cls in allowed:
             routes.append({"key": cls, "locked": False, "pattern": _prefixed(classes.PATTERNS[cls], prefixes), "requires": cls,
-                           "gateways": list(ctx.upstreams.get(cls) or ctx.upstreams["national"]), "caller_id": "caller_id_number", "send": "+1$1"})
+                           "gateways": list(ctx.upstreams.get(cls) or ctx.upstreams["national"]), "caller_id": "caller_id_number", "send": _send(ctx, cls)})
     for code in countries:
         routes.append({"key": f"international-{code}", "locked": False, "pattern": _prefixed(classes.international_pattern(code), prefixes),
                        "requires": "international", "gateways": list(ctx.upstreams.get("international") or ctx.upstreams["national"]),
@@ -145,4 +156,5 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         "spend_limit_usd": doc.calling.spend_limit_usd,
         "features": {"eavesdrop": doc.features.eavesdrop, "intercept": doc.features.intercept},
         "adopted": ctx.adopted,
+        "protected": ctx.protected,
     }

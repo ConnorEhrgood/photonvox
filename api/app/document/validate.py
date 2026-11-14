@@ -145,6 +145,8 @@ def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str
                 by_direct[u.direct_number] = uid
         elif u.show == "direct":
             out.append(Problem(f"{p}.show", "no_direct_number", "This user has no direct number to show."))
+        if u.caller_id and u.caller_id not in held:
+            out.append(Problem(f"{p}.caller_id", "not_held", "What a user's calls show must be one of the organization's numbers."))
 
     out.extend(_loops(doc))
     return sorted(out)
