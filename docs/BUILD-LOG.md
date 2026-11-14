@@ -490,3 +490,16 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   registered in PhotonVox as `live-a` (its own HTC gateway by id, no vox-agent, the write role's login sealed). 4.3 HUEPC adopted for Hickory
   Church through `app.manage adopt`, which read the engine as photonvox_rw and proved the no-op: objects 15, rows 47, extras 72, one item to
   decide (extension 701). PhotonVox shows it as new, adopted, no version yet. Nothing was written to the engine.
+- **Step 5, the first publish (2026-11-14, 23:59–00:02 UTC; Hickory Church empty until Sunday):** 5.0 the test-call and restore scripts on
+  CT 600 (checksums equal); a fresh dump (`/root/photon-changes/fusionpbx-pre-publish.dump`, 4.2 MB, also on the NAS, sha256 equal); the
+  domain's fingerprints (9 tables); 7 registrations, no channels, PhotonConsole's shim active. 5.1 **version 1 published: ready, no check
+  gates (adopted), nothing written.** 5.2 **the fingerprints after: IDENTICAL (empty diff); drift: 0 changed, 0 missing, 0 extra, 0
+  hand-built changed.** 5.3 test calls placed by FreeSWITCH: 101 → 100 bridged to the registered phone (rang, hung up after 4 s); the menu
+  answered; **the carrier loop**: 101 → the main number out through the HTC gateway on HTC's profile, back in from HTC to the main number and
+  into the menu; every leg hung up, the four call records NORMAL_CLEARING. Never 911, 933 or 9911. 5.4 the Emergency-911 route read, never
+  called: order 5, enabled, md5 7d2d09fa…d2d1 before and after; 7 registrations again, no channel left, the shim active; PhotonVox shows HUEPC
+  ready, version 1, adopted; the rows still identical after the calls.
+- **HUEPC is managed by PhotonVox**, behavior unchanged. Rollback stays ready for the week (step5.sh R0/R1/R2; the dumps kept on CT 600 and the
+  NAS). Hand edits are found by the drift check (on PhotonVox's rows and the 72 hand-built ones) and nothing locks Hickory Church out of
+  FusionPBX's screens; putting a hand edit back needs vox-agent on CT 600 (a later step: until then such a publish is refused before it commits).
+  Next, with Connor: extension 701's caller ID, the protections version, vox-agent on CT 600 (port 8781).
