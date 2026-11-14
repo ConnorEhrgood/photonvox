@@ -13,7 +13,8 @@ const EMPTY = { street: '', unit: '', city: '', state: '', zip: '' }
 /** The organization's sites, from the PhotonID directory's copy (added and edited in the directory, for every Photon product). Here each site is
  *  set up for phones: its emergency address (911, validated before the site can have phones: ARCHITECTURE §11), the number a 911 call from it
  *  shows, the number its calls show, and its office hours. */
-export function SitesPage() {
+/** `only`: one site's home (/org/<slug>/site/<site-slug>/), the same page for that site alone. */
+export function SitesPage({ only }: { only?: string } = {}) {
   const { api } = useAuth()
   const { current, can } = useTenant()
   const base = `/tenants/${current!.id}`
@@ -22,22 +23,24 @@ export function SitesPage() {
   const e911 = useLoad(() => (ps.data ? api.get<EmergencyState>(`${base}/emergency`) : Promise.resolve(null)), [api, base, ps.data?.id])
   const [setup, setSetup] = useState<Site | null>(null)
   const build = !!draft && can('vox.phone_system.build')
+  const shown = sites.data ? (only ? sites.data.filter((s) => s.slug === only) : sites.data) : null
   return (
     <>
-      <PageHeader title="Sites">
+      <PageHeader title={only && shown?.[0] ? shown[0].name : 'Sites'}>
         <a className="ph-btn ph-btn-secondary" href={DIRECTORY_URL} target="_blank" rel="noopener noreferrer">Manage sites</a>
       </PageHeader>
       <ErrorText>{sites.error}</ErrorText>
       {sites.loading && !sites.data && <Loading what="sites" />}
-      {sites.data && sites.data.length === 0 && (
+      {only && shown && shown.length === 0 && <div className="ph-empty"><p>This organization has no site at this address.</p></div>}
+      {!only && sites.data && sites.data.length === 0 && (
         <div className="ph-empty"><p>No sites yet. Sites are added in <a href={DIRECTORY_URL} target="_blank" rel="noopener noreferrer">Manage organization</a> and appear here by themselves.</p></div>
       )}
-      {sites.data && sites.data.length > 0 && (
+      {shown && shown.length > 0 && (
         <div className="ph-table-wrap">
           <table className="ph-table pv-table">
             <thead><tr><th>Site</th><th>Address</th><th>Time zone</th><th>Emergency address</th><th>Phones</th><th><span className="ph-sr-only">Set up</span></th></tr></thead>
             <tbody>
-              {sites.data.map((s) => {
+              {shown.map((s) => {
                 const inDraft = draft?.sites?.[s.id]
                 const loc = e911.data?.locations.find((l) => l.site_id === s.id && (!inDraft || l.key === inDraft.emergency_location))
                 const [tone, text] = loc ? LOCATION[loc.status] : (['warning', 'Not set up'] as const)

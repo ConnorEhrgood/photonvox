@@ -7,6 +7,9 @@ export type Scope = { all: true } | { sites: string[] }
 export interface TenantAccess {
   id: string
   name: string
+  /** The organization's address in every Photon product, /org/<slug>/ (from the directory); its former ones redirect. */
+  slug?: string | null
+  former_slugs?: string[]
   status: string
   partner_id: string | null
   role: Role

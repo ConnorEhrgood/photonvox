@@ -1,7 +1,24 @@
 // GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
+import { AppSwitcher, type SwitcherData } from './AppSwitcher'
 import { Icon, PhotonMark, type IconName } from './icons'
+
+/** The width at which the sidebar becomes a drawer and the top bar appears (components.css). */
+const PHONE = '(max-width: 900px)'
+
+function useIsPhone(): boolean {
+  const query = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(PHONE).matches
+  const [phone, setPhone] = useState(query)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const m = window.matchMedia(PHONE)
+    const on = () => setPhone(m.matches)
+    m.addEventListener('change', on)
+    return () => m.removeEventListener('change', on)
+  }, [])
+  return phone
+}
 
 export interface NavItem {
   to: string
@@ -38,6 +55,8 @@ export interface AppShellProps {
   /** A message for the whole page, above the content (billing, an unconfirmed address). */
   banner?: ReactNode
   account: { name: string; detail?: string; actions: AccountAction[] }
+  /** The suite's app switcher (AppSwitcher.tsx): this product's key and how to load the list for the organization and site on screen. */
+  apps?: { current: string; load: () => Promise<SwitcherData>; homeUrl?: string }
   children: ReactNode
 }
 
@@ -45,7 +64,7 @@ export interface AppShellProps {
  * The one application frame for every Photon product: sidebar on the left (a drawer on phones), settings pinned at the bottom,
  * the signed-in person's menu under it. GENERATED COPY: edit it in photon-ui (shell/), then run scripts/sync-vendored.mjs.
  */
-export function AppShell({ product, home, groups, footer = [], switcher, status, banner, account, children }: AppShellProps) {
+export function AppShell({ product, home, groups, footer = [], switcher, status, banner, account, apps, children }: AppShellProps) {
   // The drawer remembers the page it was opened on, so going anywhere else closes it without an effect to do so.
   const { pathname } = useLocation()
   const [openAt, setOpenAt] = useState<string | null>(null)
@@ -57,6 +76,19 @@ export function AppShell({ product, home, groups, footer = [], switcher, status,
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
+
+  // The app switcher: ONE copy, in the sidebar's head on a desktop and in the top bar on a phone; Ctrl+. or ⌘. opens it from anywhere.
+  const phone = useIsPhone()
+  const [appsOpen, setAppsOpen] = useState(false)
+  useEffect(() => {
+    if (!apps) return
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '.') { e.preventDefault(); setAppsOpen((v) => !v) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [apps])
+  const appSwitcher = apps && <AppSwitcher {...apps} open={appsOpen} onOpenChange={setAppsOpen} />
 
   const item = (n: NavItem) => (
     <NavLink key={n.to} to={n.to} end={n.end} className="ph-nav-item">
@@ -71,6 +103,7 @@ export function AppShell({ product, home, groups, footer = [], switcher, status,
       <aside id="ph-sidebar" className="ph-sidebar" data-open={open || undefined}>
         <div className="ph-sidebar-head">
           <Link to={home} className="ph-brand"><PhotonMark />{product}</Link>
+          {appSwitcher && !phone && appSwitcher}
         </div>
         {switcher && <div className="ph-sidebar-switcher">{switcher}</div>}
         <nav className="ph-sidebar-nav" aria-label="Main">
@@ -94,6 +127,7 @@ export function AppShell({ product, home, groups, footer = [], switcher, status,
             <Icon name="menu" size={20} />
           </button>
           <Link to={home} className="ph-brand"><PhotonMark />{product}</Link>
+          {appSwitcher && phone && appSwitcher}
         </header>
         {banner && <div className="ph-app-banner">{banner}</div>}
         <main className="ph-main">{children}</main>

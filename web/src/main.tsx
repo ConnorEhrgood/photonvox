@@ -17,6 +17,8 @@ const oidc = new OidcTokenSource(new PhotonSignIn({
   issuer: config.oidcIssuer,
   clientId: config.oidcClientId,
   audienceProject: config.oidcAudienceProject,
+  // The directory's audience too, so the same token reads the app switcher's list (photonid HOME-BRIEFS item 2); PhotonVox's API checks its own.
+  ...(config.directoryAudienceProject ? { extraScope: `urn:zitadel:iam:org:project:id:${config.directoryAudienceProject}:aud` } : {}),
 }))
 // The paste-a-token escape hatch exists only in development builds; Vite removes this branch from production.
 const source: TokenSource = import.meta.env.DEV && env.VITE_DEV_TOKEN_LOGIN ? new HybridTokenSource(oidc, new DevTokenSource()) : oidc

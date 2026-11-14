@@ -121,6 +121,8 @@ services:
         VITE_OIDC_CLIENT_ID: ${VITE_OIDC_CLIENT_ID:-}
         VITE_OIDC_AUDIENCE_PROJECT: ${VITE_OIDC_AUDIENCE_PROJECT:-}
         VITE_DIRECTORY_APP_URL: ${VITE_DIRECTORY_APP_URL:-}
+        VITE_DIRECTORY_API_URL: ${VITE_DIRECTORY_API_URL:-https://api.account.photonind.com}
+        VITE_DIRECTORY_AUDIENCE_PROJECT: ${VITE_DIRECTORY_AUDIENCE_PROJECT:-}
         BUILD_SHA: ${BUILD_SHA:-unknown}
     image: photonvox-web:dev
     restart: unless-stopped

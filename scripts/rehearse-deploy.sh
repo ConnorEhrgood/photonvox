@@ -105,6 +105,10 @@ check "  a deep link goes to the app" "$(get vox.photonind.com /platform/instanc
 check "api.vox.photonind.com/healthz" "$(get api.vox.photonind.com /healthz)" 200
 # (FastAPI reads a route's body before checking who is asking, so the proxy's limit is what stops it.)
 check "  a 3 MB body is refused by the proxy" "$(head -c 3000000 /dev/zero | curl -sk -o /dev/null -w '%{http_code}' --resolve api.vox.photonind.com:18443:127.0.0.1 -X PUT -H 'Content-Type: application/json' --data-binary @- https://api.vox.photonind.com:18443/tenants/00000000-0000-4000-8000-000000000000/phone-system/draft)" 413
+check "  the page may call the directory's API (the app switcher)" "$(curl -skI --resolve vox.photonind.com:18443:127.0.0.1 https://vox.photonind.com:18443/ | grep -ci '^content-security-policy:.*https://api.account.photonind.com')" 1
+check "  the summary answers the dashboard's preflight" "$(curl -sk -o /dev/null -w '%{http_code}' --resolve api.vox.photonind.com:18443:127.0.0.1 -X OPTIONS -H 'Origin: https://account.photonind.com' -H 'Access-Control-Request-Method: GET' https://api.vox.photonind.com:18443/v1/summary)" 204
+check "  the summary without a token is 401" "$(curl -sk -o /dev/null -w '%{http_code}' --resolve api.vox.photonind.com:18443:127.0.0.1 https://api.vox.photonind.com:18443/v1/summary)" 401
+check "  migrations at 0008" "$($C exec -T db psql -U photonvox -d photonvox -tAc 'select version_num from alembic_version' < /dev/null)" 0008
 check "  CORS for the web app's origin" "$(curl -skI --resolve api.vox.photonind.com:18443:127.0.0.1 -X OPTIONS -H 'Origin: https://vox.photonind.com' -H 'Access-Control-Request-Method: GET' https://api.vox.photonind.com:18443/healthz | grep -ci '^access-control-allow-origin: https://vox.photonind.com')" 1
 
 echo "== the nightly backup's lines (proposed for backup-host.sh)"

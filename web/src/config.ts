@@ -6,9 +6,14 @@ export interface AppConfig {
   oidcClientId: string
   oidcAudienceProject: string
   directoryAppUrl: string
+  /** The PhotonID directory's API (the app switcher reads it with the person's token) and its project (asked for at sign-in, so the token
+   *  also carries the directory's audience; production 398636902653100035, dev 398336253029777411). Empty: no switcher list. */
+  directoryApiUrl: string
+  directoryAudienceProject: string
 }
 
-type Raw = Partial<Record<'VITE_API_URL' | 'VITE_OIDC_ISSUER' | 'VITE_OIDC_CLIENT_ID' | 'VITE_OIDC_AUDIENCE_PROJECT' | 'VITE_DIRECTORY_APP_URL', string>>
+type Raw = Partial<Record<'VITE_API_URL' | 'VITE_OIDC_ISSUER' | 'VITE_OIDC_CLIENT_ID' | 'VITE_OIDC_AUDIENCE_PROJECT' | 'VITE_DIRECTORY_APP_URL'
+  | 'VITE_DIRECTORY_API_URL' | 'VITE_DIRECTORY_AUDIENCE_PROJECT', string>>
 
 /** `injected` wins over `vite` per name, and an empty value counts as unset (an unfilled template must not hide a development value). */
 export function readConfig(injected: Raw | undefined, vite: Raw): AppConfig {
@@ -16,6 +21,7 @@ export function readConfig(injected: Raw | undefined, vite: Raw): AppConfig {
   return {
     apiUrl: pick('VITE_API_URL'), oidcIssuer: pick('VITE_OIDC_ISSUER'), oidcClientId: pick('VITE_OIDC_CLIENT_ID'),
     oidcAudienceProject: pick('VITE_OIDC_AUDIENCE_PROJECT'), directoryAppUrl: pick('VITE_DIRECTORY_APP_URL') || 'https://account.photonind.com',
+    directoryApiUrl: pick('VITE_DIRECTORY_API_URL') || 'https://api.account.photonind.com', directoryAudienceProject: pick('VITE_DIRECTORY_AUDIENCE_PROJECT'),
   }
 }
 

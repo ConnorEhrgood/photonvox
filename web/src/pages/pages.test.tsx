@@ -1,8 +1,9 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Route, Routes } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
-import { App, Home } from '../App'
+import { Route, Routes, useParams } from 'react-router-dom'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { App, Home, OrgHome } from '../App'
+import { OrgRoute } from '../auth/TenantContext'
 import { Layout } from '../components/Layout'
 import { meWith, OWNER, renderApp, TECH_A, TECH_B, USER } from '../test/helpers'
 import { CustomersPage } from './Customers'
@@ -77,16 +78,71 @@ describe('home', () => {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/customers" element={<p>customers</p>} />
-      <Route path="/overview" element={<p>overview</p>} />
-      <Route path="/my-phone" element={<p>my phone</p>} />
+      <Route path="/org/:org/" element={<OrgSeen />} />
       <Route path="/platform" element={<p>platform</p>} />
     </Routes>, { route: '/', me, routes: {} })
-  it('goes to the customer list for an integrator', async () => { home(meWith(TECH_A)); expect(await screen.findByText('customers')).toBeInTheDocument() })
-  it('goes to the overview for a customer’s admin', async () => { home(); expect(await screen.findByText('overview')).toBeInTheDocument() })
-  it('goes to My phone for a user', async () => { home(meWith(USER)); expect(await screen.findByText('my phone')).toBeInTheDocument() })
+  beforeEach(() => localStorage.clear())
+  it('with one organization, straight into it', async () => { home(); expect(await screen.findByText('org t1')).toBeInTheDocument() })
+  it('with several, the one this person last opened in PhotonVox', async () => {
+    localStorage.setItem('pg:tenant', 't2'); home(meWith(TECH_A, TECH_B)); expect(await screen.findByText('org t2')).toBeInTheDocument()
+  })
+  it('with several and none opened yet, the list to choose from', async () => { home(meWith(TECH_A, TECH_B)); expect(await screen.findByText('customers')).toBeInTheDocument() })
+  it('a remembered organization this person no longer reaches is not opened', async () => {
+    localStorage.setItem('pg:tenant', 'gone'); home(meWith(TECH_A, TECH_B)); expect(await screen.findByText('customers')).toBeInTheDocument()
+  })
   it('goes to Platform for Photon staff with no organization', async () => { home({ ...meWith(), is_staff: true }); expect(await screen.findByText('platform')).toBeInTheDocument() })
-  it('a platform administrator flag alone is not staff in the app (the API says is_staff)', async () => {
-    home({ ...meWith(), is_platform_admin: true }); expect(await screen.findByText('my phone')).toBeInTheDocument()
+  it('the address uses the organization’s slug once the directory has sent it', async () => {
+    home(meWith({ ...OWNER, slug: 'cedar-works' })); expect(await screen.findByText('org cedar-works')).toBeInTheDocument()
+  })
+})
+
+function OrgSeen() {
+  const { org, orgSlug } = useParams()
+  return <p>org {org ?? orgSlug}</p>
+}
+
+describe('addresses', () => {
+  const CEDAR = { ...OWNER, slug: 'cedar-works', former_slugs: ['cedar'] }
+  const app = (route: string, me = meWith(CEDAR)) => renderApp(<App />, { route, me, routes: {
+    'GET /tenants/t1/phone-system': null, 'GET /tenants/t1/sites': SITES, 'GET /tenants/t1/members': [] }, bare: true })
+  it('an organization’s home in PhotonVox is its overview, or My phone for someone with only their own', async () => {
+    const at = (me: ReturnType<typeof meWith>) => renderApp(
+      <Routes><Route path="/org/:orgSlug" element={<OrgRoute />}>
+        <Route index element={<OrgHome />} /><Route path="overview" element={<p>overview</p>} /><Route path="my-phone" element={<p>my phone</p>} />
+      </Route></Routes>, { route: '/org/cedar-works/', me, routes: {} })
+    at(meWith(CEDAR))
+    expect(await screen.findByText('overview')).toBeInTheDocument()
+  })
+  it('… and My phone for a user', async () => {
+    renderApp(<Routes><Route path="/org/:orgSlug" element={<OrgRoute />}><Route index element={<OrgHome />} />
+      <Route path="my-phone" element={<p>my phone</p>} /></Route></Routes>, { route: '/org/cedar-works/', me: meWith({ ...USER, slug: 'cedar-works' }), routes: {} })
+    expect(await screen.findByText('my phone')).toBeInTheDocument()
+  })
+  it('a former slug goes to the same page under the slug it has now', async () => {
+    app('/org/cedar/sites')
+    expect(await screen.findByRole('heading', { name: 'Sites' })).toBeInTheDocument()
+  })
+  it('an organization this person cannot reach is a page saying so, never another organization', async () => {
+    app('/org/someone-else/overview')
+    expect(await screen.findByRole('heading', { name: 'No such organization in PhotonVox' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Cedar Works' })).toBeNull()
+  })
+  it('an old address without /org/ is the same page in the current organization', async () => {
+    app('/sites')
+    expect(await screen.findByRole('heading', { name: 'Sites' })).toBeInTheDocument()
+  })
+  it('a site’s home is that site alone', async () => {
+    app(`/org/cedar-works/site/${SITES[1].slug}`)
+    expect(await screen.findByRole('heading', { name: SITES[1].name })).toBeInTheDocument()
+    expect(screen.queryByText(SITES[0].name)).toBeNull()
+  })
+  it('a site that is not there says so', async () => {
+    app('/org/cedar-works/site/nowhere')
+    expect(await screen.findByText('This organization has no site at this address.')).toBeInTheDocument()
+  })
+  it('an unknown page inside an organization says it is not for them', async () => {
+    app('/org/cedar-works/nonsense')
+    expect(await screen.findByText('Your role doesn’t include this page.')).toBeInTheDocument()
   })
 })
 
@@ -114,13 +170,13 @@ describe('customers', () => {
     renderApp(
       <Routes>
         <Route path="/customers" element={<CustomersPage />} />
-        <Route path="/overview" element={<p>overview</p>} />
+        <Route path="/org/:org/" element={<OrgSeen />} />
       </Routes>, { route: '/customers', me: meWith(TECH_A, TECH_B), routes: {} })
     const rows = await screen.findAllByRole('row')
     expect(rows).toHaveLength(3)
     expect(screen.getAllByText('Admin (partner)')).toHaveLength(2)
     await userEvent.click(screen.getByRole('button', { name: 'Open Birch Co' }))
-    expect(await screen.findByText('overview')).toBeInTheDocument()
+    expect(await screen.findByText('org t2')).toBeInTheDocument()
   })
   it('a restricted customer says so', async () => {
     renderApp(<CustomersPage />, { me: meWith({ ...TECH_A, status: 'suspended' }), routes: {} })
@@ -175,10 +231,26 @@ describe('platform', () => {
 })
 
 describe('the shell’s controls', () => {
-  it('the customer picker switches customers', async () => {
-    withShell('/overview', meWith(TECH_A, TECH_B))
+  it('the app switcher asks the directory for this organization and site, with the person’s token', async () => {
+    const apps = { home: 'https://account.photonind.com/', organization: { id: 't1', slug: 'cedar-works', name: 'Cedar Works' },
+      site: { id: 's2', slug: 'cw-annex', name: 'Annex' },
+      apps: [{ key: 'vox', name: 'PhotonVox', state: 'open', url: 'https://vox.photonind.com/org/cedar-works/site/cw-annex/' },
+             { key: 'console', name: 'PhotonConsole', state: 'open', url: 'https://console.photonind.com/org/cedar-works/site/cw-annex/' }] }
+    const { calls } = renderApp(<Routes><Route path="/org/:orgSlug" element={<OrgRoute />}><Route element={<Layout />}>
+      <Route path="*" element={<OrgSeen />} /></Route></Route></Routes>,
+      { route: '/org/cedar-works/site/cw-annex/', me: meWith({ ...OWNER, slug: 'cedar-works' }), routes: { 'GET /v1/me/apps': apps } })
+    await userEvent.click(await screen.findByRole('button', { name: 'Switch app' }))
+    expect(await screen.findByRole('link', { name: /PhotonConsole/ })).toHaveAttribute('href', apps.apps[1].url)
+    expect(calls.find((c) => c.path.startsWith('/v1/me/apps'))?.path).toBe('/v1/me/apps?organization=cedar-works&site=cw-annex')
+  })
+  it('the customer picker goes to the other customer’s address, and the shell follows it', async () => {
+    renderApp(<Routes><Route path="/org/:orgSlug" element={<OrgRoute />}><Route element={<Layout />}><Route index element={<OrgSeen />} />
+      <Route path="*" element={<OrgSeen />} /></Route></Route></Routes>,
+      { route: '/org/t1/overview', me: meWith(TECH_A, TECH_B), routes: {} })
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Customer' }), 't2')
+    expect(await screen.findByText('org t2')).toBeInTheDocument()
     expect((screen.getByRole('combobox', { name: 'Customer' }) as HTMLSelectElement).value).toBe('t2')
+    expect(screen.getByRole('link', { name: /Phones/ })).toHaveAttribute('href', '/org/t2/phones')
   })
   it('the account menu opens Manage organization and signs out', async () => {
     const opened: string[] = []

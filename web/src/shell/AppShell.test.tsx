@@ -1,5 +1,5 @@
 // GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
@@ -107,5 +107,46 @@ describe('AppShell', () => {
     await user.click(button())
     await user.click(screen.getByRole('link', { name: 'Content' }))
     expect(sidebar).not.toHaveAttribute('data-open')
+  })
+
+  describe('the app switcher', () => {
+    const data = { home: 'https://account.test/', organization: { id: 'o', slug: 'huepc', name: 'HUEPC' }, site: null,
+                   apps: [{ key: 'console', name: 'PhotonConsole', state: 'open' as const, url: 'https://console.test/org/huepc/' }] }
+    function phoneScreen(matches: boolean) {
+      const listeners: Array<() => void> = []
+      const m = { matches, addEventListener: (_: string, f: () => void) => listeners.push(f), removeEventListener: vi.fn() }
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: vi.fn(() => m) })
+      return { change(to: boolean) { m.matches = to; listeners.forEach((f) => f()) } }
+    }
+
+    it('sits in the sidebar head on a desktop and opens with Ctrl+. or Cmd+.', async () => {
+      phoneScreen(false)
+      renderShell({ apps: { current: 'vox', load: async () => data } })
+      const btn = screen.getByRole('button', { name: 'Switch app' })
+      expect(btn.closest('.ph-sidebar-head')).not.toBeNull()
+      await userEvent.keyboard('{Control>}.{/Control}')
+      expect(await screen.findByRole('link', { name: 'PhotonConsole' })).toHaveAttribute('href', 'https://console.test/org/huepc/')
+      await userEvent.keyboard('{Meta>}.{/Meta}')
+      expect(screen.queryByRole('dialog')).toBeNull()
+      await userEvent.keyboard('.')                      // a plain dot does nothing
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    it('moves to the top bar on a phone (one copy only), and follows the screen', () => {
+      const screenSize = phoneScreen(true)
+      renderShell({ apps: { current: 'vox', load: async () => data } })
+      expect(screen.getAllByRole('button', { name: 'Switch app' })).toHaveLength(1)
+      expect(screen.getByRole('button', { name: 'Switch app' }).closest('.ph-topbar')).not.toBeNull()
+      act(() => screenSize.change(false))
+      expect(screen.getByRole('button', { name: 'Switch app' }).closest('.ph-sidebar-head')).not.toBeNull()
+    })
+
+    it('is absent, and the shortcut does nothing, when the product passes none', async () => {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: undefined })
+      renderShell()
+      expect(screen.queryByRole('button', { name: 'Switch app' })).toBeNull()
+      await userEvent.keyboard('{Control>}.{/Control}')
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
   })
 })

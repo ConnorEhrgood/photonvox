@@ -62,6 +62,31 @@
 }
 .ph-menu-item:hover { background: var(--surface-raised); color: var(--text); }
 
+/* --- The app switcher (shell/AppSwitcher.tsx) --- */
+.ph-sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.ph-appswitch { position: relative; margin-left: auto; }
+.ph-appswitch-btn { color: var(--text-dim); }
+.ph-appswitch-btn[aria-expanded="true"] { color: var(--text); background: var(--surface-raised); }
+.ph-appswitch-panel {
+  position: absolute; z-index: 95; top: calc(100% + 0.35rem); left: 0; width: min(20rem, calc(100vw - 2rem));
+  display: grid; gap: 0.35rem; padding: 0.6rem; background: var(--surface-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+}
+.ph-topbar .ph-appswitch-panel { left: auto; right: 0; }
+.ph-appswitch-filter { width: 100%; }
+.ph-appswitch-where { padding: 0.35rem 0.5rem 0; font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
+.ph-appswitch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
+.ph-appswitch-item {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-radius: var(--radius-sm); color: var(--text); text-decoration: none;
+}
+.ph-appswitch-item span { display: grid; min-width: 0; }
+.ph-appswitch-item small { color: var(--text-dim); font-size: 0.8rem; }
+a.ph-appswitch-item:hover, a.ph-appswitch-item:focus-visible { background: var(--surface-hover); color: var(--text); }
+.ph-appswitch-item[aria-disabled="true"] { color: var(--text-dim); }
+.ph-appswitch-item[data-current] { color: var(--text); background: var(--accent-soft); }   /* the "you are here" pill, as in the sidebar (the left bar means status) */
+.ph-appswitch-home { border-bottom: 1px solid var(--border); border-radius: var(--radius-sm) var(--radius-sm) 0 0; padding-bottom: 0.6rem; }
+.ph-appswitch-note { margin: 0; padding: 0.4rem 0.6rem; }
+
 .ph-topbar { display: none; }
 .ph-topbar .ph-btn-ghost { color: var(--text); }
 .ph-scrim { display: none; }

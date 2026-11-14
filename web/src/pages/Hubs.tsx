@@ -18,11 +18,12 @@ function Hub({ title, tabs }: { title: string; tabs: { to: string; label: string
 /** The Settings tabs this person may use; they follow what the role can do (a user has none). */
 export function settingsTabs(can: (capability: string) => boolean): { to: string; label: string }[] {
   const tabs = []
-  if (can('vox.members.view')) tabs.push({ to: '/settings/team', label: 'Team' })
-  if (can('vox.phone_system.build')) tabs.push({ to: '/settings/templates', label: 'Templates' })
-  if (can('vox.phone_system.view')) tabs.push({ to: '/settings/alerts', label: 'Alerts' })
-  if (can('vox.console.manage')) tabs.push({ to: '/settings/console', label: 'PhotonConsole connection' })
-  if (can('vox.audit.view')) tabs.push({ to: '/settings/audit', label: 'Audit log' })
+  // Relative: Settings lives in the organization's address (/org/<slug>/settings/…).
+  if (can('vox.members.view')) tabs.push({ to: 'team', label: 'Team' })
+  if (can('vox.phone_system.build')) tabs.push({ to: 'templates', label: 'Templates' })
+  if (can('vox.phone_system.view')) tabs.push({ to: 'alerts', label: 'Alerts' })
+  if (can('vox.console.manage')) tabs.push({ to: 'console', label: 'PhotonConsole connection' })
+  if (can('vox.audit.view')) tabs.push({ to: 'audit', label: 'Audit log' })
   return tabs
 }
 
