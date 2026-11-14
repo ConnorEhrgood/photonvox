@@ -13,12 +13,10 @@ import os
 import re
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, text
 
 from app import manage
-from app.db import SystemSession
-from app.engine import fusionpbx, service, takeover
-from app.models import PhoneSystem, PhoneSystemVersion
+from app.engine import fusionpbx, takeover
 from app.engine.agent import HttpAgent
 from app.routes import platform
 from tests.api.conftest import auth
@@ -67,11 +65,7 @@ def test_the_protections_version_on_the_copy(client, world):
     undo = None
     if os.environ.get("VOX_STAGING_UNDO") == "1":
         # The undo: version 1 (the takeover's document) published again. Every row of the domain as the takeover left it; PhotonVox's routes gone.
-        with SystemSession() as s:
-            ps = s.execute(select(PhoneSystem)).scalar_one()
-            v = service.queue(s, ps, s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.number == 1)).scalar_one().document, None, "test", "undo")
-            s.commit()
-            assert service.publish_version(s, v.id, connect) == "ready"
+        assert op("republish", world.a, "1", "undo: the takeover's version again")["state"] == "ready"          # the rollback's own command
         after = rows_of(eng, domain)
         assert after == takeover_rows, sorted(set(after.items()) ^ set(takeover_rows.items()))[:6]
         assert op("drift", world.a)["changed"] == []

@@ -4,8 +4,10 @@ decision 32), where no browser sign-in is involved. Secrets come on standard inp
 
     add-instance <name> <hostname> <own gateway key>=<gateway id> < database-url    an engine with its own gateways and no vox-agent
     set-agent <instance name> <agent url> < agent-secret                            its vox-agent, proved by a signed status call first
+    set-agent <instance name> off                                                   no vox-agent (publishes that need one are refused)
     adopt <instance name> <organization id> <site id> <domain>                      read, import, prove a no-op, keep (writes nothing to the engine)
     publish <organization id> <note>                                                queue the draft and publish it now (the worker's own code)
+    republish <organization id> <version number> <note>                             an earlier version again (the undo), as the draft too
     drift <organization id>                                                         compare the engine with what is published
     set-format <instance name> <upstream key>=<e164|nanp10>                         how an upstream wants North American numbers
     readopt <organization id>                                                       prove the takeover again with this build's importer (no engine write)
@@ -58,6 +60,13 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
                          target_id=i.id, name=name)
             s.commit()
             json.dump({"instance": str(i.id), "name": name, "own_gateways": i.own_gateways}, out)
+        elif cmd == "set-agent" and args[1:] == ["off"]:
+            i = s.execute(select(PbxInstance).where(PbxInstance.name == args[0])).scalar_one()
+            i.agent, i.agent_secret_sealed = {"kind": "none"}, ""
+            audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="instance.agent_off", target_type="pbx_instance",
+                         target_id=i.id)
+            s.commit()
+            json.dump({"instance": args[0], "agent": None}, out)
         elif cmd == "set-agent":
             name, url = args
             secret = stdin.readline().strip()
@@ -95,6 +104,23 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
             state = service.publish_version(s, v.id, connect)
             v = s.get(PhoneSystemVersion, v.id)
             json.dump({"version": v.number, "state": state, "error": v.error, "checks": (v.check or {}).get("results", [])}, out)
+        elif cmd == "republish":
+            tenant, number, note = args
+            ps = _ps(s, tenant)
+            old = s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id,
+                                                             PhoneSystemVersion.number == int(number))).scalar_one_or_none()
+            if old is None:
+                raise SystemExit(f"this phone system has no version {number}")
+            ps.draft = old.document                 # the draft too: the next publish does not bring back what was undone
+            v = service.queue(s, ps, old.document, None, OPERATOR, note)
+            s.flush()
+            audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="phone_system.publish_requested",
+                         tenant_id=ps.tenant_id, target_type="phone_system", target_id=ps.id, version=v.number, note=note, again=int(number))
+            s.commit()
+            state = service.publish_version(s, v.id, connect)
+            v = s.get(PhoneSystemVersion, v.id)
+            json.dump({"version": v.number, "as_version": int(number), "state": state, "error": v.error,
+                       "checks": (v.check or {}).get("results", [])}, out)
         elif cmd == "set-format":
             name, kv = args
             key, _, fmt = kv.partition("=")

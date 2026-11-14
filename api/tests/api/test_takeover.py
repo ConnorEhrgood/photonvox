@@ -279,6 +279,11 @@ def test_the_operator_registers_an_engines_agent_only_once_it_answers(client, wo
         _eng, agent = service.connect(i)
         assert getattr(agent, "available", True) and type(agent).__name__ == "HttpAgent"
         assert "instance.agent_set" in [a.action for a in s.execute(select(AuditLog).where(AuditLog.actor_label == manage.OPERATOR)).scalars()]
+    rc, out = run_("set-agent", "live-a", "off")
+    assert rc == 0 and json.loads(out) == {"instance": "live-a", "agent": None}
+    with SystemSession() as s:
+        i = s.execute(select(PbxInstance).where(PbxInstance.name == "live-a")).scalar_one()
+        assert i.agent == {"kind": "none"} and i.agent_secret_sealed == "" and service.connect(i)[1].available is False
 
 
 class EngineAgent:
@@ -355,12 +360,12 @@ def test_the_protections_version_dry_run_then_published(client, world, instance,
     assert ext["100"].hold_music == f"/{F.DOMAIN}/Music.wav" and ext["101"].password == "sip-secret-101"
     assert f"dialplan.{F.DOMAIN}" in agent.cleared and f"directory.701@{F.DOMAIN}" in agent.cleared
     # Undo: publish version 1 (the takeover's document) again: the hand-built routes are back on exactly as they were, PhotonVox's routes gone.
-    from app.engine import service as svc
+    with pytest.raises(SystemExit, match="no version 9"):
+        run_("republish", world.a, "9", "undo")
+    rc, undone = run_("republish", world.a, "1", "undo: the takeover's version again")
+    assert rc == 0 and undone["state"] == "ready" and undone["as_version"] == 1 and undone["checks"] == []
     with SystemSession() as s:
-        ps = s.execute(select(PhoneSystem)).scalar_one()
-        v = svc.queue(s, ps, s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.number == 1)).scalar_one().document, None, "test", "undo")
-        s.commit()
-        assert svc.publish_version(s, v.id, conn) == "ready"
+        assert not s.execute(select(PhoneSystem)).scalar_one().draft.get("protections")       # the draft is undone too
     with eng.connect() as c:
         on = set(c.execute(text("select dialplan_name from v_dialplans where domain_uuid = :d and dialplan_enabled"), {"d": F.D}).scalars())
         toll = c.execute(text("select toll_allow from v_extensions where extension = '701'")).scalar()
