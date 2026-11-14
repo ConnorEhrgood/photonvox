@@ -587,3 +587,14 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
 - **C**: HUEPC's site 911 address 210 Main St, Hickory, PA 15340 (on file with HTC; Connor), validated with `set-911`; drift 0.
 - **D** (about 04:49 UTC): the dry run, nothing written: blocking nothing; 75 new rows, 15 changed (dial plans switched off; extensions'
   toll_allow and 911 caller ID); calls as rehearsed; table in `~/vox-takeover/data/dryrun-table.txt` for the operator before E and F.
+- **E** (about 04:54 UTC): scripts on CT 600 (checksums equal); a fresh dump `/root/photon-changes/fusionpbx-pre-protections.dump`
+  (4.2 MB, sha256 7236…13e8, the NAS copy equal); fingerprints unchanged since version 2; 7 registrations; Emergency-911 order 5, md5
+  7d2d…d2d1 (as at step 5).
+- **F** (about 04:55 UTC): protect-apply (protections on, five routes to retire), then **version 3 published: ready, 7 of 7 checks**
+  (the four numbers reached their menu or extension, the premium probe blocked, 911 and 933 read from the plan).
+- **G**: drift 0; only v_extensions, v_dialplans (12 → 20) and v_dialplan_details (77 → 144) differ; every extension
+  national:service:toll_free with its 911 caller ID written (…4424; 701 …2300); Emergency-911 unchanged (same md5), photonvox.emergency
+  (933) after it. Test calls: 101 → 100 rang the registered phone; the menu answered; the carrier loop left through HTC as ten digits and
+  came back into the menu; every leg hung up; 7 registrations; FreeSWITCH, vox-agent, the shim and fail2ban active. PhotonVox: ready,
+  version 3. Never 911, 9911, 933, 988 or an N11 code. **The HUEPC protections are live.** Undo for the week: `republish 2` (U0), E's
+  dump (R1), the vzdump with Connor (R2).
