@@ -81,6 +81,34 @@ describe('the access token', () => {
   })
 })
 
+describe('a session begun before the app asked for more', () => {
+  const full = 'openid profile email offline_access urn:zitadel:iam:org:project:id:p:aud urn:zitadel:iam:org:project:id:dir:aud'
+  const withDirectory = () => new PhotonSignIn({ ...cfg, extraScope: 'urn:zitadel:iam:org:project:id:dir:aud' }, m as unknown as UserManagerLike, window.sessionStorage, now)
+  let m: ReturnType<typeof fakeManager>
+
+  it('is dropped, so the app signs in again with every scope it asks for now', async () => {
+    m = fakeManager(user({ scope: 'openid profile email offline_access urn:zitadel:iam:org:project:id:p:aud' }))
+    expect(await withDirectory().getAccessToken()).toBeNull()
+    expect(m.removeUser).toHaveBeenCalledTimes(1)
+  })
+
+  it('once per scope: should PhotonID not grant it, the session is kept rather than looping', async () => {
+    m = fakeManager(user({ scope: 'openid profile email offline_access urn:zitadel:iam:org:project:id:p:aud' }))
+    await withDirectory().getAccessToken()
+    m.set(user({ scope: 'openid profile email offline_access urn:zitadel:iam:org:project:id:p:aud' }))
+    expect(await withDirectory().getAccessToken()).toBe('at')
+    expect(m.removeUser).toHaveBeenCalledTimes(1)
+  })
+
+  it('a session with every scope, more than asked (a sign-up\'s organization), or none recorded is kept', async () => {
+    for (const scope of [full, `${full} urn:zitadel:iam:org:id:9`, undefined]) {
+      m = fakeManager(user({ scope }))
+      expect(await withDirectory().getAccessToken()).toBe('at')
+      expect(m.removeUser).not.toHaveBeenCalled()
+    }
+  })
+})
+
 describe('signing in', () => {
   it('goes to PhotonID once with the deep link as state, however often it is asked', async () => {
     const { auth, m } = make()

@@ -18,6 +18,8 @@ export const CALLBACK_PATH = '/auth/callback'
 export const SIGNED_OUT_PATH = '/auth/signed-out'
 /** How long after coming back from PhotonID a 401 counts as "sign-in did not work" rather than "the session ended". */
 export const LOOP_WINDOW_MS = 60_000
+/** Where the scope a session was last dropped for (it lacked part of it) is kept, so that happens once per scope. */
+const RESCOPED_KEY = 'photon-signin-rescoped'
 /** A token this close to its end is renewed before it is used. */
 export const RENEW_EARLY_S = 30
 const STAMP = 'ph-auth:callback-at'
@@ -89,6 +91,7 @@ export class PhotonSignIn {
   async getAccessToken(): Promise<string | null> {
     const u = await this.mgr.getUser()
     if (!u) return null
+    if (this.startedWithLessScope(u)) { await this.mgr.removeUser(); return null }
     if (!this.needsRenewal(u)) return u.access_token
     if (!u.refresh_token) { await this.mgr.removeUser(); return null }
     try {
@@ -97,6 +100,18 @@ export class PhotonSignIn {
       await this.mgr.removeUser()
       return null
     }
+  }
+
+  /** A session begun before this app asked for a scope it asks for now (the directory's audience for the app switcher, added later) never gains it:
+   * renewal by refresh token keeps the scopes of the first sign-in. Such a session is dropped, so the app signs in again (at once, with the PhotonID
+   * session); once per scope, never in a loop, should PhotonID not grant one. A session that records no scope is taken as it is. */
+  private startedWithLessScope(u: User): boolean {
+    if (!u.scope) return false
+    const have = new Set(u.scope.split(' '))
+    if (this.scope.split(' ').every((s) => have.has(s))) return false
+    if (this.store.getItem(RESCOPED_KEY) === this.scope) return false
+    this.store.setItem(RESCOPED_KEY, this.scope)
+    return true
   }
 
   private needsRenewal(u: User): boolean {
