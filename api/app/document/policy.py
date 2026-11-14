@@ -49,7 +49,7 @@ def touched_sites(old: PhoneSystem, new: PhoneSystem) -> Set[str]:
     out: Set[str] = set()
     if any(getattr(old, part) != getattr(new, part) for part in ORG_WIDE):
         out.add("*")
-    for part, site_of in (("users", lambda x: x.site), ("numbers", lambda x: x.site), ("doors", lambda x: x.site)):
+    for part, site_of in (("users", lambda x: x.site), ("numbers", lambda x: x.site), ("doors", lambda x: x.site), ("pages", lambda x: x.site)):
         a, b = getattr(old, part), getattr(new, part)
         for key in set(a) | set(b):
             if a.get(key) != b.get(key):

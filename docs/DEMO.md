@@ -13,7 +13,7 @@ One phone system with three of its four sites (`demo-billboards` has no phones; 
 | Site | Phones | Numbers | Call flows |
 |---|---|---|---|
 | `demo-hq` Headquarters, Pittsburgh (`72a17302-…`) | 12 extensions (100–111: reception, sales ×3, support ×3, accounts, operations, IT, a conference room, the lobby phone) | 0100 main; 0101–0104 direct lines | Menu "1 sales, 2 support, 3 accounts, 0 reception" (timeout: reception); ring groups Sales and Support (simultaneous, then voicemail); closed hours → the company's voicemail box |
-| `demo-warehouse` Distribution Center, Washington PA (`736b1e29-…`) | 5 extensions (200–204: shipping desk, dock office, two forklift handsets, the supervisor) and 2 overhead speakers (210, 211) | 0140 main, 0141 the dock | Ring group Shipping; **paging** group 290 (every warehouse phone and both speakers) |
+| `demo-warehouse` Distribution Center, Washington PA (`736b1e29-…`) | 5 extensions (200–204: shipping desk, dock office, two forklift handsets, the supervisor) and 2 overhead speakers (220, 221; 211 is a service code) | 0140 main, 0141 the dock | Ring group Shipping; **paging** group 290 (every warehouse phone and both speakers) |
 | `demo-apartments` Riverside Apartments, Wheeling WV (`e8088684-…`) | 4 extensions (300–303: leasing ×2, maintenance, the office) | 0170 leasing, 0171 maintenance line | Leasing ring group in office hours, then a box; the maintenance line rings the on-call phone, after hours its own box |
 
 0180–0199 are "the outside world": the simulated callers and the numbers the phones call. They are never the organization's numbers.

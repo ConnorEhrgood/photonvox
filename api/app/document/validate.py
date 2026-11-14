@@ -171,5 +171,23 @@ def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str
         if d.closed is not None and hours is None:
             out.append(Problem(f"{p}.closed", "no_hours", "A door with an after-hours outcome needs hours (its own, or its site's)."))
 
+    for pid, pg in doc.pages.items():
+        p = f"pages.{pid}"
+        if pg.site not in doc.sites:
+            out.append(Problem(f"{p}.site", "unknown_site", "This paging group's site is not in the phone system."))
+        elif doc.sites[pg.site].outside_prefix and pg.extension.startswith(doc.sites[pg.site].outside_prefix):
+            out.append(Problem(f"{p}.extension", "extension_prefix", f"At this site {doc.sites[pg.site].outside_prefix} starts an outside call, so no extension may start with it."))
+        if pg.extension in SERVICE_CODES:
+            out.append(Problem(f"{p}.extension", "extension_reserved", f"{pg.extension} is a service number (911, 988, 311…) and can't be an extension."))
+        if pg.extension in by_ext:
+            out.append(Problem(f"{p}.extension", "extension_taken", f"Extension {pg.extension} is already {by_ext[pg.extension]}'s."))
+        else:
+            by_ext[pg.extension] = pid
+        for i, m in enumerate(pg.members):
+            if m not in doc.users:
+                out.append(Problem(f"{p}.members.{i}", "unknown_user", f"There is no user {m!r}."))
+        if len(set(pg.members)) != len(pg.members):
+            out.append(Problem(f"{p}.members", "duplicate_member", "Someone is in this paging group twice."))
+
     out.extend(_loops(doc))
     return sorted(out)

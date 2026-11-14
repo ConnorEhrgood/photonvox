@@ -179,6 +179,6 @@ export interface Dashboard {
   busiest?: { grid: number[][]; top: { weekday: number; hour: number; calls: number } | null } | null
   week?: HourMix | null
   emergency?: { at: string; dialed: string; extension: string | null; who: string | null; site: string | null; address: string | null; answered: boolean; seconds: number }[] | null
-  voicemail?: { new: number; boxes: { box: string; name: string; new: number; oldest_new: string | null }[] } | null
+  voicemail?: { new: number; boxes: { box: string; extension: string | null; name: string; new: number; oldest_new: string | null }[] } | null
   numbers?: { number: string; site: string | null; rings: string; closed: string | null; calls_today: number; last_call: string | null }[]
 }

@@ -136,6 +136,15 @@ class Door(Strict):
     hours: Optional[str] = Field(None, pattern=NAME)   # defaults to the site's hours
 
 
+class Page(Strict):
+    """A paging group: dialing its extension speaks one way through every member's phone at once (FusionPBX's page: each phone answers on its
+    own speaker, muted). Members are users: an overhead speaker is a user with its voicemail off."""
+    name: Label
+    site: SiteId
+    extension: str = Field(pattern=r"^[1-8][0-9]{1,4}$")
+    members: List[Key] = Field(min_length=1, max_length=100)
+
+
 class Box(Strict):
     """A shared voicemail box ("general"), separate from users' own."""
     name: Label
@@ -186,6 +195,7 @@ class PhoneSystem(Strict):
     users: Dict[Key, User] = Field(default_factory=dict, max_length=2000)
     boxes: Dict[Key, Box] = Field(default_factory=dict, max_length=100)
     doors: Dict[Key, Door] = Field(default_factory=dict, max_length=200)
+    pages: Dict[Key, Page] = Field(default_factory=dict, max_length=100)
     calling: Calling = Field(default_factory=Calling)
     features: Features = Field(default_factory=Features)
 

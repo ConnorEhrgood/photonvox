@@ -131,10 +131,13 @@ def test_an_emergency_call_today_shows_who_where_and_the_sites_address():
 
 def test_voicemails_waiting_by_box():
     vm = [{"box": "100", "created": at(0, 9), "new": True}, {"box": "100", "created": at(0, 8), "new": True},
-          {"box": "200", "created": at(1, 9), "new": True}, {"box": "101", "created": at(2), "new": False}]
+          {"box": "200", "created": at(1, 9), "new": True}, {"box": "101", "created": at(2), "new": False},
+          {"box": "9901", "name": "General mailbox", "created": at(0, 7), "new": True}]           # the shared box, as the engine numbers it
     v = page(raw([], voicemail=vm))["voicemail"]
-    assert v["new"] == 3 and [(b["name"], b["new"]) for b in v["boxes"]] == [("Ada Front", 2), ("Cy Annex", 1)]
+    assert v["new"] == 4 and [(b["name"], b["extension"], b["new"]) for b in v["boxes"]] == [
+        ("Ada Front", "100", 2), ("Cy Annex", "200", 1), ("General mailbox", None, 1)]
     assert page(raw([], voicemail=vm), site=S2)["voicemail"]["new"] == 1
+    assert page(raw([], voicemail=vm), site=S1)["voicemail"]["new"] == 3      # the main number's after-hours box is the main office's
 
 
 def test_parts_the_engine_could_not_give_are_none_and_named():

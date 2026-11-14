@@ -26,7 +26,7 @@ export const BUSY: Dashboard = {
              top: { weekday: 1, hour: 10, calls: 21 } },
   week: { inbound: 520, outbound: 260, internal: 140 },
   emergency: [],
-  voicemail: { new: 4, boxes: [{ box: '100', name: 'Reception', new: 3, oldest_new: '2026-11-12T14:00:00Z' }, { box: '9000', name: 'Company mailbox', new: 1, oldest_new: null }] },
+  voicemail: { new: 4, boxes: [{ box: '100', extension: '100', name: 'Reception', new: 3, oldest_new: '2026-11-12T14:00:00Z' }, { box: '9901', extension: null, name: 'Company mailbox', new: 1, oldest_new: null }] },
   numbers: [{ number: '+14125550100', site: 'Headquarters', rings: 'the main menu', closed: 'voicemail (Company mailbox)', calls_today: 61, last_call: '2026-11-12T20:28:00Z' }],
 }
 

@@ -59,7 +59,8 @@ def gather(eng: Any, agent: Any, domain_name: str, domain_uuid: str, now: dateti
     try:
         with eng.connect() as c:
             raw.voicemail = [dict(r) for r in c.execute(text(
-                "select v.voicemail_id::text as box, m.created_epoch as created, coalesce(m.message_status, '') <> 'saved' as new "
+                "select v.voicemail_id::text as box, v.voicemail_description as name, m.created_epoch as created, "
+                "coalesce(m.message_status, '') <> 'saved' as new "
                 "from v_voicemail_messages m join v_voicemails v on v.voicemail_uuid = m.voicemail_uuid where m.domain_uuid = :d"),
                 {"d": domain_uuid}).mappings()]
     except Exception as e:  # noqa: BLE001 - production's read role gets v_voicemail_messages in step P2
@@ -109,8 +110,14 @@ def shape(doc: Document) -> Shape:
     caller_id_site = {_digits10(s.caller_id): k for k, s in doc.sites.items()}
     box_site = {u.extension: u.site for u in doc.users.values()}
     box_name = {u.extension: u.name for u in doc.users.values()}
-    for k, b in doc.boxes.items():
-        box_name[k] = b.name
+    # A shared box belongs to the site whose number or group sends calls to it (on the engine it is numbered, and named by its description)
+    for x in doc.numbers.values():
+        for t in (x.open, x.closed):
+            if isinstance(t, ToVoicemail) and t.voicemail in doc.boxes:
+                box_site.setdefault(doc.boxes[t.voicemail].name, x.site)
+    for g in doc.groups.values():
+        if isinstance(g.then, ToVoicemail) and g.then.voicemail in doc.boxes and g.members and g.members[0] in doc.users:
+            box_site.setdefault(doc.boxes[g.then.voicemail].name, doc.users[g.members[0]].site)
     number_key = {_digits10(n): n for n in doc.numbers}
     return Shape(ext_site, ext_name, dict(endpoints), number_site, number_key, caller_id_site, box_site, box_name)
 
@@ -382,10 +389,12 @@ def _voicemail(rows: List[Mapping[str, Any]], sh: Shape, mine: Any) -> Dict[str,
     boxes: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         box = str(r.get("box") or "")
-        site_id = sh.box_site.get(box)
+        user = box in sh.box_name
+        name = sh.box_name[box] if user else (r.get("name") or f"Box {box}")
+        site_id = sh.box_site.get(box if user else name)
         if not mine(site_id):
             continue
-        b = boxes.setdefault(box, {"box": box, "name": sh.box_name.get(box, f"Box {box}"), "new": 0, "saved": 0, "oldest_new": None})
+        b = boxes.setdefault(box, {"box": box, "extension": box if user else None, "name": name, "new": 0, "saved": 0, "oldest_new": None})
         if r.get("new"):
             b["new"] += 1
             c = _int(r.get("created"))

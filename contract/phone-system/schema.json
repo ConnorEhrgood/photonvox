@@ -428,6 +428,47 @@
       "title": "Number",
       "type": "object"
     },
+    "Page": {
+      "additionalProperties": false,
+      "description": "A paging group: dialing its extension speaks one way through every member's phone at once (FusionPBX's page: each phone answers on its\nown speaker, muted). Members are users: an overhead speaker is a user with its voicemail off.",
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[^<>%\\x00-\\x1f\\x7f]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "site": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Site",
+          "type": "string"
+        },
+        "extension": {
+          "pattern": "^[1-8][0-9]{1,4}$",
+          "title": "Extension",
+          "type": "string"
+        },
+        "members": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Members",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "site",
+        "extension",
+        "members"
+      ],
+      "title": "Page",
+      "type": "object"
+    },
     "Site": {
       "additionalProperties": false,
       "description": "Per site: its 911 (the emergency location and the number registered at it, both locked: \u00a711), what its calls show, its hours.",
@@ -739,6 +780,16 @@
         }
       },
       "title": "Doors",
+      "type": "object"
+    },
+    "pages": {
+      "maxProperties": 100,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_-]{0,39}$": {
+          "$ref": "#/$defs/Page"
+        }
+      },
+      "title": "Pages",
       "type": "object"
     },
     "calling": {

@@ -39,7 +39,7 @@ SHARED_BOX_BASE = 9900          # shared voicemail boxes are 9901, 9902, … (ex
 HANGUP = "photonvox-hangup"     # where "unreachable: none" forwards: a one-line dial plan that hangs up
 
 # FusionPBX's route orders run 100–300 (after its standard dial plans, before call forwarding's loop guard).
-ORDER = {"synthetic": 1, "door": 2, "emergency": 100, "block": 105, "service": 110, "national": 120, "toll_free": 130, "international": 140, "group": 101, "menu": 101,
+ORDER = {"synthetic": 1, "door": 2, "emergency": 100, "block": 105, "service": 110, "national": 120, "toll_free": 130, "international": 140, "group": 101, "menu": 101, "page": 101,
          "hangup": 102, "hours": 300, "inbound": 100}
 # Tables, parents before children: the writer inserts in this order and deletes in reverse.
 AUDIT = ("insert_date", "insert_user", "update_date", "update_user")     # FusionPBX's own bookkeeping columns: never written by PhotonVox
@@ -275,6 +275,9 @@ class _Builder:
         for d in self.p.get("doors", []):
             self.begin("door:" + d["key"], d)
             self.door(d)
+        for pg in self.p.get("pages", []):
+            self.begin("page:" + pg["key"], pg)
+            self.page(pg)
         self.obj = None
         if not self.a:
             for name, enabled in self.p["features"].items():
@@ -509,6 +512,16 @@ class _Builder:
         details = [("condition", f, e, None) for f, e in conds] + [("action", a, v, i or None) for a, v, i in actions]
         self.dialplan("door:" + key, f"photonvox.door.{key}", ORDER["door"], None, body, details=details)
 
+    def page(self, pg: Mapping[str, Any]) -> None:
+        """A paging group, as FusionPBX's own page dial plan does it: page.lua calls every member with auto-answer into a conference where they
+        are muted (one way). No PIN; any phone of the domain may page (a door station never gets here: its own dial plan runs first). The group's
+        name never goes into the dial plan (FreeSWITCH would expand "${...}" in it): the phones show "Page"."""
+        ext = pg["extension"]
+        body = (f'\t<condition field="destination_number" expression={_exact(ext)}>\n' + _act("set", "caller_id_name=Page")
+                + _act("set", "destinations=" + ",".join(pg["members"])) + _act("set", "mute=true") + _act("set", "moderator=false")
+                + _act("set", "delay=false") + _act("lua", "page.lua") + "\t</condition>\n")
+        self.dialplan("page:" + pg["key"], f"photonvox.page.{pg['key']}", ORDER["page"], None, body, number=ext)
+
     def inbound(self, n: Mapping[str, Any]) -> None:
         """The destination row and its public dial plan describe the same number, in every form a carrier may send it: +1NXXNXXXXXX,
         1NXXNXXXXXX or NXXNXXXXXX (FusionPBX's single mode matches prefix + number, + prefix + number, or the number alone)."""
@@ -556,8 +569,8 @@ def check_xml(xml: str) -> None:
         app = el.get("application")
         if el.tag in ("action", "anti-action") and app not in ALLOWED_APPS:
             raise ValueError(f"dial plan application {app!r} is not one PhotonVox writes")
-        if app == "lua" and el.get("data") != "app.lua ring_groups":
-            raise ValueError("the only Lua a PhotonVox dial plan runs is FusionPBX's ring groups")
+        if app == "lua" and el.get("data") not in ("app.lua ring_groups", "page.lua"):
+            raise ValueError("the only Lua a PhotonVox dial plan runs is FusionPBX's ring groups and paging")
         if app in ("set", "export"):
             var = el.get("data", "").split("=", 1)[0].removeprefix("nolocal:")
             if re.match(r"^(api_|execute_on_|exec_after_bridge|bridge_pre_execute)", var) and not DOOR_ANSWERED.match(el.get("data", "")):

@@ -340,7 +340,7 @@ function Voicemail({ data, unavailable }: { data: Dashboard; unavailable: boolea
         <ul className="pv-dash-list">
           {v.boxes.slice(0, 6).map((b) => (
             <li key={b.box}>
-              <span className="pv-dash-who">{b.name}<span className="ph-hint"> {b.box}</span></span>
+              <span className="pv-dash-who">{b.name}{b.extension && <span className="ph-hint"> {b.extension}</span>}</span>
               <span className="pv-dash-time">{plural(b.new, 'new', 'new')}</span>
             </li>
           ))}

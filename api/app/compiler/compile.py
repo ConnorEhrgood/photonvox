@@ -142,6 +142,9 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         doors.append({"key": did, "extension": d.extension, "name": d.name, "site": d.site, "to": f"time_condition:{key}"})
     time_conditions.sort(key=lambda t: t["key"])
 
+    pages = [{"key": k, "extension": pg.extension, "name": pg.name, "site": pg.site, "members": [doc.users[m].extension for m in pg.members]}
+             for k, pg in sorted(doc.pages.items())]
+
     prefixes = sorted({s.outside_prefix for s in doc.sites.values() if s.outside_prefix})
     routes = [
         # First and locked: 911 and 933, with or without an outside-line prefix, always to the emergency upstream, showing the site's emergency
@@ -172,6 +175,7 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         "time_conditions": time_conditions,
         "inbound": inbound,
         **({"doors": doors} if doors else {}),       # only when there are doors, so the plans of documents without stay as they were
+        **({"pages": pages} if pages else {}),       # the same for paging groups
         "outbound_routes": routes,
         "outside_prefixes": prefixes,
         "voice": doc.voice,
