@@ -11,8 +11,10 @@
   .pv-table, .pv-table tbody, .pv-table tr, .pv-table td { display: block; width: 100%; }
   .pv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .pv-table tr { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; background: var(--surface); }
-  .pv-table td { border: 0; padding: 0.3rem 0 0.3rem 6.5rem; position: relative; text-align: left; min-height: 1.6rem; overflow-wrap: anywhere; }
-  .pv-table td::before { content: attr(data-label); position: absolute; left: 0; top: 0.3rem; width: 6rem; color: var(--text-dim); }
+  /* The heading floats in its column inside a cell that contains its floats (flow-root), so a heading on two lines makes the row taller instead of
+     running into the next one. */
+  .pv-table td { display: flow-root; border: 0; padding: 0.3rem 0 0.3rem 6.5rem; text-align: left; min-height: 1.6rem; overflow-wrap: anywhere; }
+  .pv-table td::before { content: attr(data-label); float: left; margin-left: -6.5rem; width: 6rem; color: var(--text-dim); }
   .pv-table td.pv-who { padding-left: 0; padding-bottom: 0.5rem; margin-bottom: 0.25rem; border-bottom: 1px solid var(--border); }
   .pv-table td.pv-who::before, .pv-table td[data-label=""]::before { content: none; }
   .pv-table td[data-label=""] { padding-left: 0; }

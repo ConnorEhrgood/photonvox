@@ -12,3 +12,4 @@ coverage/
 scripts/inventory/out/
 .pytest_cache/
 .coverage
+.claude/settings.local.json

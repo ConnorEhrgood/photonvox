@@ -23,7 +23,7 @@ if (!existsSync(executablePath)) throw new Error(`no Chromium at ${executablePat
 const ALL = ['vox.phone_system.view', 'vox.phone_system.build', 'vox.phone.enroll', 'vox.phone.control', 'vox.site.emergency', 'vox.number.manage',
   'vox.number.port', 'vox.number.release', 'vox.calling.policy', 'vox.forwarding.external', 'vox.console.manage', 'vox.members.view', 'vox.audit.view', 'vox.self.manage']
 const ADMIN = ALL.filter((c) => !['vox.number.port', 'vox.number.release', 'vox.calling.policy', 'vox.audit.view'].includes(c))
-const tenant = (over = {}) => ({ id: 't1', name: 'Cedar Works', status: 'active', partner_id: null, role: 'owner', scope: { all: true }, source: 'direct', expires_at: null, capabilities: ALL, ...over })
+const tenant = (over = {}) => ({ id: 't1', name: 'Cedar Works', slug: 'cedar-works', former_slugs: [], status: 'active', partner_id: null, role: 'owner', scope: { all: true }, source: 'direct', expires_at: null, capabilities: ALL, ...over })
 const tech = (over = {}) => tenant({ role: 'admin', source: 'partner', partner_id: 'pa', capabilities: ADMIN, ...over })
 const me = (tenants, extra = {}) => ({ id: 'p1', name: 'Ada Owner', email: 'ada@example.com', is_platform_admin: false, tenants, ...extra })
 const SITES = [
@@ -91,11 +91,21 @@ const PAGES = [
   ['login', '/login', 'signedout'], ['pending', '/', 'pending'], ['noaccess', '/', 'noaccess'],
   ['customers-tech', '/', 'tech'], ['overview-owner', '/overview', 'owner'], ['phones-owner', '/phones', 'owner'], ['sites', '/sites', 'owner'],
   ['team', '/settings/team', 'owner'], ['myphone-user', '/', 'user'], ['platform-orgs', '/platform', 'staff'], ['platform-gdms', '/platform/gdms', 'staff'],
+  ['org-home', '/org/cedar-works/', 'owner'], ['site-home', '/org/cedar-works/site/cw-annex/', 'owner'],
+  ['switcher-open', '/org/cedar-works/site/cw-annex/', 'owner', 'Switch app'],
   ['users', '/users', 'owner'], ['numbers', '/numbers', 'owner'], ['call-flows', '/call-flows', 'owner'], ['menu-form', '/call-flows', 'owner', 'Change main'], ['setup-wizard', '/overview', 'owner', 'Start again from a template'], ['platform-911', '/platform/911', 'staff'],
 ].filter(([name]) => !only || name.includes(only))
 
 mkdirSync('screenshots', { recursive: true })
-const env = { ...process.env, VITE_API_URL: API, VITE_OIDC_ISSUER: 'http://idp.test', VITE_OIDC_CLIENT_ID: 'x', VITE_OIDC_AUDIENCE_PROJECT: '1', VITE_DEV_TOKEN_LOGIN: '1' }
+const DIRECTORY = 'http://dir.test'
+const APPS = { home: 'https://account.photonind.com/', organization: { id: 't1', slug: 'cedar-works', name: 'Cedar Works' },
+  site: { id: 's2', slug: 'cw-annex', name: 'Annex' },
+  apps: [{ key: 'home', name: 'Home', state: 'open', url: 'https://account.photonind.com/' },
+         { key: 'vox', name: 'PhotonVox', state: 'open', url: 'https://vox.photonind.com/org/cedar-works/site/cw-annex/' },
+         { key: 'console', name: 'PhotonConsole', state: 'open', url: 'https://console.photonind.com/org/cedar-works/site/cw-annex/' },
+         { key: 'guard', name: 'PhotonGuard', state: 'not_enabled' }, { key: 'board', name: 'PhotonBoard', state: 'no_access' },
+         { key: 'entry', name: 'PhotonEntry', state: 'coming' }] }
+const env = { ...process.env, VITE_DIRECTORY_API_URL: DIRECTORY, VITE_API_URL: API, VITE_OIDC_ISSUER: 'http://idp.test', VITE_OIDC_CLIENT_ID: 'x', VITE_OIDC_AUDIENCE_PROJECT: '1', VITE_DEV_TOKEN_LOGIN: '1' }
 const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { env, stdio: 'ignore', detached: true })
 const stop = () => { try { process.kill(-vite.pid) } catch { /* already gone */ } }
 process.on('exit', stop)
@@ -115,6 +125,9 @@ try {
         const [status, body] = hit ?? [404, { detail: 'no fixture' }]
         return r.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) })
       })
+      await ctx.route(`${DIRECTORY}/**`, async (r) => r.request().method() === 'OPTIONS'
+        ? r.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } })
+        : r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(APPS) }))
       const page = await ctx.newPage()
       await page.goto(`http://localhost:${PORT}${route}`)
       await page.waitForTimeout(700)
