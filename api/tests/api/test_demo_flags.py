@@ -18,9 +18,12 @@ INSTANCE = {"hostname": "vox-x", "database_url": "postgresql+psycopg://adapter:x
 
 
 def _demo(fake, world, on=True):
-    doc = dict(fake.orgs[world.a])
-    doc["demo"] = on
+    """The directory changes the organization (a new sequence number, so the next pull brings it): `demo` set, or left out when None."""
+    doc = {k: v for k, v in fake.orgs[world.a].items() if k != "demo"}
+    if on is not None:
+        doc["demo"] = on
     fake.orgs[world.a] = doc
+    fake.ref.put("organization", doc["id"], doc)
     assert pull(fake).ok
 
 
@@ -33,10 +36,8 @@ def test_the_directorys_flag_is_kept_and_a_document_without_it_is_not_a_demo(cli
     assert _tenant(world).demo is False
     _demo(fake, world)
     assert _tenant(world).demo is True
-    doc = dict(fake.orgs[world.a])
-    doc.pop("demo")
-    fake.orgs[world.a] = doc
-    assert pull(fake).ok and _tenant(world).demo is False
+    _demo(fake, world, None)
+    assert _tenant(world).demo is False
 
 
 def test_a_demo_goes_on_a_simulated_engine_and_nobody_else_does(client, fake, world):

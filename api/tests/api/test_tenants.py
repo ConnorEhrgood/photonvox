@@ -13,7 +13,7 @@ def tenant_get_routes():
 
 
 def test_there_are_tenant_routes_to_check():
-    assert tenant_get_routes() == ["/tenants/{tenant_id}", "/tenants/{tenant_id}/emergency", "/tenants/{tenant_id}/integrations/entry-tokens",
+    assert tenant_get_routes() == ["/tenants/{tenant_id}", "/tenants/{tenant_id}/dashboard", "/tenants/{tenant_id}/emergency", "/tenants/{tenant_id}/integrations/entry-tokens",
                                    "/tenants/{tenant_id}/members", "/tenants/{tenant_id}/numbers",
                                    "/tenants/{tenant_id}/phone-system", "/tenants/{tenant_id}/phone-system/templates",
                                    "/tenants/{tenant_id}/phone-system/versions", "/tenants/{tenant_id}/sites"]
