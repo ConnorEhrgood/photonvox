@@ -87,6 +87,9 @@ def test_build_publish_check_and_hand_edit_on_staging(client, world):
     call("POST", f"{a}/phone-system/import", json={"text": "Person 02,,person02@example.test,(212) 555-0402,Main office", "site_id": world.a1, "apply": False})
     d["users"]["u-person-02"] = {"name": "Person 02", "site": world.a1, "extension": "130", "email": "person02@example.test",
                                  "direct_number": DIRECT, "show": "direct"}
+    # Two door stations (PhotonEntry's intercoms): the front door rings Person 00; the annex door rings the annex group (engine/staging/door-calls.sh).
+    d["doors"] = {"front": {"name": "Front door", "site": world.a1, "extension": "701", "open": {"user": "u-person-00"}},
+                  "annex": {"name": "Annex door", "site": world.a2, "extension": "702", "open": {"group": "annex"}}}
     summary = call("PUT", f"{a}/phone-system/draft", json={"document": d})
     integrator_s = time.monotonic() - t0
     assert [p["code"] for p in summary["problems"]] == ["emergency_location_unvalidated"] * 2

@@ -52,7 +52,7 @@ def doors(client, world, built, eng):
     r = client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": draft})
     assert r.status_code == 200 and r.json()["problems"] == [], r.text
     with eng.begin() as c:
-        c.execute(text("create table v_xml_cdr (xml_cdr_uuid uuid primary key, domain_uuid uuid, extension_uuid uuid, start_epoch numeric, "
+        c.execute(text("create table v_xml_cdr (xml_cdr_uuid uuid primary key, domain_uuid uuid, caller_id_number text, start_epoch numeric, "
                        "answer_epoch numeric, end_epoch numeric)"))
     agent = DoorAgent(eng)
     conn = lambda i: (eng, agent)       # noqa: E731
@@ -152,11 +152,10 @@ def test_who_answered_a_door_call(client, world, doors, eng):
     url = "/integrations/entry/v1/door-calls"
     at = "2026-11-14T15:02:20Z"
     T = _epoch(at)
-    with eng.connect() as c:
-        ext_id = c.execute(text("select extension_uuid from v_extensions where extension = '701'")).scalar()
+    ext_id = "701"         # the call record's caller
 
     # In progress (no call record yet): from the door's log lines; answered by Ada, who is the directory's a-admin.
-    agent.log = [{"call": CALL_A, "started": T - 8, "answered": T - 3, "user": doors["first"]["extension"], "dest": doors["first"]["extension"]}]
+    agent.log = [{"call": CALL_A, "started": T - 8, "answered": T - 3, "callee": doors["first"]["extension"]}]
     body = client.get(url, headers=t, params={"station": "front", "at": at, "window_s": 60}).json()
     _valid("door-call", body)
     c = body["call"]
@@ -168,20 +167,20 @@ def test_who_answered_a_door_call(client, world, doors, eng):
     with eng.begin() as conn:
         conn.execute(text("insert into v_xml_cdr values (:u, :d, :x, :s, :a, :e)"),
                      {"u": CALL_A, "d": str(ps.domain_uuid), "x": ext_id, "s": T - 8, "a": T - 3, "e": T - 1})
-    agent.log = [{"call": CALL_A, "started": T - 8, "answered": T - 3, "user": doors["first"]["extension"], "dest": doors["first"]["extension"]}]
+    agent.log = [{"call": CALL_A, "started": T - 8, "answered": T - 3, "callee": doors["first"]["extension"]}]
     c = client.get(url, headers=t, params={"station": "front", "at": at, "window_s": 60}).json()["call"]
     assert c["id"] == CALL_A and _epoch(c["ended_at"]) == T - 1
 
     # Too long ago for the window: none. A call answered by an outside number: its last four digits only. Unanswered: nobody.
     agent.log = []
     assert client.get(url, headers=t, params={"station": "front", "at": "2026-11-14T15:10:00Z", "window_s": 30}).json()["call"] is None
-    agent.log = [{"call": CALL_B, "started": T + 100, "answered": T + 104, "user": None, "dest": "7245550199"}]
+    agent.log = [{"call": CALL_B, "started": T + 100, "answered": T + 104, "callee": "+17245550199"}]
     c = client.get(url, headers=t, params={"station": "front", "at": "2026-11-14T15:04:10Z", "window_s": 10}).json()["call"]
     assert c["answered_by"] == {"extension": "…0199", "name": "Outside number", "person_id": None} and "7245550199" not in json.dumps(c)
-    agent.log = [{"call": CALL_B, "started": T + 100, "answered": None, "user": None, "dest": None}]
+    agent.log = [{"call": CALL_B, "started": T + 100, "answered": None, "callee": None}]
     c = client.get(url, headers=t, params={"station": "front", "at": "2026-11-14T15:04:10Z", "window_s": 10}).json()["call"]
     assert c["answered_by"] is None and c["answered_at"] is None
-    agent.log = [{"call": CALL_B, "started": T + 100, "answered": T + 101, "user": "555", "dest": "555"}]   # an extension not in the document
+    agent.log = [{"call": CALL_B, "started": T + 100, "answered": T + 101, "callee": "555"}]   # an extension not in the document
     c = client.get(url, headers=t, params={"station": "front", "at": "2026-11-14T15:04:10Z", "window_s": 10}).json()["call"]
     assert c["answered_by"] == {"extension": "555", "name": "Extension 555", "person_id": None}
     # Only a call record (the log has rotated away): its times, and nobody named.

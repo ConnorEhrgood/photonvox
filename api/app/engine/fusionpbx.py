@@ -491,13 +491,16 @@ class _Builder:
         anything never comes here, and the door reaches nothing but its flow and 911. Ordered right after the synthetic check, before any
         hand-built route of an adopted domain. Nothing here touches the call's DTMF: the "#" the person answering presses reaches the
         intercom as RFC 2833 (PhotonEntry's unlock code). Two log lines say when the call started and who answered it (vox-agent reads them
-        for PhotonEntry's door-calls); the second runs on the answering leg and is expanded there (its variables are escaped once)."""
+        for PhotonEntry's door-calls); the second runs when the door's own leg is answered, which is when the flow's call is bridged, and
+        names the leg it was bridged to (callee_id_number: the extension, or the number sent out). Its variables are escaped twice, so they
+        are expanded then (an exported one would be refused by the answering leg; the hangup hook is FusionPBX's own after the transfer)."""
         ext, key = d["extension"], d["key"]
         app, data = self.transfer(d["to"])
         started = f"NOTICE PhotonVox-door domain={self.domain} door={ext} call=${{uuid}} started=${{strepoch()}}"
-        answered = (f"nolocal:api_on_answer=log NOTICE PhotonVox-door domain={self.domain} door={ext} call=${{uuid}} answered=\\${{strepoch()}} "
-                    "user=\\${dialed_user} dest=\\${destination_number}")
-        actions = [("set", f"photonvox_door={key}", True), ("log", started, False), ("export", answered, False),
+        late = "\\\\\\$"         # \\\$ : survives the action's expansion and `set`'s own, so it is expanded when the call is answered
+        answered = (f"api_on_answer=log NOTICE PhotonVox-door domain={self.domain} door={ext} call=${{uuid}} answered={late}{{strepoch()}} "
+                    f"callee={late}{{callee_id_number}}")
+        actions = [("set", f"photonvox_door={key}", True), ("log", started, False), ("set", answered, False),
                    ("unset", "bridge_terminate_key", False), ("set", "hangup_after_bridge=true", False), (app, data, False)]
         conds = [("${toll_allow}", "^door:" + ext + "$"), ("${photonvox_door}", "^$"), ("destination_number", DOOR_NOT_EMERGENCY)]
         body = ("".join(f"\t<condition field={quoteattr(f)} expression={quoteattr(e)}/>\n" for f, e in conds[:-1])
@@ -530,8 +533,8 @@ class _Builder:
 # Every number a door may dial except an emergency one (911 or 933, with an 8 or 9 in front or not): those go on to the emergency route.
 DOOR_NOT_EMERGENCY = r"^(?![89]?(?:911|933)$)"
 # The one command a PhotonVox dial plan has the engine run on an event: a door call's answering leg logs who it is (checked in check_xml).
-DOOR_ANSWERED = re.compile(r"^nolocal:api_on_answer=log NOTICE PhotonVox-door domain=[a-z0-9.-]+ door=[1-8][0-9]{1,4} call=\$\{uuid\} "
-                           r"answered=\\\$\{strepoch\(\)\} user=\\\$\{dialed_user\} dest=\\\$\{destination_number\}$")
+DOOR_ANSWERED = re.compile(r"^api_on_answer=log NOTICE PhotonVox-door domain=[a-z0-9.-]+ door=[1-8][0-9]{1,4} call=\$\{uuid\} "
+                           r"answered=\\\\\\\$\{strepoch\(\)\} callee=\\\\\\\$\{callee_id_number\}$")
 
 
 def _exact(number: str) -> str:

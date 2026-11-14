@@ -83,6 +83,28 @@ check "  130 rang, nobody else" "$(invites ph130)/$(( $(invites ph100) + $(invit
 fresh; check "the mailbox number: the general mailbox answers" "$(inbound i-mailbox $MAILBOX call.xml -d 2000)" 0
 check "  no phone rang" "$(( $(invites ph100) + $(invites ph120) + $(invites ph130) ))" 0
 
+echo "== doors (PhotonEntry's intercoms): whatever a door dials rings its flow; the answerer's \"#\" reaches the door as RFC 2833"
+LOG=/var/log/freeswitch/freeswitch.log
+since() { S "tail -c +\$(( $1 + 1 )) $LOG"; }
+door() {    # <name> <door extension> <digits>: the door calls, offering telephone-events, and holds 5 s (SIPp's exit code)
+  $SIPP run "$1" -sf /scenarios/door-call.xml -s "$3" -set from "$2" -set domain $DOMAIN -au "$2" -ap "$(pw $2)" -i 10.10.0.80 -p 5095 \
+    -m 1 -d 5000 -timeout 20s 10.10.0.60:5060 > /dev/null 2>&1; local rc=$?; sleep 1; echo $rc
+}
+check "the upstream's address out of providers again (the door shares LXC 800's address with it)" "$(acl_off)" false
+hash_phone() { $SIPP stop ph$1; $SIPP start ph$1 -sf /scenarios/phone-answer-hash.xml -i 10.10.0.80 -p $2 -mi 10.10.0.80; sleep 1; }
+for c in "701:0:100:5101:the front door rings Person 00" "702:0:120:5102:the annex door rings the annex group" "701:2125550123:100:5101:the front door dialing an outside number still rings its flow"; do
+  IFS=: read -r ext dial who port why <<<"$c"
+  fresh; hash_phone $who $port
+  OFF=$(S "stat -c %s $LOG")
+  check "$why (dialing $dial)" "$(door d-$ext-$dial $ext $dial)" 0
+  check "  $who answered, nothing reached the upstream" "$(invites ph$who)/$(invites up)" 1/0
+  L=$(since $OFF)
+  check "  the door's log lines: started, answered by $who" \
+    "$(grep -c "\[NOTICE\] .* PhotonVox-door domain=$DOMAIN door=$ext call=.* started=[0-9]*$" <<<"$L")/$(grep -c "\[NOTICE\] .* PhotonVox-door domain=$DOMAIN door=$ext call=.* answered=[0-9]* callee=$who$" <<<"$L")" 1/1
+  check "  the engine got \"#\" from $who as RFC 2833 and sent it on to the door" \
+    "$( [ "$(grep -cE 'RTP RECV DTMF #|RECV DTMF #' <<<"$L")" -ge 1 ] && echo got)/$( [ "$(grep -cE 'Send (start|end) packet for \[#\]' <<<"$L")" -ge 1 ] && echo sent)" got/sent
+done
+
 check "staging-check still passes" "$(bash scripts/staging-check.sh > /dev/null; echo $?)" 0
 $SIPP clean
 echo "$pass passed, $fail failed"; [ $fail = 0 ]

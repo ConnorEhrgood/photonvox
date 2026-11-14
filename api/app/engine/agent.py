@@ -35,7 +35,7 @@ class Agent(Protocol):
         <gateways> <number sent>" or "blocked <category>" for a dialed one; None if it found nothing. No phone rings and nothing leaves the engine."""
 
     def door_calls(self, domain_name: str, extension: str, since: int) -> List[Dict[str, Any]]:
-        """A door station's calls since then, as its dial plan logged them: {"call", "started", "answered", "user", "dest"} (read only)."""
+        """A door station's calls since then, as its dial plan logged them: {"call", "started", "answered", "callee"} (read only)."""
 
 
 class AgentError(Exception):

@@ -5,8 +5,8 @@
     GET /integrations/entry/v1/door-calls?station=&at=&window_s=      the station's call in progress at `at` (else the last one that ended within
                                                                       window_s before it) and who answered it
 
-Door calls come from the engine: when each started and was answered, and by whom, from the lines the door's dial plan logs (vox-agent reads
-them); when each ended, from FusionPBX's call records (imported a few seconds after the hangup, so a call just ended may still read as in
+Door calls come from the engine: when each started and was answered, and by whom (the extension or number its call was bridged to), from
+the lines the door's dial plan logs (vox-agent reads them); when each ended, from FusionPBX's call records (imported a few seconds after the hangup, so a call just ended may still read as in
 progress). Call records are CPNI: a token reads only its own organization's door stations.
 """
 from __future__ import annotations
@@ -159,13 +159,12 @@ def door_calls(station: str = Query(..., max_length=64), at: str = Query(..., ma
         try:
             logged = agent.door_calls(ps.domain_name, door.extension, moment - 3600)
             with eng.connect() as c:
-                ext_id = c.execute(text("select extension_uuid from v_extensions where domain_uuid = :d and extension = :e"),
-                                   {"d": str(ps.domain_uuid), "e": door.extension}).scalar()
-                ids = [x["call"] for x in logged]
+                # By the calls the door logged, or (the log rotated) by the door as the caller: FusionPBX's record names the extension that
+                # answered in extension_uuid when one did, so the caller's number is what says it was the door's.
                 records = c.execute(text(
                     "select xml_cdr_uuid::text as call, start_epoch, answer_epoch, end_epoch from v_xml_cdr where domain_uuid = :d and "
-                    "(xml_cdr_uuid::text = any(:ids) or (extension_uuid = :x and end_epoch >= :lo and start_epoch <= :hi))"),
-                    {"d": str(ps.domain_uuid), "ids": ids, "x": ext_id, "lo": moment - window_s, "hi": moment}).mappings().all()
+                    "(xml_cdr_uuid::text = any(:ids) or (caller_id_number = :e and end_epoch >= :lo and start_epoch <= :hi))"),
+                    {"d": str(ps.domain_uuid), "ids": [x["call"] for x in logged], "e": door.extension, "lo": moment - window_s, "hi": moment}).mappings().all()
         except Exception as e:  # noqa: BLE001 - the engine or its agent did not answer: PhotonEntry asks again
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "The phone system's engine did not answer; ask again.") from e
         finally:
@@ -173,9 +172,9 @@ def door_calls(station: str = Query(..., max_length=64), at: str = Query(..., ma
         calls: Dict[str, Dict[str, Any]] = {}
         for x in logged:
             calls[x["call"]] = {"call": x["call"], "start": x["started"] or x["answered"], "answer": x["answered"], "end": None,
-                                "user": x["user"], "dest": x["dest"]}
+                                "callee": x["callee"]}
         for r in records:
-            c = calls.setdefault(r["call"], {"call": r["call"], "user": None, "dest": None})
+            c = calls.setdefault(r["call"], {"call": r["call"], "callee": None})
             c["start"] = int(r["start_epoch"]) if r["start_epoch"] else c.get("start")
             c["answer"] = int(r["answer_epoch"]) if r["answer_epoch"] else c.get("answer")
             c["end"] = int(r["end_epoch"]) if r["end_epoch"] else None
@@ -191,16 +190,16 @@ def door_calls(station: str = Query(..., max_length=64), at: str = Query(..., ma
 
 
 def _answered_by(s: Session, tenant_id: uuid.UUID, doc: Document, c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """The extension that answered, its name and its directory person (by the user's email, among the organization's people); an outside number
-    as its last four digits, never whole."""
-    if c.get("user"):
-        user = next((u for u in doc.users.values() if u.extension == c["user"]), None)
-        person = None
-        if user is not None and user.email:
-            person = s.execute(select(Person.id).join(Access, Access.person_id == Person.id)
-                               .where(Access.tenant_id == tenant_id, func.lower(Person.email) == user.email.lower())).scalars().first()
-        return {"extension": c["user"], "name": user.name if user else f"Extension {c['user']}", "person_id": str(person) if person else None}
-    digits = re.sub(r"\D", "", c.get("dest") or "")
-    if len(digits) >= 7:
-        return {"extension": "…" + digits[-4:], "name": "Outside number", "person_id": None}
-    return None
+    """Who the door's call was bridged to: an extension, with its name and its directory person (by the user's email, among the organization's
+    people); an outside number as its last four digits, never whole."""
+    callee = re.sub(r"[^0-9]", "", c.get("callee") or "")
+    if not callee:
+        return None
+    if len(callee) >= 7:
+        return {"extension": "…" + callee[-4:], "name": "Outside number", "person_id": None}
+    user = next((u for u in doc.users.values() if u.extension == callee), None)
+    person = None
+    if user is not None and user.email:
+        person = s.execute(select(Person.id).join(Access, Access.person_id == Person.id)
+                           .where(Access.tenant_id == tenant_id, func.lower(Person.email) == user.email.lower())).scalars().first()
+    return {"extension": callee, "name": user.name if user else f"Extension {callee}", "person_id": str(person) if person else None}

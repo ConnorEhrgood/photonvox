@@ -65,9 +65,9 @@ def test_the_engine_rows_of_a_door():
     assert 'field="${toll_allow}" expression="^door:701$"' in xml and 'field="${photonvox_door}" expression="^$"' in xml
     assert 'data="hours-door-front XML ' in xml and 'data="photonvox_door=front" inline="true"' in xml
     assert 'data="103 XML ' not in xml and 'data="200 XML ' in dp(b, "photonvox.door.side")["dialplan_xml"]
-    answered = re.search(r'data="(nolocal:api_on_answer=[^"]*)"', xml).group(1)
-    assert fusionpbx.DOOR_ANSWERED.match(answered.replace("&quot;", '"'))
-    assert r"answered=\${strepoch()} user=\${dialed_user} dest=\${destination_number}" in answered      # expanded on the answering leg
+    answered = re.search(r'data="(api_on_answer=[^"]*)"', xml).group(1)
+    assert fusionpbx.DOOR_ANSWERED.match(answered)
+    assert r"answered=\\\${strepoch()} callee=\\\${callee_id_number}" in answered      # expanded when the door's leg is answered
     details = rows(b, "v_dialplan_details", dialplan_uuid=door["dialplan_uuid"])
     assert [d["dialplan_detail_type"] for d in details][:3] == ["${toll_allow}", "${photonvox_door}", "destination_number"]
 
@@ -80,11 +80,11 @@ def test_whatever_a_door_dials_goes_to_its_flow_except_911_and_933(dialed, goes_
 
 
 def test_no_dial_plan_may_have_the_engine_run_a_command_but_the_doors_answer_log():
-    ok = ('<extension name="x"><condition><action application="export" data="nolocal:api_on_answer=log NOTICE PhotonVox-door domain=a.b '
-          'door=701 call=${uuid} answered=\\${strepoch()} user=\\${dialed_user} dest=\\${destination_number}"/></condition></extension>')
+    ok = ('<extension name="x"><condition><action application="set" data="api_on_answer=log NOTICE PhotonVox-door domain=a.b '
+          'door=701 call=${uuid} answered=\\\\\\${strepoch()} callee=\\\\\\${callee_id_number}"/></condition></extension>')
     fusionpbx.check_xml(ok)
     for data in ("nolocal:api_on_answer=system rm -rf /", "api_hangup_hook=system x", "execute_on_answer=system x", "exec_after_bridge_app=system",
-                 "nolocal:api_on_answer=log NOTICE PhotonVox-door domain=a.b door=701 call=${uuid} answered=1 user=x dest=y; system",
+                 "api_on_answer=log NOTICE PhotonVox-door domain=a.b door=701 call=${uuid} answered=1 callee=x; system",
                  "bridge_pre_execute_bleg_app=system"):
         with pytest.raises(ValueError, match="never sets"):
             fusionpbx.check_xml(f'<extension name="x"><condition><action application="set" data="{data}"/></condition></extension>')
