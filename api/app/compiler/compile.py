@@ -33,7 +33,6 @@ class Context:
     # An adopted, hand-built domain (decision 32, ARCHITECTURE §17): its outside calls, 911 and blocking stay hand-built until the protections
     # version, so the 911 address problem does not stop it (its 911 is the engine's own, unchanged), and the builder generates no routes.
     adopted: bool = False
-    protected: bool = False                     # the adopted domain's protections version: its routes generated, its 911 address must be validated
     # How an upstream wants North American numbers: "e164" (+1 and ten digits, the default) or "nanp10" (ten digits, as HUEPC's hand-built
     # routes send HTC today). Upstream key -> format.
     dial_formats: Mapping[str, str] = field(default_factory=dict)
@@ -70,7 +69,8 @@ def _send(ctx: Context, cls: str) -> str:
 
 def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
     found = problems(doc, ctx.validated_locations, ctx.assigned_numbers)
-    if ctx.adopted and not ctx.protected:
+    protected = ctx.adopted and doc.protections is True      # the adopted domain's protections version: routes generated, 911 address validated
+    if ctx.adopted and not protected:
         found = [p for p in found if p.code != "emergency_location_unvalidated"]
     if found:
         raise CompileError(found)
@@ -156,5 +156,5 @@ def compile_plan(doc: PhoneSystem, ctx: Context) -> Dict[str, Any]:
         "spend_limit_usd": doc.calling.spend_limit_usd,
         "features": {"eavesdrop": doc.features.eavesdrop, "intercept": doc.features.intercept},
         "adopted": ctx.adopted,
-        "protected": ctx.protected,
+        "protected": protected,
     }

@@ -252,28 +252,34 @@ def test_a_later_change_writes_only_the_columns_the_document_now_gives_different
     assert ext["outbound_caller_id_number"] == F.SECOND                                                 # unchanged in the document: the live form kept
 
 
-def test_the_protections_version_sets_classes_and_911_numbers_and_retires_what_it_is_told():
+def test_the_protections_version_sets_classes_and_911_numbers_and_switches_off_what_it_retires():
     imp, a = adopted()
-    pa = fusionpbx.Adoption(a.objects, a.rows, a.ids, a.meanings, fresh=a.fresh, protected=True, retire=[F._u(36)])
-    b = build_with(imp.document, pa, protected=True)
+    hand = {f"v_dialplans:{F._u(36)}": next(r for r in F.hand_built()["tables"]["v_dialplans"] if r["dialplan_uuid"] == F._u(36))}
+    pa = fusionpbx.Adoption(a.objects, a.rows, a.ids, a.meanings, fresh=a.fresh, retire=[F._u(36)], retired_rows=hand)
+    b = build_with({**imp.document, "protections": True}, pa, protected=True)
     ext = {r["extension"]: r for r in b.rows["v_extensions"]}
     assert ext["100"]["toll_allow"] == "national:service:toll_free" and ext["701"]["emergency_caller_id_number"] == "+1" + F.SECOND
-    assert ext["701"]["call_timeout"] == 120 and b.remove == [("v_dialplans", F._u(36))]
+    assert ext["701"]["call_timeout"] == 120
+    retired = next(r for r in b.rows["v_dialplans"] if r["dialplan_uuid"] == F._u(36))
+    assert retired["dialplan_enabled"] is False and retired["dialplan_xml"] == hand[f"v_dialplans:{F._u(36)}"]["dialplan_xml"]
+    # Undone (a version without protections): the hand-built route back on exactly as it was; no PhotonVox route.
+    back = build_with(imp.document, pa)
+    assert next(r for r in back.rows["v_dialplans"] if r["dialplan_uuid"] == F._u(36))["dialplan_enabled"] is True
+    assert not any(r["dialplan_name"].startswith("photonvox.") for r in back.rows["v_dialplans"])
     assert {"photonvox.emergency", "photonvox.block", "photonvox.synthetic"} <= {r["dialplan_name"] for r in b.rows["v_dialplans"]}
     assert f"dialplan.{F.DOMAIN}" in b.cache and f"directory.701@{F.DOMAIN}" in b.cache
     # Protected again with the classes already on the engine: nothing more to write on those rows.
     rows2 = {k: ({**r, "toll_allow": "national:service:toll_free", "emergency_caller_id_number": ext[r["extension"]]["emergency_caller_id_number"]}
                  if k.startswith("v_extensions:") else r) for k, r in a.rows.items()}
-    pa2 = fusionpbx.Adoption(a.objects, rows2, a.ids, a.meanings, fresh=a.fresh, protected=True)
-    b2 = build_with(imp.document, pa2, protected=True)
-    assert f"directory.701@{F.DOMAIN}" not in b2.cache and b2.remove == []
+    pa2 = fusionpbx.Adoption(a.objects, rows2, a.ids, a.meanings, fresh=a.fresh)
+    b2 = build_with({**imp.document, "protections": True}, pa2, protected=True)
+    assert f"directory.701@{F.DOMAIN}" not in b2.cache
 
 
 def build_with(document, adoption, protected=False):
     doc = PhoneSystem.model_validate(document)
     plan = compile_plan(doc, Context(domain=F.DOMAIN, timezones={SITE: "America/New_York"}, upstreams={"national": ["htc"]}, emergency_gateway="htc",
-                                     assigned_numbers=set(doc.numbers), adopted=True, validated_locations={SITE: {"main"}} if protected else {},
-                                     protected=protected))
+                                     assigned_numbers=set(doc.numbers), adopted=True, validated_locations={SITE: {"main"}} if protected else {}))
     return fusionpbx.build(plan, fusionpbx.Target(PS, F.D, {"htc": F.GATEWAY}, adoption=adoption))
 
 

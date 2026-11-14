@@ -56,7 +56,7 @@ class FakeAgent:
         with self.eng.connect() as c:
             if kind == "inbound":
                 data = c.execute(text("select destination_data from v_destinations where domain_uuid = :d and destination_number = :n"),
-                                 {"d": domain_uuid, "n": number[2:]}).scalar()
+                                 {"d": domain_uuid, "n": number[-10:]}).scalar()
                 if data is None:
                     return None
                 first = data.split(" ")[0]
@@ -219,7 +219,7 @@ def test_a_failed_check_puts_the_previous_version_back(client, world, built, con
 
 def test_a_failed_first_publish_removes_what_it_wrote(client, world, built, connect, agent, eng):
     client.post(f"{built}/phone-system/publish", headers=auth("tech"))
-    agent.answers[MAIN] = None
+    agent.answers[MAIN[-10:]] = None                  # the check dials the ten digits
     run(connect)
     v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
     assert v["state"] == "failed" and "removed what it had written" in v["error"]
@@ -644,7 +644,7 @@ def test_a_failed_publish_says_so_without_the_engines_details_and_test_calls_hid
     assert v["error"].startswith("publish failed: the engine did not take the change") and "unreachable" not in v["error"]
     agent.fail_seed = False
     client.post(f"{built}/phone-system/publish", headers=auth("tech"))
-    agent.answers["+17245550100"] = "reached 0b5e8c1a-0000-4000-8000-0000000000a1"
+    agent.answers["7245550100"] = "reached 0b5e8c1a-0000-4000-8000-0000000000a1"     # dialed as ten digits
     run(connect)
     failed = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["checks"]["failed"][0]
     assert failed["got"] == "reached …" 

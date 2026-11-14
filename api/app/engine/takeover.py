@@ -137,7 +137,7 @@ def readopt(db: Session, ps: PhoneSystem, instance: PbxInstance, conn: Any) -> D
     if not site or not upstream:
         raise TakeoverError("the phone system has no site, or the instance no upstream")
     proof = prove(export, str(ps.id), site, upstream)
-    kept = {k: v for k, v in (ps.adoption or {}).items() if k in ("protected", "retire")}
+    kept = {k: v for k, v in (ps.adoption or {}).items() if k in ("retire", "retired_rows")}
     ps.adoption, ps.draft = {**proof["adoption"], **kept}, proof["document"]
     db.flush()
     return {"objects": proof["objects"], "rows": proof["rows"], "extras": proof["extras"], "understanding": proof["understanding"],
@@ -162,8 +162,8 @@ def protect_preview(db: Session, ps: PhoneSystem, instance: PbxInstance, conn: A
     from app.engine import service
     export = read_domain(conn, ps.domain_name)
     ids = retire_ids(ps, export, names)
-    real = ps.adoption
-    ps.adoption = {**(real or {}), "protected": True, "retire": ids}       # for this build only; restored below
+    real, real_draft = ps.adoption, ps.draft
+    ps.adoption, ps.draft = _retiring(real or {}, export, ids), {**(ps.draft or {}), "protections": True}   # for this build only; restored below
     blocking: List[Dict[str, str]] = []
     try:
         ctx = service.context(db, ps, instance)
@@ -174,18 +174,19 @@ def protect_preview(db: Session, ps: PhoneSystem, instance: PbxInstance, conn: A
             blocking = [{"path": p.path, "code": p.code, "message": p.message} for p in e.problems]
             if any(p.code != "emergency_location_unvalidated" for p in e.problems):
                 raise TakeoverError(f"the document does not compile: {blocking[0]['message']}")
-            plan = compile_plan(Document.model_validate(ps.draft), dataclasses.replace(ctx, protected=False))
+            doc = Document.model_validate(ps.draft)
+            assumed = {sid: {site.emergency_location} for sid, site in doc.sites.items()}       # as if the 911 address were validated
+            plan = compile_plan(doc, dataclasses.replace(ctx, validated_locations=assumed))
         b = fusionpbx.build(plan, service.target(ps, instance))
     finally:
-        ps.adoption = real
+        ps.adoption, ps.draft = real, real_draft
     live = compare.live_rows(export)
     diff = compare.rows_diff(b, live)
     after = {k: v for k, v in live.items()}
     for t in fusionpbx.TABLES:
         for r in b.rows[t]:
             after[f"{t}:{r[fusionpbx.KEYS[t]]}"] = {**after.get(f"{t}:{r[fusionpbx.KEYS[t]]}", {}), **r}
-    gone = set(ids) | {r["dialplan_detail_uuid"] for r in export["tables"].get("v_dialplan_details") or [] if r["dialplan_uuid"] in ids}
-    after = {k: v for k, v in after.items() if k.split(":", 1)[1] not in gone}
+
     D, name = export["domain"]["domain_uuid"], export["domain"]["domain_name"]
     before_calls, after_calls = compare.outbound(live, D, name, caller), compare.outbound(after, D, name, caller)
     new, changed = compare.summary(diff)
@@ -193,13 +194,22 @@ def protect_preview(db: Session, ps: PhoneSystem, instance: PbxInstance, conn: A
             "changes": sorted({f"{d['table']} {', '.join(d.get('columns') or [])}".strip() for d in diff if d["kind"] == "changed"}),
             "new": sorted({f"{d['table']}" for d in diff if d["kind"] == "new row"}),
             "new_dialplans": sorted(r["dialplan_name"] for r in b.rows["v_dialplans"] if f"v_dialplans:{r['dialplan_uuid']}" not in live),
-            "retired": sorted(n for n in names), "retired_rows": len(gone),
+            "retired": sorted(n for n in names),
             "calls_out": {n: {"now": before_calls[n], "after": after_calls[n]} for n in before_calls},
             "checks": [c["number"] for c in fusionpbx.checks(plan, service.target(ps, instance))]}
 
 
+def _retiring(adoption: Mapping[str, Any], export: Mapping[str, Any], ids: List[str]) -> Dict[str, Any]:
+    """The adoption with these hand-built dial plans managed from now on (their rows as they are now; no longer watched as hand-built extras)."""
+    rows = {f"v_dialplans:{r['dialplan_uuid']}": r for r in export["tables"].get("v_dialplans") or [] if r["dialplan_uuid"] in ids}
+    extras = {k: v for k, v in (adoption.get("extras") or {}).items() if k.split(":", 1)[1] not in ids}
+    return {**adoption, "retire": ids, "retired_rows": rows, "extras": extras}
+
+
 def protect_apply(ps: PhoneSystem, export: Mapping[str, Any], names: List[str]) -> Dict[str, Any]:
-    """Mark the adoption protected, with the dial plans to retire: the next publish is the protections version. Nothing is written to the engine."""
+    """The draft becomes the protections version (`protections: true`), with these hand-built dial plans switched off by it (and back on by any
+    version without protections, an undo included). The next publish publishes it. Nothing is written to the engine here."""
     ids = retire_ids(ps, export, names)
-    ps.adoption = {**(ps.adoption or {}), "protected": True, "retire": ids}
-    return {"protected": True, "retire": names}
+    ps.adoption = _retiring(ps.adoption or {}, export, ids)
+    ps.draft = {**(ps.draft or {}), "protections": True}
+    return {"protections": True, "retire": names}

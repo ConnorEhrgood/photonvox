@@ -161,6 +161,10 @@ class Features(Strict):
 
 class PhoneSystem(Strict):
     version: Literal[1] = 1
+    # A domain taken over in place (decision 32) starts with its own outside calls, 911 and blocking (False); the protections version sets True:
+    # PhotonVox's routes, block route and call classes, and the hand-built routes it was told to retire switched off. A version holds it, so an
+    # undo to an earlier version undoes it. Ignored for a phone system PhotonVox built itself (always protected).
+    protections: Optional[bool] = None
     voice: str = "en-US-Chirp3-HD-Kore"         # the voice greetings are spoken in (app/speech VOICES; decision 30)
     sites: Dict[SiteId, Site] = Field(default_factory=dict, max_length=200)
     hours: Dict[Key, Hours] = Field(default_factory=dict, max_length=50)

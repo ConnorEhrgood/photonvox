@@ -120,7 +120,7 @@ def main() -> None:
         if a.check:
             results = []
             for c in fusionpbx.checks(plan, target):
-                got = agent.check(c["kind"], c["number"], meta["domain"], target.domain_uuid, uuid.uuid4().hex)
+                got = agent.check(c["kind"], c.get("dial", c["number"]), meta["domain"], target.domain_uuid, uuid.uuid4().hex)
                 results.append({**c, "got": got, "ok": got in c["expect"]})
             out["check"] = results + fusionpbx.emergency_read(plan, target)      # 911 and 933: read, never called
         print(json.dumps(out))

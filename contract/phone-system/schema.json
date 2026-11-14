@@ -576,6 +576,18 @@
       "title": "Version",
       "type": "integer"
     },
+    "protections": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Protections"
+    },
     "voice": {
       "default": "en-US-Chirp3-HD-Kore",
       "title": "Voice",

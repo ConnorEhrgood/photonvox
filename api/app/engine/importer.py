@@ -262,7 +262,7 @@ def import_domain(export: Mapping[str, Any], site_id: str, location_key: str = "
         report.append(Item(f"gateway {g.get('gateway')!r}", "extra", f"owned by {owner}; the instance's upstream, adopted as it is, never rewritten", []))
 
     document = {
-        "version": 1,
+        "version": 1, "protections": False,         # the takeover changes nothing; the protections version comes later (decision 32)
         "sites": {site_id: {"emergency_location": location_key, "emergency_number": site_emergency or "", "caller_id": site_caller_id or "",
                             "hours": None}},
         "numbers": numbers, "menus": doc_menus, "users": doc_users, "groups": {}, "boxes": {}, "hours": {},

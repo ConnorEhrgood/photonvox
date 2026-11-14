@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, select, text
 from app.db import SystemSession
 from app.engine import service
 from app.engine.fusionpbx import KEYS
-from app.models import CarrierRequest, EmergencyNumber, EngineObject, HeldNumber, PhoneSystem
+from app.models import CarrierRequest, EmergencyNumber, EngineObject, HeldNumber, PhoneSystem, PhoneSystemVersion
 from app.routes import platform
 from tests import takeover_fixture as F
 from tests.api.conftest import auth
@@ -285,7 +285,7 @@ def test_the_protections_version_dry_run_then_published(client, world, instance,
     assert fmt["dial_formats"] == {"htc": "nanp10"}
     rc, dry = run_("protect", world.a, "101", "Outbound NANP", "Block-premium")
     assert dry["blocking_the_publish"][0]["code"] == "emergency_location_unvalidated"         # the 911 address is not validated yet
-    assert dry["changes"] == ["v_extensions emergency_caller_id_number, toll_allow"] and dry["retired"] == ["Block-premium", "Outbound NANP"]
+    assert dry["changes"] == ["v_dialplans dialplan_enabled", "v_extensions emergency_caller_id_number, toll_allow"] and dry["retired"] == ["Block-premium", "Outbound NANP"]
     assert {"photonvox.emergency", "photonvox.block", "photonvox.national", "photonvox.service", "photonvox.toll_free"} <= set(dry["new_dialplans"])
     calls = dry["calls_out"]
     assert calls["9005550100"]["now"].startswith("Block-premium") and calls["9005550100"]["after"].startswith("photonvox.block")
@@ -300,17 +300,29 @@ def test_the_protections_version_dry_run_then_published(client, world, instance,
                       json={"key": "main", "street": "1 Church St", "city": "Hickory", "state": "PA", "zip": "15340"}).json()
     assert client.post(f"/platform/emergency-locations/{loc['id']}/validate", headers=auth("staff"), json={"ok": True}).status_code == 200
     rc, applied = run_("protect-apply", world.a, "Outbound NANP", "Block-premium")
-    assert applied == {"protected": True, "retire": ["Outbound NANP", "Block-premium"]} and snapshot(eng) == before
+    assert applied == {"protections": True, "retire": ["Outbound NANP", "Block-premium"]} and snapshot(eng) == before
     rc, published = run_("publish", world.a, "the protections version")
     assert published["state"] == "ready", published
     assert all(c["ok"] for c in published["checks"]) and {c["kind"] for c in published["checks"]} == {"inbound", "route", "emergency, read"}
     with eng.connect() as c:
-        names = set(c.execute(text("select dialplan_name from v_dialplans where domain_uuid = :d"), {"d": F.D}).scalars())
+        names = set(c.execute(text("select dialplan_name from v_dialplans where domain_uuid = :d and dialplan_enabled"), {"d": F.D}).scalars())
+        off = set(c.execute(text("select dialplan_name from v_dialplans where domain_uuid = :d and not dialplan_enabled"), {"d": F.D}).scalars())
         ext = {r.extension: r for r in c.execute(text("select extension, toll_allow, emergency_caller_id_number, hold_music, call_timeout, password "
                                                       "from v_extensions"))}
         details = c.execute(text("select count(*) from v_dialplan_details where dialplan_uuid = :u"), {"u": F._u(36)}).scalar()
-    assert "Outbound NANP" not in names and "Block-premium" not in names and details == 0 and "old route" in names     # retired; the rest left
+    assert {"Outbound NANP", "Block-premium", "old route"} <= off and details == 1          # switched off, never deleted; the rest left as it was
     assert ext["701"].toll_allow == "national:service:toll_free" and ext["701"].emergency_caller_id_number == "+1" + F.SECOND
     assert ext["100"].emergency_caller_id_number == "+1" + F.MAIN and str(ext["701"].call_timeout) == "120"          # what the document doesn't say stays
     assert ext["100"].hold_music == f"/{F.DOMAIN}/Music.wav" and ext["101"].password == "sip-secret-101"
     assert f"dialplan.{F.DOMAIN}" in agent.cleared and f"directory.701@{F.DOMAIN}" in agent.cleared
+    # Undo: publish version 1 (the takeover's document) again: the hand-built routes are back on exactly as they were, PhotonVox's routes gone.
+    from app.engine import service as svc
+    with SystemSession() as s:
+        ps = s.execute(select(PhoneSystem)).scalar_one()
+        v = svc.queue(s, ps, s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.number == 1)).scalar_one().document, None, "test", "undo")
+        s.commit()
+        assert svc.publish_version(s, v.id, conn) == "ready"
+    with eng.connect() as c:
+        on = set(c.execute(text("select dialplan_name from v_dialplans where domain_uuid = :d and dialplan_enabled"), {"d": F.D}).scalars())
+        toll = c.execute(text("select toll_allow from v_extensions where extension = '701'")).scalar()
+    assert {"Outbound NANP", "Block-premium"} <= on and not any(n.startswith("photonvox.") for n in on) and toll is None

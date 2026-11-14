@@ -93,8 +93,7 @@ def context(db: Session, ps: PhoneSystem, instance: PbxInstance) -> Context:
     assigned = set(db.execute(select(HeldNumber.number).where(HeldNumber.tenant_id == ps.tenant_id)).scalars())
     return Context(domain=ps.domain_name, timezones={str(s.id): s.timezone for s in sites}, upstreams=dict(instance.routing or {}),
                    emergency_gateway=instance.emergency_upstream, validated_locations=validated, assigned_numbers=assigned,
-                   adopted=ps.adoption is not None, protected=bool((ps.adoption or {}).get("protected")),
-                   dial_formats=dict(instance.dial_formats or {}))
+                   adopted=ps.adoption is not None, dial_formats=dict(instance.dial_formats or {}))
 
 
 def get_speech() -> Optional[Speech]:
@@ -107,8 +106,8 @@ def adoption(ps: PhoneSystem) -> Optional[fusionpbx.Adoption]:
     if not a:
         return None
     return fusionpbx.Adoption(objects={k: [tuple(x) for x in v] for k, v in a["objects"].items()}, rows=a["rows"], ids=a["ids"],
-                              meanings=a["meanings"], fresh=a.get("fresh") or {}, protected=bool(a.get("protected")),
-                              retire=list(a.get("retire") or []))
+                              meanings=a["meanings"], fresh=a.get("fresh") or {}, retire=list(a.get("retire") or []),
+                              retired_rows=a.get("retired_rows") or {})
 
 
 def target(ps: PhoneSystem, instance: PbxInstance, speech_on: bool = False) -> fusionpbx.Target:
@@ -150,7 +149,7 @@ def _record(db: Session, ps: PhoneSystem, res: writer.Result) -> None:
 def run_checks(agent: Agent, plan: Mapping[str, Any], t: fusionpbx.Target) -> List[Dict[str, Any]]:
     out = []
     for c in fusionpbx.checks(plan, t):
-        got = agent.check(c["kind"], c["number"], plan["domain"], t.domain_uuid, uuid.uuid4().hex)
+        got = agent.check(c["kind"], c.get("dial", c["number"]), plan["domain"], t.domain_uuid, uuid.uuid4().hex)
         out.append({**c, "got": got, "ok": got in c["expect"]})
     return out
 

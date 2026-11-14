@@ -104,10 +104,10 @@ class Adoption:
     # document now gives differently are written; every other column keeps what is on the engine (hold music, a ring time the document has
     # no word for).
     fresh: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
-    # The protections version (ARCHITECTURE §15, §17 stage 5): PhotonVox's routes, block route, gates and checks are generated; every adopted
-    # extension takes the call classes and the 911 caller ID (PROTECTED); the hand-built dial plans in `retire` are removed in the same write.
-    protected: bool = False
-    retire: Sequence[str] = ()          # v_dialplans ids (their details go with them)
+    # Hand-built dial plans PhotonVox manages from the protections on (ARCHITECTURE §17 stage 5): switched off in a protected version (the plan's
+    # `protected`, from the document), and back on exactly as they were in one without, so an undo is a real undo. Never deleted.
+    retire: Sequence[str] = ()                                           # v_dialplans ids
+    retired_rows: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)   # "table:id" -> the row as it was (the dial plans and their details)
 
 
 @dataclass
@@ -116,7 +116,6 @@ class Build:
     secrets: Dict[Tuple[str, str], str] = field(default_factory=dict)   # (table, uuid) -> column holding a Secret
     meanings: Dict[str, str] = field(default_factory=dict)              # object key -> what it means (a hash of its part of the plan)
     adopted: List[str] = field(default_factory=list)                    # objects emitted exactly as they are on the engine
-    remove: List[Tuple[str, str]] = field(default_factory=list)          # hand-built rows the writer removes (a protected adoption's `retire`)
     row_cache: Dict[Tuple[str, str], List[str]] = field(default_factory=dict)   # (table, uuid) -> its object's cache entries, for a row rewritten alone
     features: Dict[str, bool] = field(default_factory=dict)             # standard dial plan app_uuid -> enabled
     cache: List[str] = field(default_factory=list)                      # /var/cache/fusionpbx file names to delete
@@ -153,7 +152,8 @@ def checks(plan: Mapping[str, Any], target: Target) -> List[Dict[str, Any]]:
         first = built[n["number"][-10:]].split(" ")[0]
         if kind != "time_condition" and not first.startswith("hours-"):
             expect = ["reached " + first]
-        out.append({"kind": "inbound", "number": n["number"], "expect": expect})
+        # Dialed as the ten digits, the form carriers send and every inbound route takes (a hand-built one may take nothing else).
+        out.append({"kind": "inbound", "number": n["number"], "dial": n["number"][-10:], "expect": expect})
     block = next(r for r in plan["outbound_routes"] if r["key"] == "block")
     if any(c["category"] == "premium" for c in block["categories"]):
         out.append({"kind": "route", "number": "19005550100", "expect": ["blocked premium"]})
@@ -253,7 +253,7 @@ class _Builder:
             self.begin("box:" + box["key"], box)
             self.voicemail(self.box_id[box["key"]], box["name"], box.get("email"), f"box:{box['key']}")
         self.obj = None
-        if not self.a or self.a.protected:
+        if not self.a or self.p.get("protected"):
             # An adopted domain keeps its own outside calls, 911 and blocking (hand-built) until the protections version: none generated before.
             self.direction()
             self.hangup()
@@ -297,7 +297,7 @@ class _Builder:
         what changed are cleared."""
         assert self.a
         keep: List[str] = []
-        prot = {t: cols for t, cols in PROTECTED.items()} if self.a.protected else {}
+        prot = {t: cols for t, cols in PROTECTED.items()} if self.p.get("protected") else {}
         for obj, built in self.obj_rows.items():
             live = self.a.objects.get(obj)
             if live is not None and self.a.meanings.get(obj) == self.b.meanings[obj]:
@@ -325,9 +325,11 @@ class _Builder:
                     cols.update(merged)
             keep += self.obj_cache.get(obj, [])
         changed = set(self.obj_rows) - set(self.b.adopted)
-        if self.a.protected:
-            self.b.remove = [("v_dialplans", uid) for uid in self.a.retire]
-        domain_wide = changed or self.a.protected
+        for uid in self.a.retire:                  # off while protected, as they were otherwise (their details are left as they are)
+            row = {**self.a.retired_rows[f"v_dialplans:{uid}"]}
+            row["dialplan_enabled"] = False if self.p.get("protected") else row.get("dialplan_enabled")
+            self.b.rows["v_dialplans"].append(row)
+        domain_wide = changed or self.p.get("protected") or self.a.retire
         self.b.cache = sorted(set(keep) | ({f"dialplan.{self.domain}"} if domain_wide else set()))
         for table in TABLES:
             self.b.rows[table].sort(key=lambda r: r[KEYS[table]])
