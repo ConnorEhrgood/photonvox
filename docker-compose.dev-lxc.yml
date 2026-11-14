@@ -1,0 +1,24 @@
+# The dev PhotonVox on LXC 800 for other products' integration tests (PhotonEntry's door stations first): the database, the migration and the
+# API only, compose project `photonvox-dev` in /root/vox-dev (scripts/dev-stack.sh). Not production: dev PhotonID (the dev Zitadel), the staging
+# engine (CT 610, 10.10.0.60), no worker, no web app, no directory sync (scripts/dev-entry-seed.py seeds what a test needs).
+name: photonvox-dev
+
+x-labels: &labels
+  com.photonvox.owner: photonvox-dev
+  com.photonvox.purpose: "dev stack for integration tests (not production)"
+
+services:
+  db:
+    labels: *labels
+  migrate:
+    image: photonvox-api:devstack
+    labels: *labels
+  api:
+    image: photonvox-api:devstack
+    labels: *labels
+    ports: !override
+      - "10.10.0.80:${API_PORT:-8113}:8000"         # LXC 800's own address: reachable on the LAN, never the internet
+  worker:
+    profiles: ["off"]
+  web:
+    profiles: ["off"]
