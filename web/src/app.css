@@ -31,12 +31,6 @@
 .pv-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0 0.75rem; }
 .pv-paste { width: 100%; min-height: 8rem; font-family: var(--font-mono, monospace); }
 
-/* The sidebar's column painted the page's full height (wide screens). The sidebar itself is sticky and one window tall, so a page taller than
-   the window (a full-page screenshot, a tall dashboard) showed the column's background stopping under it. Proposed to photon-ui. */
-@media (min-width: 901px) {
-  .ph-app { background: linear-gradient(to right, var(--surface) calc(15rem - 1px), var(--border) calc(15rem - 1px), var(--border) 15rem, transparent 15rem); }
-}
-
 /* The customer dashboard (pages/Dashboard.tsx). Calls are coloured by kind; status uses photon-ui's severities and edges. */
 :root { --pv-in: #4f8cff; --pv-out: #b48cff; --pv-int: #7d8799; }
 :root[data-theme="light"] { --pv-in: #1f5fd1; --pv-out: #7a3fd6; --pv-int: #687385; }

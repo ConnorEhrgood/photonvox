@@ -609,3 +609,8 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   switcher's list (200); no loop. A first attempt that only stripped the audience from the request was not dropped: the app stores the
   scope it asked for, so only a session from the older app (which never asked) is old-style. That is the real case.
 
+
+## Shell re-vendored (photon-ui 7c74bc7)
+- `sync-vendored.mjs web/src --css --base --auth`: only `ph-components.css` changed. The sidebar's full-height column (ccc0a84's rule, now
+  shared) and the sidebar above positioned page content (z-index 50, below dialogs and the app switcher). Vox's own copy of the rule is gone
+  from app.css. 238 web tests pass; the demo screenshots show the column the page's full height.

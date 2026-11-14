@@ -4,6 +4,11 @@
 
 /* --- App frame: sidebar + content (see shell/AppShell.tsx). On phones the sidebar becomes a drawer. --- */
 .ph-app { display: grid; grid-template-columns: 15rem minmax(0, 1fr); min-height: 100vh; }
+/* The sidebar is sticky and one window tall, so the column itself is painted the page's full height (wide screens only): otherwise, on a page taller
+   than the window (a full-page screenshot, a long list), the page background showed under the sidebar from about one window down. As PhotonVox had it. */
+@media (min-width: 901px) {
+  .ph-app { background: linear-gradient(to right, var(--surface) calc(15rem - 1px), var(--border) calc(15rem - 1px), var(--border) 15rem, transparent 15rem); }
+}
 .ph-app-body { min-width: 0; display: flex; flex-direction: column; }
 .ph-main { padding: 1.5rem; flex: 1; width: 100%; max-width: var(--content-max); margin: 0 auto; }
 .ph-main h1 { margin: 0; font-size: var(--fs-xl); }
@@ -14,6 +19,9 @@
   position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
   background: var(--surface); border-right: 1px solid var(--border);
 }
+/* Above the page's positioned content (camera tiles, maps), so its menus and the app switcher open over them; below dialogs (100). On phones the
+   drawer sets its own. As PhotonGuard had it. */
+@media (min-width: 901px) { .ph-sidebar { z-index: 50; } }
 .ph-sidebar-head { padding: 1rem 1rem 0.75rem; }
 .ph-sidebar-switcher { padding: 0 0.75rem 0.5rem; }
 .ph-sidebar-switcher .ph-input, .ph-sidebar-switcher select { width: 100%; }
