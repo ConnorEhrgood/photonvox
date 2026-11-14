@@ -36,7 +36,7 @@ export class FakeSource implements TokenSource {
 }
 
 const ALL = ['vox.phone_system.view', 'vox.phone_system.build', 'vox.phone.enroll', 'vox.phone.control', 'vox.site.emergency', 'vox.number.manage',
-  'vox.number.port', 'vox.number.release', 'vox.calling.policy', 'vox.forwarding.external', 'vox.console.manage', 'vox.members.view', 'vox.audit.view', 'vox.self.manage']
+  'vox.number.port', 'vox.number.release', 'vox.calling.policy', 'vox.forwarding.external', 'vox.console.manage', 'vox.entry.manage', 'vox.members.view', 'vox.audit.view', 'vox.self.manage']
 
 export const OWNER: TenantAccess = {
   id: 't1', name: 'Cedar Works', status: 'active', partner_id: null, role: 'owner', scope: { all: true }, source: 'direct', expires_at: null, capabilities: ALL,

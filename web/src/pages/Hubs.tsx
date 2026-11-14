@@ -23,6 +23,7 @@ export function settingsTabs(can: (capability: string) => boolean): { to: string
   if (can('vox.phone_system.build')) tabs.push({ to: 'templates', label: 'Templates' })
   if (can('vox.phone_system.view')) tabs.push({ to: 'alerts', label: 'Alerts' })
   if (can('vox.console.manage')) tabs.push({ to: 'console', label: 'PhotonConsole connection' })
+  if (can('vox.entry.manage')) tabs.push({ to: 'entry', label: 'PhotonEntry connection' })
   if (can('vox.audit.view')) tabs.push({ to: 'audit', label: 'Audit log' })
   return tabs
 }

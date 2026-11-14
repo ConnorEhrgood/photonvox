@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../auth/TenantContext'
-import { VOICES, type Draft, type DraftGroup, type DraftHours, type DraftMenu } from '../api/types'
+import { VOICES, type Draft, type DraftDoor, type DraftGroup, type DraftHours, type DraftMenu } from '../api/types'
 import { rename, slug, TargetPicker, targetText, targetValue, toTarget, useDraft, useSiteNames } from '../components/draft'
 import { ErrorText, Loading, Modal, PageHeader } from '../components/ui'
 
-type Kind = 'group' | 'menu' | 'box' | 'hours'
+type Kind = 'group' | 'menu' | 'box' | 'hours' | 'door'
 const DAYS = [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'], ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']] as const
 const SPAN = /^([01][0-9]|2[0-3]):[0-5][0-9]-(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$/
 const DIGITS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
@@ -25,6 +25,7 @@ export function CallFlowsPage() {
   const menus = Object.entries(draft.menus ?? {})
   const boxes = Object.entries(draft.boxes ?? {})
   const hours = Object.entries(draft.hours ?? {})
+  const doors = Object.entries(draft.doors ?? {})
   return (
     <>
       <PageHeader title="Call flows">{canBuild && <CloneFrom onDone={() => ps.reload()} />}</PageHeader>
@@ -82,6 +83,16 @@ export function CallFlowsPage() {
           ))}</div>
         )}
       </section>
+      <section aria-label="Doors">
+        <div className="ph-page-header"><h2>Doors</h2><div className="ph-actions">{add('door')}</div></div>
+        {doors.length === 0 ? <p className="ph-hint">None yet. A door station is a PhotonEntry intercom: when someone presses its button, it rings who you choose, and pressing # on the call opens the door.</p> : (
+          <ul className="pv-plain">{doors.map(([k, x]) => (
+            <li key={k}><strong>{x.name}</strong> ({x.extension}): <span className="ph-hint">{names[x.site] ?? 'a site'}; rings {targetText(draft, x.open)}
+              {x.closed ? `, after hours ${targetText(draft, x.closed)}` : ''}</span> {edit('door', k)}</li>
+          ))}</ul>
+        )}
+      </section>
+      {editing?.kind === 'door' && <DoorForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} siteNames={names} />}
       {editing?.kind === 'group' && <GroupForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} />}
       {editing?.kind === 'menu' && <MenuForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} />}
       {editing?.kind === 'box' && <BoxForm draft={draft} k={editing.key} saving={saving} error={error} onClose={() => setEditing(null)} save={save} />}
@@ -116,6 +127,43 @@ function Footer({ k, saving, ok, onSave, onRemove }: { k: string; saving: boolea
       {k && <button className="ph-btn ph-btn-danger" disabled={saving} onClick={onRemove}>Remove {k}</button>}
       <button className="ph-btn" disabled={saving || !ok} onClick={onSave}>Save</button>
     </div>
+  )
+}
+
+function DoorForm({ draft, k, saving, error, onClose, save, siteNames }: FormProps & { siteNames: Record<string, string> }) {
+  const was: DraftDoor | undefined = draft.doors?.[k]
+  const sites = Object.keys(draft.sites ?? {})
+  const [name, setName] = useState(was?.name ?? '')
+  const [site, setSite] = useState(was?.site ?? sites[0] ?? '')
+  const [extension, setExtension] = useState(was?.extension ?? '')
+  const [open, setOpen] = useState(targetValue(was?.open))
+  const [closed, setClosed] = useState(targetValue(was?.closed))
+  const key = k || slug(name)
+  const taken = !k && !!draft.doors?.[key]
+  const used = [...Object.values(draft.users ?? {}), ...Object.entries(draft.doors ?? {}).filter(([d]) => d !== k).map(([, x]) => x)].some((x) => x.extension === extension)
+  const ok = !!key && !taken && !!name.trim() && !!site && /^[1-8][0-9]{1,4}$/.test(extension) && !used && !!open
+  const value: DraftDoor = { name: name.trim(), site, extension, open: toTarget(open)!, closed: toTarget(closed) }
+  return (
+    <Modal title={k ? `Door ${was?.name ?? k}` : 'New door'} onClose={onClose}>
+      <div className="ph-field"><label htmlFor="pv-door-name">Name</label>
+        <input id="pv-door-name" className="ph-input" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} aria-invalid={taken} placeholder="Front door" />
+        {taken && <small className="ph-error">That name is taken.</small>}</div>
+      <div className="pv-row">
+        <div className="ph-field"><label htmlFor="pv-door-site">Site</label>
+          <select id="pv-door-site" className="ph-input" value={site} onChange={(e) => setSite(e.target.value)}>
+            {sites.map((id) => <option key={id} value={id}>{siteNames[id] ?? 'Site'}</option>)}
+          </select></div>
+        <div className="ph-field"><label htmlFor="pv-door-ext">Extension</label>
+          <input id="pv-door-ext" className="ph-input" inputMode="numeric" value={extension} onChange={(e) => setExtension(e.target.value.trim())} aria-invalid={used} />
+          {used && <small className="ph-error">That extension is taken.</small>}</div>
+      </div>
+      <TargetPicker id="pv-door-open" label="Rings" draft={draft} value={open} onChange={setOpen} peopleOnly />
+      <TargetPicker id="pv-door-closed" label="After hours (the site's office hours)" draft={draft} value={closed} onChange={setClosed} allowNone="the same" peopleOnly />
+      <p className="ph-hint">The door's intercom is set up in PhotonEntry, which reads this door once the phone system is published.</p>
+      <ErrorText>{error}</ErrorText>
+      <Footer k={k} saving={saving} ok={ok} onSave={() => void save((d) => ({ ...d, doors: put(d.doors, k, key, value) }))}
+        onRemove={() => void save((d) => ({ ...d, doors: put(d.doors, k, k, null) }))} />
+    </Modal>
   )
 }
 

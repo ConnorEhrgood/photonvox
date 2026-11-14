@@ -49,8 +49,8 @@ export function useDraft() {
 }
 
 /** Where a call goes: a user, a ring group, a menu or a mailbox from this draft. */
-export function TargetPicker({ id, label, draft, value, onChange, allowNone }:
-  { id: string; label: string; draft: Draft; value: TargetValue; onChange: (v: TargetValue) => void; allowNone?: string }) {
+export function TargetPicker({ id, label, draft, value, onChange, allowNone, peopleOnly }:
+  { id: string; label: string; draft: Draft; value: TargetValue; onChange: (v: TargetValue) => void; allowNone?: string; peopleOnly?: boolean }) {
   const users = Object.entries(draft.users ?? {})
   const boxes = Object.entries((draft.boxes ?? {}) as Record<string, { name: string }>)
   return (
@@ -60,11 +60,11 @@ export function TargetPicker({ id, label, draft, value, onChange, allowNone }:
         <option value="">{allowNone ?? 'Choose…'}</option>
         {users.length > 0 && <optgroup label="People">{users.map(([k, u]) => <option key={k} value={`user:${k}`}>{u.name} ({u.extension})</option>)}</optgroup>}
         {Object.keys(draft.groups ?? {}).length > 0 && <optgroup label="Ring groups">{Object.keys(draft.groups ?? {}).map((k) => <option key={k} value={`group:${k}`}>{k}</option>)}</optgroup>}
-        {Object.keys((draft.menus ?? {}) as object).length > 0 && <optgroup label="Menus">{Object.keys(draft.menus as object).map((k) => <option key={k} value={`menu:${k}`}>{k}</option>)}</optgroup>}
-        <optgroup label="Voicemail">
+        {!peopleOnly && Object.keys((draft.menus ?? {}) as object).length > 0 && <optgroup label="Menus">{Object.keys(draft.menus as object).map((k) => <option key={k} value={`menu:${k}`}>{k}</option>)}</optgroup>}
+        {!peopleOnly && <optgroup label="Voicemail">
           {boxes.map(([k, b]) => <option key={k} value={`voicemail:${k}`}>{b.name}</option>)}
           {users.map(([k, u]) => <option key={`vm-${k}`} value={`voicemail:${k}`}>{u.name}’s voicemail</option>)}
-        </optgroup>
+        </optgroup>}
       </select>
     </div>
   )
@@ -99,5 +99,6 @@ export function rename(d: Draft, kind: 'group' | 'menu' | 'voicemail', from: str
     groups: Object.fromEntries(Object.entries(d.groups ?? {}).map(([k, g]) => [k, { ...g, ...(g.then ? { then: fix(g.then) } : {}) }])),
     menus: Object.fromEntries(Object.entries(d.menus ?? {}).map(([k, m]) => [k, { ...m, ...(m.timeout ? { timeout: fix(m.timeout)! } : {}),
       options: Object.fromEntries(Object.entries(m.options).map(([o, t]) => [o, fix(t)!])) }])),
+    ...(d.doors ? { doors: Object.fromEntries(Object.entries(d.doors).map(([k, x]) => [k, { ...x, open: fix(x.open)!, ...(x.closed ? { closed: fix(x.closed) } : {}) }])) } : {}),
   }
 }

@@ -83,6 +83,8 @@ export interface DraftNumber { site: string; open: DraftTarget; closed?: DraftTa
 export interface DraftGroup { members: string[]; strategy?: 'simultaneous' | 'sequence'; ring_seconds?: number; then?: DraftTarget | null }
 export interface DraftMenu { greeting: string; options: Record<string, DraftTarget>; timeout?: DraftTarget }   // none: the call ends (an adopted menu, decision 32)
 export interface DraftHours { week: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', string[]>>; holidays?: 'none' | 'us-federal' }
+/** A door station (PhotonEntry's intercom): whatever it dials rings `open` (or `closed` after hours); never a menu or voicemail. */
+export interface DraftDoor { name: string; site: string; extension: string; open: DraftTarget; closed?: DraftTarget | null; hours?: string | null }
 export interface DraftSite { emergency_location: string; emergency_number: string; caller_id: string; hours?: string | null; unreachable?: 'voicemail' | 'none'; outside_prefix?: '8' | '9' | null }
 export interface Draft {
   version: 1
@@ -94,6 +96,7 @@ export interface Draft {
   groups?: Record<string, DraftGroup>
   users?: Record<string, DraftUser>
   boxes?: Record<string, { name: string; email?: string | null }>
+  doors?: Record<string, DraftDoor>
   calling?: Record<string, unknown>
   features?: Record<string, boolean>
 }
@@ -120,6 +123,9 @@ export interface Version {
   published_at: string | null
   checks: { passed: number; total: number; failed: { kind: string; number: string; expected: string[]; got: string | null }[] }
 }
+
+/** A PhotonEntry connection token (api/app/routes/integrations.py); `token` only in the answer that made it. */
+export interface EntryToken { id: string; label: string; scope: string; hint: string; created_at: string; revoked_at: string | null; last_used_at: string | null; token?: string }
 
 export interface Template { key: string; name: string; description: string }
 

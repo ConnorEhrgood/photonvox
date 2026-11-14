@@ -385,3 +385,31 @@ describe('number stock (Photon staff)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('A North American number in +1 form.')
   })
 })
+
+describe('doors', () => {
+  it('adds a door that rings a group (never a menu or voicemail), changes it, and keeps it when the group is renamed', async () => {
+    const { saved } = withServer(<CallFlowsPage />)
+    expect(await screen.findByText(/A door station is a PhotonEntry intercom/)).toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('region', { name: 'Doors' })).getByRole('button', { name: 'Add' }))
+    const dialog = await screen.findByRole('dialog', { name: 'New door' })
+    const rings = within(dialog).getByLabelText('Rings')
+    expect(within(rings).queryByRole('option', { name: 'main' })).toBeNull()                       // a menu would take the "#"
+    expect(within(rings).queryByRole('option', { name: 'General mailbox' })).toBeNull()
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Front door')
+    await userEvent.type(within(dialog).getByLabelText('Extension'), '100')
+    expect(within(dialog).getByText('That extension is taken.')).toBeInTheDocument()               // Ada's
+    await userEvent.clear(within(dialog).getByLabelText('Extension'))
+    await userEvent.type(within(dialog).getByLabelText('Extension'), '701')
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()                    // rings nobody yet
+    await userEvent.selectOptions(rings, 'group:everyone')
+    await userEvent.selectOptions(within(dialog).getByLabelText("After hours (the site's office hours)"), 'user:u-ben')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(saved[0].doors).toEqual({ 'front-door': { name: 'Front door', site: 's1', extension: '701', open: { group: 'everyone' }, closed: { user: 'u-ben' } } })
+    expect(await screen.findByText(/rings .*everyone.*, after hours Ben Office/)).toBeInTheDocument()
+    expect(rename(saved[0], 'group', 'everyone', 'desk').doors!['front-door'].open).toEqual({ group: 'desk' })
+    await userEvent.click(screen.getByRole('button', { name: 'Change front-door' }))
+    const again = await screen.findByRole('dialog', { name: 'Door Front door' })
+    await userEvent.click(within(again).getByRole('button', { name: 'Remove front-door' }))
+    expect(saved[1].doors).toEqual({})
+  })
+})

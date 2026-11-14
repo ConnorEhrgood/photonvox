@@ -20,6 +20,7 @@ import {
 import { TeamPage } from './pages/Team'
 import { UsersPage } from './pages/Users'
 import { AccessPending, CallbackRoute, NoAccess, RequireSignIn, SignedOutRoute, SignInProblem, SigningIn } from './ph-auth/pages'
+import { EntryPage } from './pages/Entry'
 
 /** Everything but the auth routes needs a session. Signed out: straight to PhotonID with the deep link kept (the suite's sign-in contract, ph-auth).
  *  A 401 just after signing in, and any 403, are pages here: never another redirect. */
@@ -124,6 +125,7 @@ export function App() {
               <Route path="templates" element={<TemplatesPage />} />
               <Route path="alerts" element={<AlertsPage />} />
               <Route path="console" element={<ConsolePage />} />
+              <Route path="entry" element={<EntryPage />} />
               <Route path="audit" element={<AuditPage />} />
             </Route>
             <Route path="*" element={<NotForYou />} />
