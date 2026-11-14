@@ -532,3 +532,24 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   on CT 600 port 8781 (the mgmtnet grant gains tcp/8781: the mgmtnet repo's change, for Connor), B ten-digit format and readopt, C the 911
   address (Connor), D the dry run (read), E dump and fingerprints, F protect-apply and publish, G drift, fingerprints, test calls. Rollback
   written first: U0 `republish 1` (rehearsed), R1 the domain's rows from E's dump, R2 the vzdump with Connor; the agent's removal.
+
+## 2026-11-14: PhotonEntry's door stations (a1's contract, approved by the operator within Connor's plan; built, not deployed)
+
+- **Review sent to a1 first;** a1 agreed all seven points and updated photonaccess (7f9c397, 32839f9): server = the phone system's SIP domain,
+  username = the extension, station ids = door keys, the call UUID as the call's id, ended_at may lag, published doors only, 400s; and a1's
+  question led to `sip.outbound_proxy` (optional, null unless an engine's `sip_access` sets it; customer SIP domains resolve publicly through
+  a wildcard, checked for the live engine). No "dial" field: PhotonEntry sets the call button to "0" (anything a door dials rings its flow).
+- **Built:** `doors` in the document (validation, site-scoped policy, compiler, adapter), migration 0009 (integration tokens, hashed;
+  `pbx_instance.sip_access`), capability `vox.entry.manage` (admin, owner; sensitive), the two read-only endpoints, vox-agent's read-only
+  `door-calls`, `check_xml` allowing exactly one engine-run command (the door's answer log line), the web app's Doors section and Settings →
+  PhotonEntry connection. API 564 passed, critical modules 100%; agent 31; web 226; answers validated against PhotonEntry's own schemas.
+- **Proved on staging's engine (engine/staging/build-test.sh, 42 of 42):** a door calling rings a desk phone and a ring group; the
+  answerer's "#" (RFC 2833 from the SIPp phone) is received by FreeSWITCH and sent on to the door as RFC 2833; a door dialing an outside
+  number rings its flow and nothing reaches the carrier stand-in; the door's log lines name who answered (100; 120 through the group).
+  Findings on the way: FreeSWITCH refuses an exported `${…}` value on the answering leg, and FusionPBX replaces a hangup hook set before the
+  transfer, so the door's own leg logs at answer (`callee_id_number`, escaped twice); FusionPBX's call record puts the answering extension,
+  not the door, in `extension_uuid`, so ended calls are found by the logged call id or the caller's number. vox-agent on staging was
+  updated (bind 10.10.0.60:8780 as documented).
+- **Not expressible yet:** an outside number (a mobile) as a door's outcome; when it comes, the trunk leg needs the same "#" proof.
+  **For the live engine, later:** its vox-agent allows status, cache/delete and check only (protections.sh); doors there need `door-calls`
+  added to `VOX_AGENT_OPERATIONS`, and the read role must read `v_xml_cdr.caller_id_number` (call history columns; to verify then).
