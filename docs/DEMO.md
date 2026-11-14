@@ -8,13 +8,13 @@ and the staging engine CT 610.
 ## 1. What the demo shows
 
 Organization **Photon Demo** (`demo`, `3560c835-5885-442d-bf55-6e250e4b5190`, the directory's fixed id: the same in dev and production).
-One phone system with three of its four sites (`billboards` has no phones). Numbers only from **(412) 555-0100 to 0199**.
+One phone system with three of its four sites (`demo-billboards` has no phones; the slugs are photon-suite DEMO.md be6f221's). Numbers only from **(412) 555-0100 to 0199**.
 
 | Site | Phones | Numbers | Call flows |
 |---|---|---|---|
-| `hq` Headquarters, Pittsburgh (`72a17302-…`) | 12 extensions (100–111: reception, sales ×3, support ×3, accounts, operations, IT, a conference room, the lobby phone) | 0100 main; 0101–0104 direct lines | Menu "1 sales, 2 support, 3 accounts, 0 reception" (timeout: reception); ring groups Sales and Support (simultaneous, then voicemail); closed hours → the company's voicemail box |
-| `warehouse` Distribution Center, Washington PA (`736b1e29-…`) | 5 extensions (200–204: shipping desk, dock office, two forklift handsets, the supervisor) and 2 overhead speakers (210, 211) | 0140 main, 0141 the dock | Ring group Shipping; **paging** group 290 (every warehouse phone and both speakers) |
-| `apartments` Riverside Apartments, Wheeling WV (`e8088684-…`) | 4 extensions (300–303: leasing ×2, maintenance, the office) | 0170 leasing, 0171 maintenance line | Leasing ring group in office hours, then a box; the maintenance line rings the on-call phone, after hours its own box |
+| `demo-hq` Headquarters, Pittsburgh (`72a17302-…`) | 12 extensions (100–111: reception, sales ×3, support ×3, accounts, operations, IT, a conference room, the lobby phone) | 0100 main; 0101–0104 direct lines | Menu "1 sales, 2 support, 3 accounts, 0 reception" (timeout: reception); ring groups Sales and Support (simultaneous, then voicemail); closed hours → the company's voicemail box |
+| `demo-warehouse` Distribution Center, Washington PA (`736b1e29-…`) | 5 extensions (200–204: shipping desk, dock office, two forklift handsets, the supervisor) and 2 overhead speakers (210, 211) | 0140 main, 0141 the dock | Ring group Shipping; **paging** group 290 (every warehouse phone and both speakers) |
+| `demo-apartments` Riverside Apartments, Wheeling WV (`e8088684-…`) | 4 extensions (300–303: leasing ×2, maintenance, the office) | 0170 leasing, 0171 maintenance line | Leasing ring group in office hours, then a box; the maintenance line rings the on-call phone, after hours its own box |
 
 0180–0199 are "the outside world": the simulated callers and the numbers the phones call. They are never the organization's numbers.
 Calling as a customer would have it: national, service and toll-free; international off; the protections on (the demo shows them as
@@ -149,6 +149,13 @@ later; it is not part of this.
 - Text-to-speech for about ten greetings, once: inside Google's free tier.
 
 ## 6. Connor's decisions
+
+**Answered (the operator, 2026-11-14):** 1. CT 610, as recommended; it rides Connor's one rollout go with the other products. 2. No emergency
+call in the demo's history. 3. Google's Chirp 3 HD voices are fine; a synthetic voice reading our own fictional text needs no further
+approval. The dashboard is built first (it helps Hickory Church now), then the demo; its screenshots go to the operator as soon as they look
+right, with Hickory's real numbers and with the demo's.
+
+The questions as asked:
 
 1. **Production PhotonVox reads and publishes to the staging engine CT 610** (P3, a new mgmtnet path), the demo living there beside the
    build tests (they touch only their own domains). The alternative is a separate demo container built the same way (another 2 GB of memory

@@ -5,6 +5,7 @@ import { DevTokenPage } from './auth/DevTokenPage'
 import { OrgRoute, orgPath, rememberedTenant, TenantProvider, ToCurrentOrg, useTenant } from './auth/TenantContext'
 import { isIntegrator, Layout } from './components/Layout'
 import { CustomersPage } from './pages/Customers'
+import { DashboardPage } from './pages/Dashboard'
 import { NotForYou, PlatformHub, SettingsHub, SettingsIndex } from './pages/Hubs'
 import { CallFlowsPage } from './pages/CallFlows'
 import { Emergency911Page } from './pages/Emergency911'
@@ -14,7 +15,7 @@ import { OverviewPage } from './pages/Overview'
 import { PlatformOrganizationsPage } from './pages/Platform'
 import { SitesPage } from './pages/Sites'
 import {
-  AlertsPage, AuditPage, ConsolePage, GdmsPage, InstancesPage, MonitorPage, MyPhonePage, PhonesPage,
+  AlertsPage, AuditPage, ConsolePage, GdmsPage, InstancesPage, MyPhonePage, PhonesPage,
   TemplatesPage, UpstreamsPage,
 } from './pages/Soon'
 import { TeamPage } from './pages/Team'
@@ -74,7 +75,7 @@ export function Home() {
 /** An organization's home in PhotonVox, /org/<slug>/: its phone system's overview, or "My phone" for someone who only has their own. */
 export function OrgHome() {
   const { can } = useTenant()
-  return <Navigate to={can('vox.phone_system.view') ? 'overview' : 'my-phone'} replace />
+  return can('vox.phone_system.view') ? <DashboardPage /> : <Navigate to="my-phone" replace />
 }
 
 /** A site's home, /org/<slug>/site/<site-slug>/: the site set up for phones (its 911 address, numbers and hours). */
@@ -94,7 +95,7 @@ function PlatformOnly() {
   return me?.is_staff ? <Outlet /> : <Navigate to="/" replace />
 }
 
-const LEGACY = ['overview', 'users', 'phones', 'numbers', 'call-flows', 'sites', 'monitor', 'my-phone', 'settings']
+const LEGACY = ['overview', 'phone-system', 'users', 'phones', 'numbers', 'call-flows', 'sites', 'monitor', 'my-phone', 'settings']
 
 export function App() {
   return (
@@ -110,14 +111,15 @@ export function App() {
             <Route index element={<OrgHome />} />
             <Route path="my-phone" element={<MyPhonePage />} />
             <Route element={<Needs cap="vox.phone_system.view" />}>
-              <Route path="overview" element={<OverviewPage />} />
+              <Route path="phone-system" element={<OverviewPage />} />
+              <Route path="overview" element={<Navigate to="../phone-system" replace />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="phones" element={<PhonesPage />} />
               <Route path="numbers" element={<NumbersPage />} />
               <Route path="call-flows" element={<CallFlowsPage />} />
               <Route path="sites" element={<SitesPage />} />
               <Route path="site/:siteSlug" element={<SiteHome />} />
-              <Route path="monitor" element={<MonitorPage />} />
+              <Route path="monitor" element={<Navigate to=".." replace />} />
             </Route>
             <Route path="settings" element={<SettingsHub />}>
               <Route index element={<SettingsIndex />} />

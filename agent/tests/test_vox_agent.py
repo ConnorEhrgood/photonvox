@@ -23,6 +23,26 @@ REPLIES = {
     "sofia status gateway": f"Profile::Gateway-Name\tData\tState\n external::{UUID1}\tsip:x@10.10.0.80:5071\tNOREG\t0.00\n",
     "show registrations count": "2 total.\n",
     "reloadacl": "+OK acl reloaded\n",
+    "sofia xmlstatus profile internal reg": """<?xml version="1.0"?><profile><registrations>
+<registration><user>100@x.test</user><contact>&lt;sip:100@192.0.2.7:5101&gt;</contact><agent>Grandstream GRP2614 1.0.11.7</agent>
+<status>Registered(UDP)(unknown) exp(2026-11-14 16:48:35) expsecs(648)</status><ping-status>Reachable</ping-status>
+<network-ip>192.0.2.7</network-ip><network-port>5101</network-port></registration>
+<registration><user>100@y.test</user><agent>other</agent><status>Registered(UDP) expsecs(9)</status><network-ip>192.0.2.8</network-ip></registration>
+</registrations></profile>""",
+    "sofia xmlstatus profile external reg": "<profile><registrations></registrations></profile>",
+    "show channels as json": json.dumps({"row_count": 4, "rows": [
+        {"uuid": "a1", "call_uuid": "a1", "direction": "inbound", "name": "sofia/internal/100@x.test", "context": "x.test", "initial_context": "x.test",
+         "cid_num": "100", "dest": "2125550123", "callee_num": "", "callstate": "ACTIVE", "presence_id": "100@x.test", "accountcode": "x.test",
+         "created_epoch": "1794674261", "ip_addr": "192.0.2.7"},
+        {"uuid": "a2", "call_uuid": "a1", "direction": "outbound", "name": "sofia/external/+12125550123", "context": "x.test", "cid_num": "+12125550400",
+         "dest": "+12125550123", "callee_num": "+12125550123", "callstate": "ACTIVE", "presence_id": "", "created_epoch": "1794674262"},
+        {"uuid": "b1", "call_uuid": "b1", "direction": "inbound", "name": "sofia/external/3105550199@10.0.0.1", "context": "x.test",
+         "initial_context": "public", "cid_num": "3105550199", "dest": "2125550400", "callstate": "RINGING", "created_epoch": "1794674263"},
+        {"uuid": "c1", "call_uuid": "c1", "direction": "inbound", "name": "sofia/internal/100@y.test", "context": "y.test", "presence_id": "100@y.test",
+         "cid_num": "100", "dest": "101", "callstate": "ACTIVE", "created_epoch": "1794674264"}]}),
+    "sofia xmlstatus gateway": f"""<gateways><gateway><name>{UUID1}</name><profile>external</profile><username>secretuser</username>
+<password>yes</password><state>NOREG</state><status>UP</status><pingtime>0.00</pingtime><uptime-usec>79396114739</uptime-usec><calls-in>4</calls-in>
+<calls-out>155</calls-out><failed-calls-in>0</failed-calls-in><failed-calls-out>2</failed-calls-out></gateway></gateways>""",
 }
 
 
@@ -226,6 +246,30 @@ def test_a_door_stations_calls_are_read_from_its_own_log_lines(agent, tmp_path):
     for bad in ({"domain_name": "x.test", "extension": "701", "since": "1"}, {"domain_name": "x.test", "extension": "701", "since": True},
                 {"domain_name": "x.test", "extension": "9; x", "since": 0}, {"domain_name": "x.test", "extension": "701", "since": -1}):
         assert call(agent, "POST", "/v1/door-calls", bad)[0] == 400
+
+
+def test_live_reads_one_domains_phones_and_calls_and_every_gateways_health_without_addresses(agent):
+    code, r = call(agent, "POST", "/v1/live", {"domain_name": "x.test"})
+    assert code == 200
+    assert r["registrations"] == [{"extension": "100", "agent": "Grandstream GRP2614 1.0.11.7", "expires_s": 648, "reachable": True,
+                                   "profile": "internal"}]
+    assert [(c["uuid"], c["call"], c["direction"], c["gateway"], c["callstate"], c["presence"], c["created"]) for c in r["channels"]] == [
+        ("a1", "a1", "inbound", False, "ACTIVE", "100", 1794674261), ("a2", "a1", "outbound", True, "ACTIVE", "", 1794674262),
+        ("b1", "b1", "inbound", True, "RINGING", "", 1794674263)]
+    assert r["gateways"] == [{"gateway": UUID1, "profile": "external", "state": "NOREG", "status": "UP", "pingtime": 0.0, "calls_in": 4,
+                              "calls_out": 155, "failed_calls_in": 0, "failed_calls_out": 2, "uptime_usec": 79396114739}]
+    text = json.dumps(r)
+    assert "192.0.2" not in text and "secretuser" not in text and "y.test" not in text
+    assert {"sofia xmlstatus profile internal reg", "sofia xmlstatus profile external reg", "show channels as json"} <= set(FakeESL.commands)
+    for bad in ({}, {"domain_name": "x.test; hupall"}, {"domain_name": "*"}):
+        assert call(agent, "POST", "/v1/live", bad)[0] == 400
+
+
+def test_live_with_nothing_registered_and_no_calls(agent, monkeypatch):
+    monkeypatch.setitem(REPLIES, "show channels as json", '{"row_count": 0}')
+    monkeypatch.setitem(REPLIES, "sofia xmlstatus profile internal reg", "")
+    monkeypatch.setitem(REPLIES, "sofia xmlstatus gateway", "not xml")
+    assert call(agent, "POST", "/v1/live", {"domain_name": "x.test"}) == (200, {"registrations": [], "channels": [], "gateways": []})
 
 
 def test_a_line_written_just_before_the_log_rotated_is_still_read(tmp_path):

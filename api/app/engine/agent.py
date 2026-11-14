@@ -37,6 +37,9 @@ class Agent(Protocol):
     def door_calls(self, domain_name: str, extension: str, since: int) -> List[Dict[str, Any]]:
         """A door station's calls since then, as its dial plan logged them: {"call", "started", "answered", "callee"} (read only)."""
 
+    def live(self, domain_name: str) -> Dict[str, Any]:
+        """The domain right now (read only): {"registrations": [...], "channels": [...], "gateways": [...]} (vox-agent's /v1/live)."""
+
 
 class AgentError(Exception):
     pass
@@ -86,6 +89,9 @@ class HttpAgent:
 
     def door_calls(self, domain_name: str, extension: str, since: int) -> List[Dict[str, Any]]:
         return self.call("POST", "/v1/door-calls", {"domain_name": domain_name, "extension": extension, "since": since})["calls"]
+
+    def live(self, domain_name: str) -> Dict[str, Any]:
+        return self.call("POST", "/v1/live", {"domain_name": domain_name})
 
     def check(self, kind: str, number: str, domain_name: str, domain_uuid: str, token: str) -> Optional[str]:
         return self.call("POST", "/v1/check", {"kind": kind, "number": number, "domain_name": domain_name, "domain_uuid": domain_uuid,

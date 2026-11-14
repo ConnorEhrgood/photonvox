@@ -26,18 +26,18 @@ export function Layout() {
   const items: (NavItem & { cap?: string })[] = !current ? [] : [
     ...(isIntegrator(tenants) ? [{ to: '/customers', label: 'Customers', icon: 'clients' as const }] : []),
     // Icons as photon-ui DESIGN.md "Icons" says (id1, 2026-11-14): a desk phone for phones, a handset for one's own, a call for live calls.
-    { to: at('/overview'), label: 'Overview', icon: 'overview', cap: 'vox.phone_system.view' },
+    { to: at(''), label: 'Dashboard', icon: 'overview', cap: 'vox.phone_system.view', end: true },
     { to: at('/users'), label: 'Users', icon: 'people', cap: 'vox.phone_system.view' },
     { to: at('/phones'), label: 'Phones', icon: 'deskphone', cap: 'vox.phone_system.view' },
     { to: at('/numbers'), label: 'Numbers', icon: 'numbers', cap: 'vox.phone_system.view' },
     { to: at('/call-flows'), label: 'Call flows', icon: 'flows', cap: 'vox.phone_system.view' },
     { to: at('/sites'), label: 'Sites', icon: 'sites', cap: 'vox.phone_system.view' },
-    { to: at('/monitor'), label: 'Monitor', icon: 'calls', cap: 'vox.phone_system.view' },
+    { to: at('/phone-system'), label: 'Phone system', icon: 'history', cap: 'vox.phone_system.view' },
     { to: at('/my-phone'), label: 'My phone', icon: 'phone', cap: 'vox.self.manage' },
   ]
   const visible = items.filter((i) => !i.cap || can(i.cap))
   // An admin has both; the self-service page is for people who have nothing else.
-  const trimmed = visible.some((i) => i.to === at('/overview')) ? visible.filter((i) => i.to !== at('/my-phone')) : visible
+  const trimmed = visible.some((i) => i.to === at('')) ? visible.filter((i) => i.to !== at('/my-phone')) : visible
   const groups: NavGroup[] = [{ items: trimmed.map(({ cap: _cap, ...i }) => i) }]
   const footer: NavItem[] = []
   if (current && settingsTabs(can).length > 0) footer.push({ to: at('/settings'), label: 'Settings', icon: 'settings' })

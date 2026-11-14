@@ -159,3 +159,26 @@ export const VOICES: [string, string][] = [
   ['en-US-Chirp3-HD-Kore', 'Kore (US English, female)'], ['en-US-Chirp3-HD-Charon', 'Charon (US English, male)'],
   ['en-US-Chirp3-HD-Aoede', 'Aoede (US English, female, lighter)'], ['es-US-Chirp3-HD-Kore', 'Kore (US Spanish, female)'],
 ]
+
+/** The customer dashboard (GET /tenants/{id}/dashboard; api/app/dashboard.py). A part the engine could not give is null and named in `unavailable`. */
+export type CallKind = 'inbound' | 'outbound' | 'internal'
+export interface HourMix { inbound: number; outbound: number; internal: number }
+export interface Dashboard {
+  published: boolean
+  as_of?: string
+  timezone?: string
+  site: string | null
+  sites: { id: string; slug: string; name: string }[]
+  unavailable?: ('history' | 'live' | 'voicemail')[]
+  phone_system?: { status: PhoneSystemStatus; version: number }
+  now?: { count: number; lines: number; calls: { kind: CallKind; who: { extension: string; name: string }[]; other: string | null; number: string | null; state: 'talking' | 'ringing'; seconds: number; site: string | null }[] } | null
+  phones?: { online: number; total: number; devices: number; offline: { extension: string; name: string; site: string }[] } | null
+  trunk?: { state: 'ok' | 'trouble' | 'unknown'; words: string; gateways: number; last_in: string | null; last_out: string | null }
+  today?: (HourMix & { calls: number; minutes: number; answered: number; missed: number; to_voicemail: number; by_hour: HourMix[]; peak_lines: number; in_progress?: number }) | null
+  typical?: { days: number; weekday: string; by_hour: number[]; calls_so_far: number | null; minutes_so_far: number | null; missed_so_far: number | null } | null
+  busiest?: { grid: number[][]; top: { weekday: number; hour: number; calls: number } | null } | null
+  week?: HourMix | null
+  emergency?: { at: string; dialed: string; extension: string | null; who: string | null; site: string | null; address: string | null; answered: boolean; seconds: number }[] | null
+  voicemail?: { new: number; boxes: { box: string; name: string; new: number; oldest_new: string | null }[] } | null
+  numbers?: { number: string; site: string | null; rings: string; closed: string | null; calls_today: number; last_call: string | null }[]
+}

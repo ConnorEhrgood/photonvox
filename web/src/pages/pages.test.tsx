@@ -29,7 +29,8 @@ describe('the sidebar', () => {
   it('an owner sees the phone system’s pages, Settings, and no Customers list', async () => {
     withShell('/overview')
     await screen.findByText('page')
-    expect(navNames()).toEqual(expect.arrayContaining(['Overview', 'Users', 'Phones', 'Numbers', 'Call flows', 'Sites', 'Monitor']))
+    expect(navNames()).toEqual(expect.arrayContaining(['Dashboard', 'Users', 'Phones', 'Numbers', 'Call flows', 'Sites', 'Phone system']))
+    expect(navNames()).not.toContain('Monitor')
     expect(navNames()).not.toContain('Customers')
     expect(navNames()).not.toContain('My phone')
     expect(screen.getByRole('link', { name: /Settings/ })).toBeInTheDocument()
@@ -105,13 +106,12 @@ describe('addresses', () => {
   const CEDAR = { ...OWNER, slug: 'cedar-works', former_slugs: ['cedar'] }
   const app = (route: string, me = meWith(CEDAR)) => renderApp(<App />, { route, me, routes: {
     'GET /tenants/t1/phone-system': null, 'GET /tenants/t1/sites': SITES, 'GET /tenants/t1/members': [] }, bare: true })
-  it('an organization’s home in PhotonVox is its overview, or My phone for someone with only their own', async () => {
-    const at = (me: ReturnType<typeof meWith>) => renderApp(
+  it('an organization’s home in PhotonVox is its dashboard, or My phone for someone with only their own', async () => {
+    renderApp(
       <Routes><Route path="/org/:orgSlug" element={<OrgRoute />}>
-        <Route index element={<OrgHome />} /><Route path="overview" element={<p>overview</p>} /><Route path="my-phone" element={<p>my phone</p>} />
-      </Route></Routes>, { route: '/org/cedar-works/', me, routes: {} })
-    at(meWith(CEDAR))
-    expect(await screen.findByText('overview')).toBeInTheDocument()
+        <Route index element={<OrgHome />} /><Route path="my-phone" element={<p>my phone</p>} />
+      </Route></Routes>, { route: '/org/cedar-works/', me: meWith(CEDAR), routes: { [`GET /tenants/${CEDAR.id}/dashboard`]: { published: false, site: null, sites: [] } } })
+    expect(await screen.findByText(/The dashboard fills in once the phone system is running/)).toBeInTheDocument()
   })
   it('… and My phone for a user', async () => {
     renderApp(<Routes><Route path="/org/:orgSlug" element={<OrgRoute />}><Route index element={<OrgHome />} />

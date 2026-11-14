@@ -11,6 +11,9 @@ Operations (JSON over HTTP, on the management network only):
     POST /v1/sound           {"domain_name", "name": "photonvox-<hash>.wav", "data": base64 WAV}: a spoken greeting into the domain's recordings
     POST /v1/door-calls      {"domain_name", "extension", "since": unix seconds}: what a door station's calls logged since then (read only):
                              {"calls": [{"call", "started", "answered", "callee"}]} (PhotonEntry's door-calls, through PhotonVox)
+    POST /v1/live            {"domain_name"}: right now, read only: the domain's registrations (extension, the phone's name for itself, seconds
+                             until it must register again; never its address), its calls' channels, and every gateway's health
+                             (PhotonVox's dashboard)
     POST /v1/check           {"kind": "inbound"|"route", "number", "domain_name", "domain_uuid", "token"}: one synthetic call of the
                              post-publish check; answers {"found": "reached 301" | "<route> <gateways> <number sent>" | "blocked <category>" | null}
 
@@ -246,6 +249,64 @@ def door_calls(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
     return {"calls": [c for c in calls.values() if max(c["started"] or 0, c["answered"] or 0) >= since]}
 
 
+EXPSECS = re.compile(r"expsecs\((\d+)\)")
+GATEWAY_FIELDS = {"state": str, "status": str, "pingtime": float, "calls-in": int, "calls-out": int, "failed-calls-in": int, "failed-calls-out": int,
+                  "uptime-usec": int}
+
+
+def _num(kind: Callable[[str], Any], text: Optional[str]) -> Any:
+    try:
+        return kind(text) if kind is not str else (text or "")
+    except (TypeError, ValueError):
+        return None
+
+
+def live(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
+    """One domain right now, read only. Registrations from every running SIP profile, the domain's users only: the extension, the phone's
+    name for itself (its User-Agent, cut to 80 characters), seconds until it must register again, whether it answers FreeSWITCH's pings.
+    Never its network address. Channels whose call is in the domain (its context, first or now, its account code or its presence): each
+    leg's direction, whether it is on a gateway, its numbers, state and start. Every gateway's state, status and call counts since
+    FreeSWITCH started (no names, logins or addresses besides the gateway's id)."""
+    domain = _str(body, "domain_name", DOMAIN)
+    profiles = [line.split()[0] for line in esl_api(cfg, "sofia status").splitlines()
+                if len(line.split()) >= 4 and line.split()[1] == "profile" and "RUNNING" in line and PROFILE.match(line.split()[0])]
+    registrations = []
+    for p in profiles:
+        try:
+            root = ET.fromstring(esl_api(cfg, f"sofia xmlstatus profile {p} reg").strip() or "<profile/>")
+        except ET.ParseError:
+            continue
+        for r in root.iter("registration"):
+            user, _, realm = (r.findtext("user") or "").partition("@")
+            if realm != domain or not user:
+                continue
+            m = EXPSECS.search(r.findtext("status") or "")
+            registrations.append({"extension": user, "agent": (r.findtext("agent") or "")[:80], "expires_s": int(m.group(1)) if m else None,
+                                  "reachable": (r.findtext("ping-status") or "") == "Reachable", "profile": p})
+    try:
+        rows = json.loads(esl_api(cfg, "show channels as json") or "{}").get("rows") or []
+    except ValueError:
+        rows = []
+    channels = []
+    for c in rows:
+        if not (domain in (c.get("context"), c.get("initial_context"), c.get("accountcode")) or (c.get("presence_id") or "").endswith("@" + domain)):
+            continue
+        name = c.get("name") or ""
+        channels.append({"uuid": c.get("uuid"), "call": c.get("call_uuid") or c.get("uuid"), "direction": c.get("direction"),
+                         "gateway": name.startswith(("sofia/gateway/", "sofia/external/")), "cid_num": c.get("cid_num") or "",
+                         "dest": c.get("dest") or "", "callee_num": c.get("callee_num") or "", "callstate": c.get("callstate") or "",
+                         "presence": (c.get("presence_id") or "").partition("@")[0], "created": _num(int, c.get("created_epoch"))})
+    gateways = []
+    try:
+        for g in ET.fromstring(esl_api(cfg, "sofia xmlstatus gateway").strip() or "<gateways/>").iter("gateway"):
+            gw = {"gateway": g.findtext("name") or "", "profile": g.findtext("profile") or ""}
+            gw.update({k.replace("-", "_"): _num(kind, g.findtext(k)) for k, kind in GATEWAY_FIELDS.items()})
+            gateways.append(gw)
+    except ET.ParseError:
+        pass
+    return {"registrations": registrations, "channels": channels, "gateways": gateways}
+
+
 def _tail(path: str, size: int = 512 * 1024) -> str:
     """The newest `size` bytes of FreeSWITCH's log, across a rotation: when the current file is shorter, the end of the one rotated before it
     (`<path>.1`) comes first, so a line written just before the rotation is still read (a check once missed its line that way)."""
@@ -283,6 +344,7 @@ def check(cfg: Config, body: Dict[str, Any], wait_s: float = 3.0) -> Dict[str, A
 ROUTES: Dict[Tuple[str, str], Callable[[Config, Dict[str, Any]], Dict[str, Any]]] = {
     ("GET", "/v1/status"): status, ("POST", "/v1/cache/delete"): cache_delete, ("POST", "/v1/rescan"): rescan,
     ("POST", "/v1/reloadacl"): reloadacl, ("POST", "/v1/seed-domain"): seed_domain, ("POST", "/v1/check"): check, ("POST", "/v1/door-calls"): door_calls, ("POST", "/v1/sound"): sound,
+    ("POST", "/v1/live"): live,
 }
 
 
