@@ -38,9 +38,11 @@ class Settings(BaseSettings):
     directory_resolve_timeout_s: float = 3.0
     directory_timeout_s: float = 10.0
 
-    # Photon staff come from the directory (person documents: `platform_admin`, and membership of partner Photon). This list of PhotonID subjects
-    # (comma separated) is a fallback for one release from 2026-11-13, then removed.
-    platform_admin_subs: str = ""
+    # PhotonVox's own web app's PhotonID client id: a token issued to any other app (the PhotonID account app, for the home dashboard) is
+    # accepted on GET /v1/summary only, and refused everywhere else. Empty: not checked (development).
+    oidc_web_client_id: str = ""
+    # The home dashboard's origin(s): CORS on GET /v1/summary only (comma separated).
+    summary_origins: str = "https://account.photonind.com"
 
     # Fernet key for the secrets PhotonVox keeps: engine database logins, the SIP passwords and voicemail PINs it gave phones, agent secrets.
     # Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Comma separated: the first
@@ -64,8 +66,8 @@ class Settings(BaseSettings):
         return [s.strip() for s in self.directory_notice_secret.split(",") if s.strip()]
 
     @property
-    def platform_admins(self) -> List[str]:
-        return [s.strip() for s in self.platform_admin_subs.split(",") if s.strip()]
+    def summary_origin_list(self) -> List[str]:
+        return [o.strip() for o in self.summary_origins.split(",") if o.strip()]
 
     @property
     def cors_list(self) -> List[str]:

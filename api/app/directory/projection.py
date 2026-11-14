@@ -97,6 +97,8 @@ class DbProjection(Projection):
             row = Tenant(id=tid)
             self.db.add(row)
         row.name, row.plan_key, row.home_region = doc["name"], doc.get("plan_key", ""), doc["home_region"]
+        # The address (/org/<slug>/): a document from before the directory sent it keeps none until the next pull.
+        row.slug, row.former_slugs = doc.get("slug") or None, sorted(doc.get("former_slugs") or [])
         row.partner_id = _uuid(doc["partner_id"]) if doc.get("partner_id") else None
         row.products = sorted(doc.get("products") or [])
         # An archived organization is not ours to serve: its access is kept but the tenant is "removed" like one that lost its entitlement.

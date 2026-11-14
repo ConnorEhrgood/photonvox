@@ -31,7 +31,7 @@ def me(who: Who = Depends(current_person), db: Session = Depends(get_db)) -> Dic
         if not access.is_active(grant, now) or t.status == "removed":
             continue
         tenants.append({
-            "id": str(t.id), "name": t.name, "status": t.status, "partner_id": str(t.partner_id) if t.partner_id else None, "role": grant.role,
+            "id": str(t.id), "name": t.name, "slug": t.slug, "former_slugs": list(t.former_slugs or []), "status": t.status, "partner_id": str(t.partner_id) if t.partner_id else None, "role": grant.role,
             "scope": scope_json(grant), "source": grant.source, "expires_at": grant.expires_at.isoformat() if grant.expires_at else None,
             "capabilities": sorted(access.capabilities(grant, now)),
         })

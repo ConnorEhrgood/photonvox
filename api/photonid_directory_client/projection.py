@@ -2,7 +2,9 @@
 
 The directory sends four kinds of thing, each keyed by a string:
 
-  organization   key = organization id.   {id, name, partner_id, home_region, status, plan_key, products}
+  organization   key = organization id.   {id, name, slug, former_slugs, partner_id, home_region, status, plan_key, products}
+                 `slug`: the organization's address in every product, /org/<slug>/ (the suite's URL convention; only the directory gives it).
+                 `former_slugs`: every slug it had before: a link with one of them redirects to /org/<slug>/ (never to another organization).
                  `products`: the keys of ALL the products the organization has switched on (sorted; always includes the product you are, because you are
                  only told about organizations that have you), e.g. ["board", "guard"]. Keys only: no plans, counts or other products' data. Switching any product
                  on or off sends the organization again to every product it still has. `plan_key` is YOUR plan only.

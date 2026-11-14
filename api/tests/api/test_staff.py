@@ -1,10 +1,9 @@
 """Photon staff come from the PhotonID directory (decided 2026-11-13, as PhotonConsole does): the directory's platform administrators, and every
-member, in any role, of partner Photon. PLATFORM_ADMIN_SUBS stays as a fallback for one release."""
+member, in any role, of partner Photon. (The PLATFORM_ADMIN_SUBS fallback was removed on 2026-11-14.)"""
 import uuid
 
 from sqlalchemy import text
 
-from app.config import settings
 from tests.api.conftest import auth, pull
 
 PHOTON = str(uuid.uuid4())
@@ -62,10 +61,9 @@ def test_a_document_without_the_fields_counts_as_neither(client, world, fake):
     assert client.get("/me", headers=auth("old")).json()["is_staff"] is False
 
 
-def test_platform_admin_subs_is_still_a_fallback_for_one_release(client, world, fake, monkeypatch):
+def test_a_subject_in_the_old_fallback_setting_is_not_staff(client, world, fake, monkeypatch):
     fake.add_person("legacy", name="Legacy")
     pull(fake)
+    monkeypatch.setenv("PLATFORM_ADMIN_SUBS", "legacy")         # an old .env line: ignored
     assert client.get("/platform/organizations", headers=auth("legacy")).status_code == 403
-    monkeypatch.setattr(settings, "platform_admin_subs", "legacy")
-    assert client.get("/platform/organizations", headers=auth("legacy")).status_code == 200
-    assert client.get("/me", headers=auth("legacy")).json()["is_staff"] is True
+    assert client.get("/me", headers=auth("legacy")).json()["is_staff"] is False

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import uuid
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
@@ -25,6 +26,11 @@ import httpx
 from .client import DirectoryClient
 from .notice import sign_notice
 from .projection import KINDS, Doc, Projection
+
+
+def _slugify(name: str) -> str:
+    """As the directory makes an organization's slug from its name (a-z 0-9 and hyphens)."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:63].strip("-") or "org"
 
 BASE = "http://directory.test"
 
@@ -105,9 +111,11 @@ class FakeDirectory:
         self.seq = seq
 
     def organization(self, id: Optional[str] = None, name: str = "Organization", region: str = "us-east", partner_id: Optional[str] = None, plan_key: str = "standard",
-                     status: str = "active", products: Optional[List[str]] = None) -> Doc:
-        """`products`: the other products the organization has switched on; this product's own key is always in the list, which is sorted (as the directory sends it)."""
-        doc = {"id": id or str(uuid.uuid4()), "name": name, "partner_id": partner_id or str(uuid.uuid4()), "home_region": region, "status": status, "plan_key": plan_key,
+                     status: str = "active", products: Optional[List[str]] = None, slug: Optional[str] = None, former_slugs: Optional[List[str]] = None) -> Doc:
+        """`products`: the other products the organization has switched on; this product's own key is always in the list, which is sorted (as the directory sends it).
+        `slug`: its address in every product (/org/<slug>/; default: from the name); `former_slugs`: the ones it had, which redirect."""
+        doc = {"id": id or str(uuid.uuid4()), "name": name, "slug": slug or _slugify(name), "former_slugs": sorted(former_slugs or []),
+               "partner_id": partner_id or str(uuid.uuid4()), "home_region": region, "status": status, "plan_key": plan_key,
                "products": sorted({self.product, *(products or [])})}
         self.put("organization", doc["id"], doc)
         return doc

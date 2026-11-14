@@ -8,7 +8,7 @@ from sqlalchemy.exc import DataError
 
 from app.config import settings
 from app.db import engine, system_engine
-from app.routes import directory_notify, me, phone_system, platform, tenants
+from app.routes import directory_notify, me, phone_system, platform, summary, tenants
 
 problem = settings.production_safe()
 if problem:
@@ -21,6 +21,7 @@ app.include_router(tenants.router)
 app.include_router(phone_system.router)
 app.include_router(platform.router)
 app.include_router(directory_notify.router)
+app.include_router(summary.router)
 
 # Every verb the web app uses; a verb missing here fails in the browser only, as a preflight the API never answers.
 CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -28,6 +29,35 @@ CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 if settings.cors_list:
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_list, allow_methods=CORS_METHODS,
                        allow_headers=["Authorization", "Content-Type"], max_age=600)
+
+
+class SummaryCors:
+    """CORS for the home dashboard (the PhotonID account app) on GET /v1/summary only: its origin may call that one route, and nothing else
+    (every other route answers only PhotonVox's own web app). Outermost, so a preflight for the summary never reaches the general rule."""
+
+    def __init__(self, app_):
+        self.app = app_
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"] != "/v1/summary":
+            return await self.app(scope, receive, send)
+        origin = dict(scope["headers"]).get(b"origin", b"").decode()
+        if origin not in settings.summary_origin_list:
+            return await self.app(scope, receive, send)
+        allow = [(b"access-control-allow-origin", origin.encode()), (b"vary", b"Origin")]
+        if scope["method"] == "OPTIONS":
+            await send({"type": "http.response.start", "status": 204, "headers": allow + [
+                (b"access-control-allow-methods", b"GET"), (b"access-control-allow-headers", b"Authorization"), (b"access-control-max-age", b"600")]})
+            return await send({"type": "http.response.body", "body": b""})
+
+        async def with_cors(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [h for h in message.get("headers", []) if h[0] not in (b"access-control-allow-origin", b"vary")] + allow}
+            await send(message)
+        return await self.app(scope, receive, with_cors)
+
+
+app.add_middleware(SummaryCors)
 
 
 @app.on_event("startup")

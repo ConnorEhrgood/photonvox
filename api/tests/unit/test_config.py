@@ -34,8 +34,8 @@ def test_each_unsafe_production_setting_is_named(over, word):
 
 
 def test_lists_are_split_and_trimmed():
-    s = Settings(cors_origins=" https://a , https://b ,", platform_admin_subs="x, y", directory_notice_secret="one, two")
-    assert s.cors_list == ["https://a", "https://b"] and s.platform_admins == ["x", "y"] and s.notice_secrets == ["one", "two"]
+    s = Settings(cors_origins=" https://a , https://b ,", summary_origins="https://c, ", directory_notice_secret="one, two")
+    assert s.cors_list == ["https://a", "https://b"] and s.summary_origin_list == ["https://c"] and s.notice_secrets == ["one", "two"]
 
 
 def test_the_product_key_is_vox():

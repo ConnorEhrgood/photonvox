@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://account.photonind.com/contract/summary.schema.json",
+  "title": "GET <product api>/v1/summary[?organization=<id>] (every product; docs/HOME-PLAN.md)",
+  "description": "A product's one-line live status for one organization (or, without `organization`, across every organization the person reaches in it: the dashboard's app tile), for the home dashboard at account.photonind.com. Authenticated with the person's own token (the account app's; its aud includes the product's project): the product authorizes as for any request and accepts a token issued to another app on this route only. Cheap and cached (30 s per organization, Cache-Control: private, max-age=30, under 300 ms); CORS for https://account.photonind.com. The dashboard waits at most 4 s.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "product",
+    "organization_id",
+    "as_of",
+    "state",
+    "summary",
+    "sites"
+  ],
+  "properties": {
+    "product": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$"
+    },
+    "organization_id": {
+      "description": "The organization asked about; null for the answer across all of the person's organizations (then `sites` is empty).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "summary": {
+      "description": "One short line in the product's words, e.g. \"12 of 12 cameras online · recording\".",
+      "type": "string",
+      "maxLength": 120
+    },
+    "sites": {
+      "description": "The sites of this organization the product has something to say about; a site left out shows the organization's line.",
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "site_id",
+          "state",
+          "summary"
+        ],
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "state": {
+            "$ref": "#/$defs/state"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "state": {
+      "description": "ok: all well. attention: something needs a look. down: not working. unknown: the product cannot tell.",
+      "enum": [
+        "ok",
+        "attention",
+        "down",
+        "unknown"
+      ]
+    }
+  }
+}

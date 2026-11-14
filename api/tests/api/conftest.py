@@ -16,7 +16,6 @@ from sqlalchemy import text
 os.environ.setdefault("OIDC_ISSUER", "https://idp.test")
 os.environ.setdefault("OIDC_AUDIENCE", "photonvox")
 os.environ.setdefault("DIRECTORY_URL", "https://directory.test")
-os.environ.setdefault("PLATFORM_ADMIN_SUBS", "fallback-staff")   # the one-release fallback; staff otherwise come from the directory (test_staff.py)
 os.environ.setdefault("DIRECTORY_NOTICE_SECRET", "notice-secret-for-tests-0123456789-abcdef")
 os.environ.setdefault("SECRETS_KEY", "dGVzdC1zZWNyZXRzLWtleS1mb3ItcGhvdG9udm94LTA=")   # Fernet: 32 bytes, url-safe base64
 

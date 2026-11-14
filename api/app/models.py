@@ -35,6 +35,9 @@ class Tenant(Base):
     __tablename__ = "tenant"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
+    # Its address in every Photon product, /org/<slug>/ (the directory's; the suite's URL convention), and the ones it had, which redirect.
+    slug: Mapped[Optional[str]] = mapped_column(String(63))
+    former_slugs: Mapped[List[str]] = mapped_column(JSONB, default=list)
     partner_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
     plan_key: Mapped[str] = mapped_column(String(60), default="")
     # active | suspended | removed. "removed" = no longer entitled to PhotonVox: the row stays, access ends.

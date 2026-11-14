@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import FrozenSet, Optional
+from typing import Any, Dict, FrozenSet, Optional
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
@@ -74,16 +74,43 @@ def _known(sub: str) -> Optional[Person]:
         return s.execute(select(Person).where(Person.sub == sub)).scalar_one_or_none()
 
 
+def _unauthorized(detail: str = "Invalid token") -> HTTPException:
+    return HTTPException(status.HTTP_401_UNAUTHORIZED, detail, headers={"WWW-Authenticate": "Bearer"})
+
+
+def _verified(authorization: Optional[str], verifier: TokenVerifier, any_client: bool) -> Dict[str, Any]:
+    try:
+        claims = verifier.verify(_bearer(authorization))
+    except TokenError:
+        raise _unauthorized()
+    client = claims.get("client_id") or claims.get("azp")
+    # A token PhotonID issued to another app (it can carry PhotonVox's audience: the account app asks for it) is accepted only where that app
+    # is meant to call: the home dashboard's summary (any_client). Everywhere else, only PhotonVox's own web client.
+    if settings.oidc_web_client_id and not any_client and client != settings.oidc_web_client_id:
+        raise _unauthorized("This token was issued to another app")
+    return claims
+
+
 def current_person(
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     verifier: TokenVerifier = Depends(get_verifier),
     directory: Optional[DirectoryFactory] = Depends(get_directory),
 ) -> Who:
-    try:
-        claims = verifier.verify(_bearer(authorization))
-    except TokenError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token", headers={"WWW-Authenticate": "Bearer"})
+    return _person(_verified(authorization, verifier, False), db, directory)
+
+
+def current_person_any_app(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+    verifier: TokenVerifier = Depends(get_verifier),
+    directory: Optional[DirectoryFactory] = Depends(get_directory),
+) -> Who:
+    """As current_person, for the routes another Photon app may call with the person's own token (GET /v1/summary)."""
+    return _person(_verified(authorization, verifier, True), db, directory)
+
+
+def _person(claims: Dict[str, Any], db: Session, directory: Optional[DirectoryFactory]) -> Who:
     sub = str(claims["sub"])
     person = _known(sub)
     if person is None:
@@ -100,8 +127,7 @@ def current_person(
             raise _no_access()
     if not person.active:
         raise _no_access()
-    # Staff come from the directory (person.is_staff). PLATFORM_ADMIN_SUBS is a fallback for one release (from 2026-11-13), then removed.
-    staff = person.is_staff or sub in settings.platform_admins
+    staff = bool(person.is_staff)          # from the directory only (decided 2026-11-13; the PLATFORM_ADMIN_SUBS fallback was removed 2026-11-14)
     rls.as_person(db, person.id, staff)
     return Who(person.id, sub, person.name, person.email, staff, bool(person.is_platform_admin))
 

@@ -1,1 +1,1 @@
-Vendored from photonid/directory/client at commit b3e8c7f (main), 2026-11-13: person documents carry platform_admin and partners. Do not edit: re-copy from photonid. SOURCE.sha256 is checked by tests/unit/test_vendored.py.
+Vendored from photonid/directory/client at commit f186d54 (main), 2026-11-14: organization slugs (slug, former_slugs). Do not edit: re-copy from photonid. SOURCE.sha256 is checked by tests/unit/test_vendored.py.
