@@ -566,3 +566,15 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
 - Found: staging's adapter could not read `v_xml_cdr`; it now reads six columns of it (ENGINE.md), and door-calls logs why when the engine
   does not answer. Checked: door-stations and a real door call's door-calls (answered by 100, "#" pressed), both valid against PhotonEntry's
   schemas; 401 without a token.
+
+## 2026-11-14: the HUEPC protections, parts P and A (Connor approved the file; the operator's go per part)
+
+- **P** (about 04:35 UTC): 6ff13a7 deployed, migrations 0008 and 0009 (docs/DEPLOY.md). Decision 33 is in it (988, 711, 311 routed for
+  every system; 211, 411, 511, 611, 811 not).
+- **A** (about 04:41 UTC): mgmtnet grant console → gateway:fusionpbx tcp/8781 (mgmtnet f577100; `mgmtnet diff` also reported the live
+  table "differs (hand edit?)": its drop rules carry counters, which change the hash it compares; the rules read without counters equal
+  what was last loaded, and the only rendered change was the 8781 accept). On CT 600: vox-agent 0.1.0 as www-data, writing only FusionPBX's
+  cache, on 10.10.0.21:8781, operations status, cache/delete and check; the firewall rule in the same form as 8780's
+  (`-i wg-mgmt -s 10.2.1.5/32`), persisted as one line inserted into rules.v4 (backup rules.v4.bak-vox-8781; `iptables-restore --test`
+  passes; never iptables-save: fail2ban's chains, the operator's rule). Unsigned 401 on CT 600 and from the Vultr host; registered on
+  live-a after a signed status (FreeSWITCH 1.11.1, 7 registrations); signed seed-domain, reloadacl and door-calls answer 404.
