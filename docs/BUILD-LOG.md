@@ -598,3 +598,14 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
   came back into the menu; every leg hung up; 7 registrations; FreeSWITCH, vox-agent, the shim and fail2ban active. PhotonVox: ready,
   version 3. Never 911, 9911, 933, 988 or an N11 code. **The HUEPC protections are live.** Undo for the week: `republish 2` (U0), E's
   dump (R1), the vzdump with Connor (R2).
+
+## 2026-11-14 — photon-ui's sign-in re-vendored and deployed (643f983; id1's request)
+
+- `sync-vendored.mjs web/src --css --base --auth`: only `ph-auth/signin.ts` and its test changed (photon-ui 2bceada): a session whose
+  stored scope lacks a scope the app asks for now (the directory's audience, for the switcher) is dropped once per scope. tsc clean,
+  229 tests, build OK.
+- Deployed about 14:41 UTC on the operator's go (see DEPLOY.md): 0009, healthy, HUEPC ready 3, signed-out deep links straight to PhotonID.
+- QA account: an old-style session (token and stored scope without the directory's audience) was dropped once; the new token reads the
+  switcher's list (200); no loop. A first attempt that only stripped the audience from the request was not dropped: the app stores the
+  scope it asked for, so only a session from the older app (which never asked) is old-style. That is the real case.
+

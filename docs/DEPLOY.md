@@ -54,6 +54,14 @@ host's `.env`; then the steps below, in order.
   401 without a token; signed out, a deep link goes straight to PhotonID at 1440 and 390. id1 told the summary is live.
   (`signin-prod-check.mjs` takes a screenshot folder and runs from `web/`.)
 
+- 2026-11-14 about 14:41 UTC, 643f983 (photon-ui's sign-in, 2bceada, re-vendored for id1; Connor's "Please deploy", the operator's go):
+  web only, no migration (0009), nothing on CT 600. api, worker and web healthy; Board, the directory and Console 200; HUEPC ready,
+  version 3. Signed out, a deep link goes straight to PhotonID at 1440 and 390. **As the QA account, a session begun without the
+  directory's audience** (its token refused by the directory, 401, and its stored scope without it, as the older app left them): on
+  reload it was dropped once, signed in again at once with the PhotonID session, and the switcher's request
+  (`/v1/me/apps?organization=guardtest`, from vox.photonind.com) answered 200 with the account's six products; reloading again made no
+  further trip (no loop). The QA account has no PhotonVox role, so it sees "No access to PhotonVox" and not the switcher itself.
+
 **Open:**
 - **Connor's first real sign-in:** PhotonVox now has his account and flags (PhotonVox switched on for PhotonConsole's organization,
   2026-11-13), but nobody has signed in yet.
