@@ -12,6 +12,7 @@ progress). Call records are CPNI: a token reads only its own organization's door
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import secrets
 import uuid
@@ -32,6 +33,7 @@ from app.models import Access, EngineSecret, IntegrationToken, PbxInstance, Pers
 from app.routes.phone_system import _who
 from app.routes.platform import get_connect
 
+log = logging.getLogger(__name__)
 MANAGE, SCOPE, PREFIX = "vox.entry.manage", "vox:entry", "pvx_entry_"
 manage = APIRouter(prefix="/tenants/{tenant_id}/integrations")
 entry = APIRouter(prefix="/integrations/entry/v1")
@@ -166,6 +168,7 @@ def door_calls(station: str = Query(..., max_length=64), at: str = Query(..., ma
                     "(xml_cdr_uuid::text = any(:ids) or (caller_id_number = :e and end_epoch >= :lo and start_epoch <= :hi))"),
                     {"d": str(ps.domain_uuid), "ids": [x["call"] for x in logged], "e": door.extension, "lo": moment - window_s, "hi": moment}).mappings().all()
         except Exception as e:  # noqa: BLE001 - the engine or its agent did not answer: PhotonEntry asks again
+            log.warning("door-calls for %s station %s failed: %s: %s", tenant_id, station, type(e).__name__, e)     # for Photon staff
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "The phone system's engine did not answer; ask again.") from e
         finally:
             eng.dispose()
