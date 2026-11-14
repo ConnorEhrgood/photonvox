@@ -247,10 +247,20 @@ def door_calls(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _tail(path: str, size: int = 512 * 1024) -> str:
-    with open(path, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        f.seek(max(0, f.tell() - size))
-        return f.read().decode("utf-8", "replace")
+    """The newest `size` bytes of FreeSWITCH's log, across a rotation: when the current file is shorter, the end of the one rotated before it
+    (`<path>.1`) comes first, so a line written just before the rotation is still read (a check once missed its line that way)."""
+    out = b""
+    for p in (path, path + ".1"):
+        try:
+            with open(p, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - (size - len(out))))
+                out = f.read() + out
+        except FileNotFoundError:
+            pass
+        if len(out) >= size:
+            break
+    return out.decode("utf-8", "replace")
 
 
 def check(cfg: Config, body: Dict[str, Any], wait_s: float = 3.0) -> Dict[str, Any]:

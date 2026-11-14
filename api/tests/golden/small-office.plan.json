@@ -145,7 +145,7 @@
       ],
       "key": "service",
       "locked": true,
-      "pattern": "^(?:9)?(988|711|211|311|511|811)$",
+      "pattern": "^(?:9)?(988|711|311)$",
       "requires": "service",
       "send": "$1"
     },

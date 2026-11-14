@@ -228,6 +228,16 @@ def test_a_door_stations_calls_are_read_from_its_own_log_lines(agent, tmp_path):
         assert call(agent, "POST", "/v1/door-calls", bad)[0] == 400
 
 
+def test_a_line_written_just_before_the_log_rotated_is_still_read(tmp_path):
+    log = tmp_path / "freeswitch.log"
+    (tmp_path / "freeswitch.log.1").write_text("old " * 10 + "PhotonVox-synthetic token=abc reached=100\n")
+    log.write_text("new line\n")
+    assert "token=abc reached=100" in va._tail(str(log), 4096) and va._tail(str(log), 4096).endswith("new line\n")
+    assert va._tail(str(log), 9) == "new line\n"                          # the current file alone when it is long enough
+    (tmp_path / "freeswitch.log.1").unlink()
+    assert va._tail(str(log), 4096) == "new line\n"
+
+
 def test_a_wrong_event_socket_password_is_an_error(agent):
     agent["cfg"].esl_password = "wrong"
     assert call(agent, "POST", "/v1/reloadacl", {}) == (500, {"error": "ConnectionError"})

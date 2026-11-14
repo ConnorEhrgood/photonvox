@@ -176,13 +176,20 @@ def test_the_block_route_comes_right_after_911_and_is_locked():
     assert keys[:2] == ["emergency", "block"] and route(plan(), "block")["locked"] and route(plan(), "block")["list_version"]
 
 
-@pytest.mark.parametrize("digits", ["911", "933", "9911", "9933", "988", "711", "211", "311", "511", "811"])
+@pytest.mark.parametrize("digits", ["911", "933", "9911", "9933", "988", "711", "311"])
 def test_no_block_pattern_ever_matches_an_emergency_or_service_code(digits):
     d = copy.deepcopy(SAMPLE)
     d["calling"]["blocking"] = {"block": ["+12", "+9", "+91", "+1911"], "allow": []}
     b = route(plan(d), "block")
     assert not any(re.match(c["pattern"], digits) for c in b["categories"])
     assert routed(plan(d), digits)[0] in ("emergency", "service")
+
+
+@pytest.mark.parametrize("digits", ["211", "411", "511", "611", "811", "9411", "9611"])
+def test_n11_codes_outside_decision_33_are_not_routed(digits):
+    d = copy.deepcopy(SAMPLE)
+    d["sites"][next(iter(d["sites"]))]["outside_prefix"] = "9"
+    assert routed(plan(d), digits) == (None, None)
 
 
 def test_an_organization_can_allow_a_category_block_numbers_and_let_numbers_through():

@@ -11,7 +11,10 @@ from __future__ import annotations
 from typing import Dict, Tuple
 
 EMERGENCY = ("911", "933")                          # 933: the address read-back test, routed exactly like 911 (§11)
-SERVICES = ("988", "711", "211", "311", "511", "811")   # the crisis line, relay services and local information lines: always allowed
+# Routed to the carrier for every phone system, whatever its classes block (decision 33, Connor 2026-11-14): the crisis line, the relay service
+# and the city's information line. 933 follows 911 (EMERGENCY). 211, 411, 511, 611 and 811 are not routed (411 and 611 by decision; 211,
+# 511 and 811 until Connor says otherwise): a call to them fails, as before.
+SERVICES = ("988", "711", "311")
 
 HIGH_COST_NANP: Tuple[str, ...] = (
     "242", "246", "264", "268", "284", "345", "441", "473", "649", "658", "664", "721", "758", "767", "784", "809", "829", "849", "868", "869", "876",

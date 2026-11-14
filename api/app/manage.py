@@ -14,6 +14,8 @@ decision 32), where no browser sign-in is involved. Secrets come on standard inp
     protect <organization id> <caller extension> [<dial plan to retire> ...]       the protections version as a dry run (reads only)
     protect-apply <organization id> [<dial plan to retire> ...]                     mark it protected (the next publish is the protections version)
     show <organization id>                                                          the phone system's state, versions and last drift check
+    set-911 <organization id> <site id> <key> <street> <city> <state> <zip> <note>    a site's 911 address, validated (the carrier has it on file:
+                                                                                    the note says who confirmed it, and when)
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ from app import audit, crypto
 from app.db import SystemSession
 from app.engine import service, takeover
 from app.engine.agent import HttpAgent
-from app.models import PbxInstance, PhoneSystem, PhoneSystemVersion
+from app.models import EmergencyLocation, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, utcnow
 
 OPERATOR = "operator (app.manage)"
 
@@ -156,6 +158,24 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
         elif cmd == "drift":
             ps = _ps(s, args[0])
             json.dump(service.check_drift(s, ps, connect), out, indent=1, default=str)
+        elif cmd == "set-911":
+            tenant, site, key, street, city, state, zip_, note = args
+            tid, sid = uuid.UUID(tenant), uuid.UUID(site)
+            if s.execute(select(Site).where(Site.id == sid, Site.tenant_id == tid)).scalar_one_or_none() is None:
+                raise SystemExit("that site is not the organization's")
+            if len(state) != 2 or not zip_.isdigit() or len(zip_) != 5 or not street.strip() or not city.strip() or not note.strip():
+                raise SystemExit("the address is <street> <city> <two-letter state> <five-digit zip>, and the note says who confirmed it")
+            loc = s.execute(select(EmergencyLocation).where(EmergencyLocation.site_id == sid, EmergencyLocation.key == key)).scalar_one_or_none()
+            if loc is None:
+                loc = EmergencyLocation(tenant_id=tid, site_id=sid, key=key)
+                s.add(loc)
+            loc.address = {"street": street.strip(), "city": city.strip(), "state": state.upper(), "zip": zip_}
+            loc.status, loc.note, loc.validated_by_label, loc.validated_at = "validated", note.strip(), OPERATOR, utcnow()
+            s.flush()
+            audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="emergency_location.validated", tenant_id=tid,
+                         target_type="emergency_location", target_id=loc.id, site=str(sid), key=key, note=note.strip())
+            s.commit()
+            json.dump({"id": str(loc.id), "site_id": site, "key": key, "address": loc.address, "status": loc.status}, out)
         elif cmd == "show":
             ps = _ps(s, args[0])
             versions = s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id).order_by(PhoneSystemVersion.number)).scalars()

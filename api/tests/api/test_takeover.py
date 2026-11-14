@@ -343,6 +343,12 @@ def test_the_protections_version_dry_run_then_published(client, world, instance,
     loc = client.post(f"/tenants/{world.a}/sites/{world.a1}/emergency-locations", headers=auth("a-owner"),
                       json={"key": "main", "street": "1 Church St", "city": "Hickory", "state": "PA", "zip": "15340"}).json()
     assert client.post(f"/platform/emergency-locations/{loc['id']}/validate", headers=auth("staff"), json={"ok": True}).status_code == 200
+    with pytest.raises(SystemExit, match="not the organization's"):
+        run_("set-911", world.a, world.b1, "main", "1 Church St", "Hickory", "PA", "15340", "on file with the carrier")
+    with pytest.raises(SystemExit, match="two-letter state"):
+        run_("set-911", world.a, world.a1, "main", "1 Church St", "Hickory", "Penn", "15340", "on file with the carrier")
+    rc, again = run_("set-911", world.a, world.a1, "main", "210 Main St", "Hickory", "pa", "15340", "on file with the carrier (test)")
+    assert rc == 0 and again["id"] == loc["id"] and again["status"] == "validated" and again["address"]["state"] == "PA"   # the same address row
     rc, applied = run_("protect-apply", world.a, "Outbound NANP", "Block-premium")
     assert applied == {"protections": True, "retire": ["Outbound NANP", "Block-premium"]} and snapshot(eng) == before
     rc, published = run_("publish", world.a, "the protections version")

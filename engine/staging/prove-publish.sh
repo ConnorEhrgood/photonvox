@@ -35,8 +35,9 @@ check "  sent as +1 and ten digits" "$($SIPP log up | grep -c '^INVITE sip:+1212
 EM=$(q "select dialplan_xml from v_dialplans where dialplan_name = 'photonvox.emergency' and domain_uuid = (select domain_uuid from v_domains where domain_name = '$DOMAIN')")
 check "the emergency route, read: 911 and 933, with or without 9, first (order 100), to the emergency upstream, showing the emergency caller ID" \
   "$(grep -c 'expression="^(?:9)?(911|933)$"' <<<"$EM")$(grep -c 'effective_caller_id_number=${emergency_caller_id_number}' <<<"$EM")$(grep -c 'sofia/gateway/' <<<"$EM")" 111
-fresh; check "301 dials 988 (always allowed)" "$(out o-988 301 988)" 0
-check "  dialing 988" "$($SIPP log up | grep -c '^INVITE sip:988@')" 1
+# 988 is never dialed in a test (the operator's rule, 2026-11-14): the service route that carries it is read instead (decision 33).
+check "the service route carries 988, 711 and 311 (read, never dialed)" \
+  "$(q "select count(*) from v_dialplans d join v_domains o using (domain_uuid) where o.domain_name = '$DOMAIN' and dialplan_name = 'photonvox.service' and dialplan_xml like '%(988|711|311)\$%'")" 1
 for n in 9005550100:premium 7249765100:premium 8765560100:high_cost_nanp 2125559990:listed 01133123456789:international 011881234567:satellite; do
   d=${n%:*}; fresh
   check "301 dials $d: refused (${n#*:})" "$( [ "$(out o-$d 301 $d)" != 0 ] && echo refused)" refused
