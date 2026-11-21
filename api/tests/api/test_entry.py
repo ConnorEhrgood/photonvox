@@ -95,7 +95,7 @@ def test_admins_make_list_and_revoke_tokens_shown_once(client, world):
     assert client.get("/integrations/entry/v1/door-stations", headers=bearer(t["token"])).status_code == 401
     with SystemSession() as s:
         actions = [a.action for a in s.execute(select(AuditLog).where(AuditLog.action.like("integration.%"))).scalars()]
-    assert actions == ["integration.token_made", "integration.token_revoked"]
+    assert actions == ["integration.token_made", "integration.token_used", "integration.token_revoked"]
 
 
 def test_unknown_missing_and_other_scope_tokens(client, world):
@@ -208,3 +208,30 @@ def test_door_call_questions_that_are_refused(client, world, doors, eng):
     doors["agent"].door_calls = broken
     r = client.get(url, headers=t, params={"station": "front", "at": "2026-11-14T15:00:00Z"})
     assert r.status_code == 503 and "unreachable" not in r.text
+
+
+def test_a_tokens_first_use_each_day_is_audited(client, world):
+    """Audit VOX-A-12 (b): last_used_at is kept, and the first read of the day writes an audit row."""
+    from datetime import timedelta
+    t = _token(client, world)
+    for _ in range(3):
+        assert client.get("/integrations/entry/v1/door-stations", headers=bearer(t["token"])).status_code == 200
+    with SystemSession() as s:
+        assert len(s.execute(select(AuditLog).where(AuditLog.action == "integration.token_used")).scalars().all()) == 1
+        row = s.get(IntegrationToken, uuid.UUID(t["id"]))
+        row.last_used_at = row.last_used_at - timedelta(days=1)
+        s.commit()
+    client.get("/integrations/entry/v1/door-stations", headers=bearer(t["token"]))
+    with SystemSession() as s:
+        used = s.execute(select(AuditLog).where(AuditLog.action == "integration.token_used")).scalars().all()
+        assert len(used) == 2 and used[0].actor_source == "token"
+
+
+def test_door_call_questions_are_limited_per_organization(client, world, monkeypatch):
+    """Audit VOX-A-4: each answer reads the engine and its agent."""
+    from app.routes import integrations
+    from app.throttle import Throttle
+    monkeypatch.setattr(integrations, "door_calls_throttle", Throttle(limit=2, window_s=60))
+    t = _token(client, world)
+    q = "/integrations/entry/v1/door-calls?station=front&at=2026-11-21T10:00:00Z"
+    assert [client.get(q, headers=bearer(t["token"])).status_code for _ in range(3)] == [404, 404, 429]

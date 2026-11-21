@@ -25,6 +25,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app import audit, crypto
+from app.throttle import Throttle
 from app.db import SystemSession, get_db
 from app.deps import Ctx, require
 from app.document.model import PhoneSystem as Document
@@ -106,7 +107,12 @@ def entry_tenant(authorization: Optional[str] = Header(None)) -> uuid.UUID:
         if tenant is None or tenant.status == "removed":
             raise unauthorized
         now = utcnow()
-        if t.last_used_at is None or now - t.last_used_at > timedelta(minutes=1):
+        new_day = t.last_used_at is None or t.last_used_at.date() != now.date()
+        if new_day:
+            # The first read each day is in the audit log (audit VOX-A-12): a leaked token's use can be seen from PhotonVox's side too.
+            audit.record(s, actor_id=None, actor_label=f"PhotonEntry token …{t.hint}", actor_source="token", action="integration.token_used",
+                         tenant_id=t.tenant_id, target_type="integration_token", target_id=t.id)
+        if new_day or now - t.last_used_at > timedelta(minutes=1):
             t.last_used_at = now
             s.commit()
         return t.tenant_id
@@ -147,6 +153,7 @@ def door_stations(tenant_id: uuid.UUID = Depends(entry_tenant)) -> Dict[str, Any
         return {"organization_id": str(tenant_id), "stations": stations}
 
 
+door_calls_throttle = Throttle(limit=60, window_s=60)
 AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:00)$")
 
 
@@ -155,6 +162,9 @@ def door_calls(station: str = Query(..., max_length=64), at: str = Query(..., ma
                tenant_id: uuid.UUID = Depends(entry_tenant), connect: service.Connect = Depends(get_connect)) -> Dict[str, Any]:
     if not AT.fullmatch(at) or not 1 <= window_s <= 600:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "at: an ISO 8601 UTC time; window_s: 1 to 600")
+    if not door_calls_throttle.allow(str(tenant_id)):
+        # Each answer reads the engine and its agent (audit VOX-A-4): an organization's token may not keep the engine's connections busy.
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many door-call questions; ask again in a minute.", headers={"Retry-After": "30"})
     when = datetime.fromisoformat(at.replace("Z", "+00:00"))
     moment = int(when.timestamp())
     with SystemSession() as s:

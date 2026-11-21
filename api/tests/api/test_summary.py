@@ -126,3 +126,15 @@ def test_an_organizations_address_comes_from_the_directory(client, world, fake):
     pull(fake)
     t = next(t for t in client.get("/me", headers=auth("a-user")).json()["tenants"] if t["id"] == world.a)
     assert t["slug"] == "cedar-works" and t["former_slugs"] == ["cedar"]
+
+
+def test_photon_staff_reading_an_organization_they_hold_no_grant_in_is_recorded(client, world):
+    """Audit VOX-A-8."""
+    from sqlalchemy import select
+    from app.db import SystemSession
+    from app.models import AuditLog
+    assert client.get(f"/v1/summary?organization={world.a}", headers=auth("staff")).status_code == 200
+    assert client.get(f"/v1/summary?organization={world.a}", headers=auth("a-owner")).status_code == 200     # a member's read is not a staff view
+    with SystemSession() as s:
+        rows = s.execute(select(AuditLog).where(AuditLog.action == "staff.viewed_summary")).scalars().all()
+    assert [(str(r.tenant_id), r.actor_label) for r in rows] == [(world.a, "Staff")]

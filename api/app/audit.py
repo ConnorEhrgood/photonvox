@@ -1,5 +1,7 @@
 """An append-only record of what matters if something goes wrong or someone asks "who did that": every change to a phone system, every phone action
-(enroll, move, reboot, reset), every emergency-address change and every staff view, from the steps that add them. Written in the same transaction as
+(enroll, move, reboot, reset), every emergency-address change, staff reading an organization they hold no grant in (its summary line), and an
+integration token's first use each day, from the steps that add them. Staff's own queues (pending addresses, carrier requests, numbers,
+instances) are lists across organizations and are not recorded per read. Written in the same transaction as
 the change, so a change that rolls back leaves no trace and a change that commits always has one. Details never hold secrets."""
 from __future__ import annotations
 

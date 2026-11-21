@@ -51,6 +51,7 @@ def board(client, world, built, eng):
     ps = ps_row(world)
     assert ps.published_version == 1, ps.status
     route._cache.clear()
+    route._raw.clear()
     return {"agent": agent, "ps": ps, "base": built, "eng": eng}
 
 
@@ -116,11 +117,22 @@ def test_without_the_live_view_or_voicemail_the_rest_still_shows(client, world, 
     assert p["trunk"]["state"] == "unknown"
 
 
-def test_cached_for_ten_seconds_per_choice(client, world, board):
+def test_the_engine_is_read_once_per_organization_for_ten_seconds_whatever_the_site(client, world, board):
+    """Audit VOX-A-4: the engine's answer is cached per organization, not per site choice, and concurrent requests share one read."""
+    import threading
     client.get(f"{board['base']}/dashboard", headers=auth("a-admin"))
     client.get(f"{board['base']}/dashboard", headers=auth("a-owner"))
     assert board["agent"].asked == 1
-    client.get(f"{board['base']}/dashboard?site=cw-main", headers=auth("a-admin"))
+    assert client.get(f"{board['base']}/dashboard?site=cw-main", headers=auth("a-admin")).json()["site"] == world.a1
+    client.get(f"{board['base']}/dashboard", headers=auth("a-admin-s1"))
+    assert board["agent"].asked == 1
+    route._cache.clear()
+    route._raw.clear()
+    threads = [threading.Thread(target=lambda: client.get(f"{board['base']}/dashboard?site=cw-main", headers=auth("a-admin"))) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
     assert board["agent"].asked == 2
 
 

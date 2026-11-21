@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import access
+from app import access, audit
 from app.access import Grant
 from app.db import SystemSession, get_db
 from app.deps import Who, current_person_any_app
@@ -54,7 +54,10 @@ def _cached(key: Tuple[str, str], build) -> Dict[str, Any]:
     if hit and time.monotonic() - hit[0] < CACHE_S:
         return hit[1]
     value = build()
-    _cache[key] = (time.monotonic(), value)
+    now = time.monotonic()
+    for k in [k for k, (t, _v) in _cache.items() if now - t > 60]:      # entries no longer fresh are dropped (audit VOX-A-12)
+        del _cache[k]
+    _cache[key] = (now, value)
     return value
 
 
@@ -66,6 +69,12 @@ def summary(response: Response, organization: Optional[uuid.UUID] = Query(None),
     if organization is not None:
         if organization not in reachable and not who.is_staff:
             raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "no_access", "detail": "No access to this organization in PhotonVox."})
+        if organization not in reachable:
+            # Photon staff reading an organization they hold no grant in: recorded, as every staff view of a customer is (audit VOX-A-8).
+            with SystemSession() as s:
+                audit.record(s, actor_id=who.id, actor_label=who.label, actor_source="platform", action="staff.viewed_summary",
+                             tenant_id=organization, target_type="organization", target_id=organization)
+                s.commit()
 
         def one() -> Dict[str, Any]:
             with SystemSession() as s:      # the person's access was checked above; the line is the organization's, the same for everyone

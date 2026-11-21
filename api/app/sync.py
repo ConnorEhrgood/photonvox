@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Callable, Optional
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import roles
@@ -61,9 +62,11 @@ def pull(db: Session, make_client: DirectoryFactory, now: datetime) -> PullResul
         state.last_ok_at, state.last_error = now, None
         db.commit()
         return PullResult(ok=True, applied=result.changes, cursor=result.cursor)
-    except (DirectoryError, BadDocument, KeyError, TypeError, ValueError) as e:
+    except (DirectoryError, BadDocument, KeyError, TypeError, ValueError, SQLAlchemyError) as e:
+        # A change our copy cannot take (a constraint, a serialization failure) is recorded like any other failure (audit VOX-A-11): the
+        # status line and the platform page show that the copy has stopped, instead of only the worker's log.
         db.rollback()
-        message = f"{type(e).__name__}: {e}"[:500]
+        message = f"{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"[:500]
         log.warning("directory pull failed: %s", message)
         state = _state(db)
         state.last_pull_at, state.last_error = now, message

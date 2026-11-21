@@ -27,6 +27,25 @@ router = APIRouter(prefix="/tenants/{tenant_id}")
 CACHE_S = 10.0
 _cache: Dict[Tuple[str, str, str], Tuple[float, Dict[str, Any]]] = {}
 _lock = threading.Lock()
+# The engine's answer per organization, whatever site is chosen, and one engine read per organization at a time (audit VOX-A-4): requests that
+# arrive while it is read wait for it and share it, so open dashboards and varied site choices cannot hold the engine role's few connections.
+_raw: Dict[str, Tuple[float, datetime, Any]] = {}
+_flights: Dict[str, threading.Lock] = {}
+
+
+def _gathered(key: str, fetch) -> Tuple[datetime, Any]:
+    with _lock:
+        flight = _flights.setdefault(key, threading.Lock())
+    with flight:
+        with _lock:
+            hit = _raw.get(key)
+            if hit and time.monotonic() - hit[0] < CACHE_S:
+                return hit[1], hit[2]
+        now = datetime.now(timezone.utc)
+        raw = fetch(now)
+        with _lock:
+            _raw[key] = (time.monotonic(), now, raw)
+        return now, raw
 
 
 def _address(a: Dict[str, Any]) -> str:
@@ -64,12 +83,13 @@ def get_dashboard(site: Optional[str] = Query(None, max_length=80), ctx: Ctx = D
         for sid, s in doc.sites.items():
             if str(loc.site_id) == sid and loc.key == s.emergency_location:
                 address[sid] = _address(loc.address or {})
-    now = datetime.now(timezone.utc)
-    eng, agent = connect(instance)
-    try:
-        raw = dashboard.gather(eng, agent, ps.domain_name, str(ps.domain_uuid), now)
-    finally:
-        eng.dispose()
+    def fetch(at: datetime) -> Any:
+        eng, agent = connect(instance)
+        try:
+            return dashboard.gather(eng, agent, ps.domain_name, str(ps.domain_uuid), at)
+        finally:
+            eng.dispose()
+    now, raw = _gathered(str(ctx.tenant_id), fetch)
     out = dashboard.compute(doc, sites, chosen, raw, now, address, carrier)
     out.update({"published": True, "phone_system": {"status": ps.status, "version": ps.published_version}})
     with _lock:

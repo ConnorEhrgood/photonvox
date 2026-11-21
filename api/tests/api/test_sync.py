@@ -325,3 +325,20 @@ def test_a_projection_with_no_state_row_starts_at_zero(db):
     assert p.get_cursor() == 0
     p.set_cursor(7)
     assert p.get_cursor() == 7
+
+
+def test_a_change_our_copy_cannot_take_is_recorded_not_only_logged(fake, db):
+    """Audit VOX-A-11: a database error while applying the feed rolls back, keeps the cursor and is written to sync_state like any failure."""
+    from sqlalchemy.exc import IntegrityError
+    assert pull(fake).ok
+    before = db.get(SyncState, 1).cursor
+
+    class Broken:
+        def sync_once(self):
+            raise IntegrityError("insert into access ...", {}, Exception("duplicate key value violates unique constraint\nDETAIL: secret row"))
+    with SystemSession() as s:
+        result = sync.pull(s, lambda _projection, **_kw: Broken(), datetime.now(timezone.utc))
+    assert not result.ok and result.error.startswith("IntegrityError")
+    db.expire_all()
+    st = db.get(SyncState, 1)
+    assert st.cursor == before and st.last_error.startswith("IntegrityError") and "secret row" not in st.last_error
