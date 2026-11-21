@@ -81,6 +81,7 @@ services:
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]     # holds the engines' credentials (audit VOX-B-18)
     logging: *logging
 
   worker:
@@ -110,6 +111,7 @@ services:
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]     # holds the engines' credentials (audit VOX-B-18)
     logging: *logging
 
   web:

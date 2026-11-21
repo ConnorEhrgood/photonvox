@@ -2,7 +2,31 @@
 
 Prepared 2026-11-13 and **deployed the same evening with Connor's go-ahead** (see "Deployed" below). Hosting is decision 18 (ARCHITECTURE
 §16): PhotonVox's cloud runs on the shared Photon host until there are paying customers or the host gets tight; the PBX engines stay in the
-colo. GATE 1c (the live engine's read-only role) is still **not run**.
+colo. GATE 1c and the write role were applied on 2026-11-13/14 and PhotonVox writes to the live engine: see "The live engine" below
+(the sections after this one describe the first deploy as it was planned and done).
+
+## The live engine (FusionPBX on CT 600, 10.10.0.21), since 2026-11-14
+
+Updated 2026-11-21 (audit VOX-B-19). PhotonVox manages one adopted customer domain (HUEPC) on the production FusionPBX, with the protections
+version live (BUILD-LOG 2026-11-14). What it can do there, and how to take it away:
+
+| What | Where | Can |
+|---|---|---|
+| `photonvox_ro` (GATE 1c, `engine/live/gate-1c.sql`) | Postgres on CT 600, `pg_hba` from 10.2.1.5 only | read 15 tables, column by column, every domain (no SIP passwords, PINs or gateway logins) |
+| `photonvox_rw` (`engine/live/gate-rw.sql`) | the same, from 10.2.1.5 only; the instance `live-a` logs in with it | insert, update and delete on nine tables, **every domain**: PhotonVox scopes each statement to its domain, the role does not (audit VOX-B-1) |
+| vox-agent 0.1.0 | CT 600, 10.10.0.21:8781 (iptables: from 10.2.1.5 on wg-mgmt only), as www-data, writing only FusionPBX's cache (`engine/live/vox-agent-live.conf`) | `status`, `cache/delete`, `check` only (`engine/live/vox-agent-live.env`) |
+
+- **Credentials:** sealed in PhotonVox's database (`SECRETS_KEY`). Copies of record with Connor. The runner still had plaintext copies in
+  `~/.config/photonvox/` on 2026-11-17 (audit VOX-B-13): to delete or rotate.
+- **Updating the agent:** `agent/install.sh root@10.10.0.21 <key>` keeps `/etc/vox-agent.env` as it is (secret, bind, operations); give a
+  bind or operations list only to change it. The update since 0.1.0 refuses emergency and service numbers in `check` and can be limited to
+  the managed domains (`VOX_AGENT_DOMAINS`, to add with HUEPC's domain name).
+- **Undo (take PhotonVox's write access away):** `engine/live/gate-rw.sh undo` (drops `photonvox_rw` and its `pg_hba` line), stop and
+  disable vox-agent (`systemctl disable --now vox-agent`) and remove its iptables line (backup `rules.v4.bak-vox-8781`); the read role:
+  `engine/live/gate-1c.sh undo`. The domain's rows stay as PhotonVox last wrote them; the protections' own undo is `app.manage republish
+  <org> 2` (before the access is taken away).
+- **Deploys** wait until no version is queued or being published before the worker is recreated (`scripts/deploy.sh`); a version a
+  stopped worker left "publishing" is marked failed after 20 minutes, or at once with `app.manage recover <org>`.
 
 ## Deployed (2026-11-13, commit ba15639)
 
