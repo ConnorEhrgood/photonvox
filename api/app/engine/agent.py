@@ -57,7 +57,8 @@ class HttpAgent:
 
     def __init__(self, url: str, secret: str, client: Optional[httpx.Client] = None) -> None:
         self.url, self.secret = url.rstrip("/"), secret
-        self.client = client or httpx.Client(timeout=310)        # seeding a domain can take minutes on a busy engine
+        # Seeding a domain can take minutes on a busy engine (the read); an agent that cannot be reached fails in seconds (audit VOX-B-12).
+        self.client = client or httpx.Client(timeout=httpx.Timeout(310, connect=10))
 
     def call(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         data = json.dumps(body).encode() if body is not None else b""

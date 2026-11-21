@@ -5,7 +5,7 @@ from app.config import Settings
 GOOD = dict(environment="production", oidc_issuer="https://id.photonind.com", oidc_audience="photonvox", directory_url="https://api.account.photonind.com",
             directory_client_id="pdc_vox", directory_client_secret="s" * 40, directory_notice_secret="n" * 40,
             system_database_url="postgresql+psycopg://vox_system:x@db/photonvox", cors_origins="https://vox.photonind.com",
-            secrets_key="k" * 44)
+            secrets_key="k" * 44, oidc_web_client_id="399486252400836611")
 
 
 def test_a_good_production_configuration_is_safe():
@@ -26,6 +26,7 @@ def test_development_is_never_refused():
     ({"directory_notice_secret": "short"}, "DIRECTORY_NOTICE_SECRET"),
     ({"system_database_url": ""}, "SYSTEM_DATABASE_URL"),
     ({"secrets_key": ""}, "SECRETS_KEY"),
+    ({"oidc_web_client_id": ""}, "OIDC_WEB_CLIENT_ID"),          # audit VOX-A-9 / XP-2
     ({"cors_origins": ""}, "CORS_ORIGINS must list"),
     ({"cors_origins": "http://localhost:5183"}, "https://"),
 ])

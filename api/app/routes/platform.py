@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,9 +15,21 @@ from app.engine import service
 from app.db import SystemSession, get_db
 from app.deps import Who, platform_admin
 from app.document.model import E164
-from app.models import CarrierRequest, EmergencyLocation, HeldNumber, PbxInstance, SyncState, Tenant, utcnow
+from app.models import CarrierRequest, EmergencyLocation, HeldNumber, PbxInstance, PhoneSystem, PhoneSystemVersion, SyncState, Tenant, utcnow
 
 router = APIRouter(prefix="/platform")
+
+
+def _inside(host: str) -> bool:
+    """A private (RFC 1918), shared/overlay (100.64/10) or loopback address."""
+    try:
+        a = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return a.is_loopback or any(a in ipaddress.ip_network(n) for n in INSIDE if ipaddress.ip_network(n).version == a.version)
+
+
+INSIDE = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7")
 
 
 @router.get("/organizations")
@@ -55,6 +68,15 @@ class InstanceIn(BaseModel):
     database_url: str = Field(min_length=10)
     # No agent: an engine whose domains are only adopted (decision 32) until vox-agent is installed there.
     agent_url: Optional[str] = Field(None, pattern=r"^https?://[A-Za-z0-9.:\[\]-]+(:[0-9]+)?/?$")
+
+    @field_validator("agent_url")
+    @classmethod
+    def _plain_http_only_inside(cls, url: Optional[str]) -> Optional[str]:
+        """https://, or plain http:// only to a private, overlay or loopback address (audit VOX-A-10): the agent's secret is never sent (requests
+        are signed), but its answers (door calls, registrations) would cross the internet in clear."""
+        if url and url.startswith("http://") and not _inside(url[len("http://"):].rstrip("/").rpartition(":")[0] or url[len("http://"):]):
+            raise ValueError("plain http:// is allowed only to a private, overlay or loopback address; use https://")
+        return url
     agent_secret: Optional[str] = Field(None, min_length=32, max_length=200)
     upstreams: List[UpstreamIn]
     routing: Dict[str, List[str]]
@@ -123,6 +145,10 @@ def validate_location(location_id: uuid.UUID, body: Verdict, who: Who = Depends(
         loc = s.get(EmergencyLocation, location_id)
         if loc is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        if loc.status != "pending":
+            # A verdict is given once (audit VOX-A-7): a validated address that a live version or a carrier request relies on is not withdrawn
+            # here, and a rejected one is corrected by the customer entering it again (a new pending address under the same key).
+            raise HTTPException(status.HTTP_409_CONFLICT, {"code": "decided", "detail": f"This address was already {loc.status}."})
         loc.status, loc.note, loc.validated_by_label, loc.validated_at = ("validated" if body.ok else "rejected"), body.note, who.label, utcnow()
         audit.record(s, actor_id=who.id, actor_label=who.label, actor_source="platform", action="emergency_location.validated" if body.ok else
                      "emergency_location.rejected", tenant_id=loc.tenant_id, target_type="emergency_location", target_id=loc.id)
@@ -270,14 +296,33 @@ def put_number(number: str, body: NumberIn, who: Who = Depends(platform_admin)) 
     if not re.fullmatch(E164, number):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "bad_number", "detail": "A North American number in +1 form."})
     with SystemSession() as s:
+        if body.tenant_id is not None and s.get(Tenant, body.tenant_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_organization", "detail": "There is no such organization."})
         n = s.get(HeldNumber, number) or HeldNumber(number=number)
         before = n.tenant_id
+        if before is not None and before != body.tenant_id and _in_use(s, before, number):
+            # (audit VOX-A-10) moved away while its organization still uses it, that organization's next publish would fail
+            raise HTTPException(status.HTTP_409_CONFLICT, {"code": "in_use", "detail": "Its organization's phone system still uses this number "
+                                "(published or in the draft): take it out there first."})
         n.tenant_id, n.carrier, n.note = body.tenant_id, body.carrier, body.note
         s.add(n)
         audit.record(s, actor_id=who.id, actor_label=who.label, actor_source="platform", action="number.assigned", tenant_id=body.tenant_id or before,
                      target_type="number", target_id=number, before=str(before) if before else None, after=str(body.tenant_id) if body.tenant_id else None)
         s.commit()
         return {"number": number, "tenant_id": str(n.tenant_id) if n.tenant_id else None}
+
+
+def _in_use(s: Session, tenant_id: uuid.UUID, number: str) -> bool:
+    """Whether the organization's draft or published version names the number."""
+    ps = s.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == tenant_id)).scalar_one_or_none()
+    if ps is None:
+        return False
+    docs = [ps.draft or {}]
+    if ps.published_version is not None:
+        live = s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id,
+                                                          PhoneSystemVersion.number == ps.published_version)).scalar_one_or_none()
+        docs.append(live.document if live else {})
+    return any(number in (d.get("numbers") or {}) for d in docs)
 
 
 @router.delete("/numbers/{number}", status_code=204)

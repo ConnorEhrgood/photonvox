@@ -144,7 +144,9 @@ def test_adoption_is_refused_with_a_reason(client, world, instance, eng):
         with pytest.raises(Exception):
             s.flush()                                                          # one phone system per domain (a unique column)
         s.rollback()
-    assert adopt(client, world, instance, tenant_id=world.b).json()["detail"]["detail"] == "this domain already belongs to a phone system"
+    # A site of another organization is refused first (audit VOX-A-10), then the domain that is already taken.
+    assert adopt(client, world, instance, tenant_id=world.b).json()["detail"]["detail"] == "that site is not the organization's"
+    assert adopt(client, world, instance, tenant_id=world.b, site_id=world.b1).json()["detail"]["detail"] == "this domain already belongs to a phone system"
 
 
 def test_the_first_publish_writes_nothing_and_registers_no_911_numbers(client, world, instance, eng, connect):

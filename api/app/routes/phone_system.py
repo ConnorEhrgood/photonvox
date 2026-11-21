@@ -325,8 +325,25 @@ def add_location(site_id: uuid.UUID, body: LocationIn, ctx: Ctx = Depends(requir
     """An emergency address for a site, pending until Photon staff validate it (the R1 staff queue, ARCHITECTURE §11)."""
     if not ctx.can(EMERGENCY, site_id) or str(site_id) not in {str(s.id) for s in visible_sites(db, ctx)}:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-    loc = EmergencyLocation(tenant_id=ctx.tenant_id, site_id=site_id, key=body.key,
-                            address=body.model_dump(include={"street", "unit", "city", "state", "zip"}))
+    address = body.model_dump(include={"street", "unit", "city", "state", "zip"})
+    loc = db.execute(select(EmergencyLocation).where(EmergencyLocation.site_id == site_id, EmergencyLocation.key == body.key)).scalar_one_or_none()
+    if loc is not None and loc.status == "validated":
+        # (audit VOX-A-7) A validated address is what the carrier is told and what live versions use: changed only with Photon staff.
+        raise HTTPException(status.HTTP_409_CONFLICT, {"code": "validated", "detail": "This site already has a validated address under that "
+                            "name. Use another name for a new address, or ask Photon to change this one."})
+    if loc is not None:
+        # A corrected address (after a rejection, or before staff looked) goes back to the staff queue in place of the old one. As the system:
+        # the app role may only add addresses; the audit entry commits with the change.
+        with SystemSession() as sys_db:
+            row = sys_db.get(EmergencyLocation, loc.id)
+            before, row.address, row.status, row.note = row.address, address, "pending", ""
+            row.validated_by_label, row.validated_at = "", None
+            sys_db.flush()
+            audit.record(sys_db, **_who(ctx), action="emergency_location.replaced", target_type="site", target_id=site_id, key=body.key,
+                         before=before)
+            sys_db.commit()
+            return _location(row)
+    loc = EmergencyLocation(tenant_id=ctx.tenant_id, site_id=site_id, key=body.key, address=address)
     db.add(loc)
     db.flush()
     audit.record(db, **_who(ctx), action="emergency_location.added", target_type="site", target_id=site_id, key=body.key)

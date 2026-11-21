@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.compiler.compile import CompileError, Context, compile_plan
 from app.document.model import PhoneSystem as Document
 from app.engine import compare, fusionpbx, importer
-from app.models import HeldNumber, PbxInstance, PhoneSystem
+from app.models import HeldNumber, PbxInstance, PhoneSystem, Site
 
 DENY = {
     "v_extensions": {"password"}, "v_voicemails": {"voicemail_password"}, "v_ivr_menus": {"ivr_menu_pin_number"},
@@ -103,6 +103,8 @@ def adopt(db: Session, instance: PbxInstance, tenant_id: uuid.UUID, site_id: uui
     imported document, its numbers assigned to the organization. Nothing is written to the engine here."""
     if db.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == tenant_id)).scalars().first():
         raise TakeoverError("this organization already has a phone system")
+    if db.execute(select(Site).where(Site.id == site_id, Site.tenant_id == tenant_id)).scalar_one_or_none() is None:
+        raise TakeoverError("that site is not the organization's")         # (audit VOX-A-10; the CLI's set-911 checks the same)
     export = read_domain(conn, domain_name)
     if db.execute(select(PhoneSystem).where(PhoneSystem.domain_uuid == uuid.UUID(export["domain"]["domain_uuid"]))).scalars().first():
         raise TakeoverError("this domain already belongs to a phone system")

@@ -87,6 +87,8 @@ class Settings(BaseSettings):
             return "DIRECTORY_NOTICE_SECRET must be set to a long random value (without it anyone could trigger a sync)"
         if not self.system_database_url:
             return "SYSTEM_DATABASE_URL must be set (the worker and the directory sync connect as vox_system)"
+        if not self.oidc_web_client_id:
+            return "OIDC_WEB_CLIENT_ID must be set (without it a token PhotonID issued to any other Photon app is accepted everywhere)"
         if not self.secrets_key:
             return "SECRETS_KEY must be set (engine credentials and phones' SIP passwords are kept encrypted with it)"
         if not self.cors_list:

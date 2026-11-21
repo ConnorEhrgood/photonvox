@@ -60,7 +60,10 @@ def connect(instance: PbxInstance) -> Tuple[Engine, Agent]:
     from sqlalchemy.pool import NullPool
     # No pool: every connection to the engine closes when it is released. The engine's roles allow 4 connections each, and a long-running worker
     # whose engines were never disposed kept idle ones open until garbage collection, filling them (found 2026-11-14: "too many connections").
-    eng = create_engine(crypto.unseal(instance.database_url_sealed), poolclass=NullPool, connect_args={"client_encoding": "utf8"})
+    # Bounded waits (audit VOX-B-12, VOX-A-4): an unreachable engine fails in seconds and a lock is not waited on for long (the roles carry their own statement_timeout).
+    eng = create_engine(crypto.unseal(instance.database_url_sealed), poolclass=NullPool,
+                        connect_args={"client_encoding": "utf8", "connect_timeout": 10,
+                                      "options": "-c lock_timeout=5s"})
     a = instance.agent or {}
     if a.get("kind") != "http" or not instance.agent_secret_sealed:
         return eng, NoAgent()       # type: ignore[return-value]

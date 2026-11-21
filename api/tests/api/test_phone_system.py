@@ -396,7 +396,7 @@ def test_staff_queue_and_validation_need_staff(client, world, built):
 
 
 def test_an_instance_must_route_through_its_own_upstreams(client, world):
-    body = {"name": "bad", "hostname": "h", "database_url": "postgresql://x/y", "agent_url": "http://e:8780", "agent_secret": "a" * 40,
+    body = {"name": "bad", "hostname": "h", "database_url": "postgresql://x/y", "agent_url": "http://10.2.1.21:8780", "agent_secret": "a" * 40,
             "upstreams": [{"key": "htc", "proxy": "p.example", "addresses": ["198.51.100.0/28"]}], "routing": {"national": ["other"]}, "emergency_upstream": "htc"}
     r = client.post("/platform/instances", headers=auth("staff"), json=body)
     assert r.status_code == 422 and r.json()["detail"]["code"] == "bad_routing"
@@ -859,3 +859,47 @@ def test_anything_that_fails_before_the_engine_is_reached_fails_the_version(clie
     run(broken)
     v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
     assert v["state"] == "failed" and "could not prepare it" in v["error"] and "route" not in v["error"]
+
+
+def test_a_rejected_address_is_corrected_under_the_same_name_and_a_verdict_is_given_once(client, world, built):
+    """Audit VOX-A-7: entering the same key again replaced nothing and answered 500; staff could flip a verdict at any time."""
+    a2 = f"/tenants/{world.a}/sites/{world.a2}/emergency-locations"
+    first = client.post(a2, headers=auth("tech"), json={"key": "annex", "street": "2 Anex Rd", "city": "Pittsburgh", "state": "PA", "zip": "15222"})
+    assert first.status_code == 201
+    lid = first.json()["id"]
+    assert client.post(f"/platform/emergency-locations/{lid}/validate", headers=auth("staff"), json={"ok": False, "note": "typo"}).json()["status"] == "rejected"
+    assert client.post(f"/platform/emergency-locations/{lid}/validate", headers=auth("staff"), json={"ok": True}).status_code == 409
+    again = client.post(a2, headers=auth("tech"), json={"key": "annex", "street": "2 Annex Rd", "city": "Pittsburgh", "state": "PA", "zip": "15222"})
+    assert again.status_code == 201 and again.json()["id"] == lid and again.json()["status"] == "pending"
+    assert again.json()["address"]["street"] == "2 Annex Rd"
+    assert client.post(f"/platform/emergency-locations/{lid}/validate", headers=auth("staff"), json={"ok": True}).json()["status"] == "validated"
+    r = client.post(a2, headers=auth("tech"), json={"key": "annex", "street": "9 Other St", "city": "Pittsburgh", "state": "PA", "zip": "15222"})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "validated"
+    assert client.post(f"/platform/emergency-locations/{lid}/validate", headers=auth("staff"), json={"ok": False}).status_code == 409
+    with SystemSession() as s:
+        from app.models import AuditLog
+        assert s.execute(select(AuditLog).where(AuditLog.action == "emergency_location.replaced")).scalars().one().detail["before"]["street"] == "2 Anex Rd"
+
+
+def test_numbers_go_only_to_known_organizations_and_never_away_from_one_that_uses_them(client, world, built, connect):
+    """Audit VOX-A-10."""
+    assert client.put("/platform/numbers/+17245550177", headers=auth("staff"), json={"tenant_id": str(uuid.uuid4())}).status_code == 404
+    r = client.put(f"/platform/numbers/{MAIN}", headers=auth("staff"), json={"tenant_id": world.b})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "in_use"               # in Cedar Works' draft
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    d["numbers"].pop("+17245550111", None)
+    client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": d})
+    assert client.put("/platform/numbers/+17245550111", headers=auth("staff"), json={}).status_code == 200      # used by neither
+    assert client.put(f"/platform/numbers/{MAIN}", headers=auth("staff"), json={"tenant_id": world.a}).status_code == 200   # unchanged owner
+
+
+def test_an_agent_is_reached_over_plain_http_only_inside_private_networks(client, world):
+    base = {"name": "colo-x", "hostname": "vox-x", "database_url": "postgresql+psycopg://adapter:x@engine/fusionpbx", "agent_secret": "a" * 64,
+            "upstreams": [{"key": "htc", "proxy": "198.51.100.5", "addresses": ["198.51.100.0/28"]}], "routing": {"national": ["htc"]},
+            "emergency_upstream": "htc"}
+    for url, ok in (("http://203.0.113.9:8781", False), ("http://agent.example.com:8781", False), ("https://agent.example.com:8781", True),
+                    ("http://10.10.0.21:8781", True), ("http://100.64.1.2:8781/", True), ("http://127.0.0.1:8780", True)):
+        r = client.post("/platform/instances", headers=auth("staff"), json={**base, "name": f"colo-{abs(hash(url)) % 10**6}", "agent_url": url})
+        assert (r.status_code == 201) == ok, (url, r.text)

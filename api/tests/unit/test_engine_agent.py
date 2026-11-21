@@ -82,3 +82,19 @@ def test_connections_to_an_engine_are_never_kept_idle(monkeypatch):
     monkeypatch.setattr(crypto, "unseal", lambda s: "postgresql+psycopg://u:p@engine.invalid/fusionpbx")
     eng, agent = service.connect(PbxInstance(database_url_sealed="x", agent={"kind": "none"}))
     assert isinstance(eng.pool, NullPool) and agent.available is False
+
+
+def test_an_unreachable_agent_or_engine_fails_in_seconds(monkeypatch):
+    """Audit VOX-B-12: connects are bounded (the agent's read stays long for seeding a domain); the engine also waits on no lock for long."""
+    import sqlalchemy
+    from app import crypto
+    from app.engine import service
+    from app.engine.agent import HttpAgent
+    from app.models import PbxInstance
+    t = HttpAgent("http://10.2.1.21:8780", "s" * 40).client.timeout
+    assert t.connect == 10 and t.read == 310
+    seen = {}
+    monkeypatch.setattr(sqlalchemy, "create_engine", lambda url, **kw: seen.update(kw) or "engine")
+    i = PbxInstance(database_url_sealed=crypto.seal("postgresql+psycopg://u:p@engine/fusionpbx"), agent={"kind": "none"}, agent_secret_sealed="")
+    assert service.connect(i)[0] == "engine"
+    assert seen["connect_args"]["connect_timeout"] == 10 and "lock_timeout=5s" in seen["connect_args"]["options"]

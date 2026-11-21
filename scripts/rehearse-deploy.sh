@@ -42,6 +42,7 @@ APP_DB_PASSWORD=$(rnd)
 SYSTEM_DB_PASSWORD=$(rnd)
 OIDC_ISSUER=https://id.rehearsal.test
 OIDC_AUDIENCE=rehearsal
+OIDC_WEB_CLIENT_ID=rehearsal
 CORS_ORIGINS=https://vox.photonind.com
 DIRECTORY_URL=https://api.account.rehearsal.test
 DIRECTORY_CLIENT_ID=rehearsal
