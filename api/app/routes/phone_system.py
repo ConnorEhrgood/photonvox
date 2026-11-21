@@ -120,6 +120,16 @@ def _allowed(ctx: Ctx, old_raw: Dict[str, Any], new: Document) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "not_allowed_change", "detail": reason})
 
 
+def _kept(doc: Document, value: Optional[bool]) -> Document:
+    """The document with `protections` as stored (audit VOX-A-1): switching an adopted system's protections on or off is Photon staff's step
+    (`manage protect-apply`, `manage republish`), never a customer route's, whatever the document sent says or leaves out."""
+    return doc if doc.protections == value else doc.model_copy(update={"protections": value})
+
+
+def _stored(raw: Optional[Dict[str, Any]]) -> Optional[bool]:
+    return (raw or {}).get("protections")
+
+
 def _document(raw: Dict[str, Any]) -> Document:
     try:
         return Document.model_validate(raw)
@@ -132,7 +142,7 @@ def _document(raw: Dict[str, Any]) -> Document:
 def save_draft(body: DraftIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Save the draft. Problems (an unvalidated address, a dangling reference) do not stop saving; they stop publishing."""
     ps = _ps(db, ctx)
-    doc = _document(body.document)
+    doc = _kept(_document(body.document), _stored(ps.draft))
     _allowed(ctx, ps.draft, doc)
     ps.draft, ps.draft_updated_at = doc.model_dump(mode="json", exclude_defaults=False), utcnow()
     audit.record(db, **_who(ctx), action="phone_system.draft_saved", target_type="phone_system", target_id=ps.id)
@@ -179,9 +189,13 @@ def restore(number: int, ctx: Ctx = Depends(require(BUILD)), db: Session = Depen
     old = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id, PhoneSystemVersion.number == number)).scalar_one_or_none()
     if old is None or old.state not in ("ready", "superseded"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_version", "detail": f"There is no published version {number}."})
-    _allowed(ctx, ps.draft, _document(old.document))
-    out = _queue(db, ctx, ps, old.document, f"restored from version {number}")
-    ps.draft, ps.draft_updated_at = old.document, utcnow()
+    # The undo brings back the earlier version's phone system, never its protections: those stay as the live version has them (VOX-A-1).
+    live = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id,
+                                                       PhoneSystemVersion.number == ps.published_version)).scalar_one_or_none()
+    document = {**old.document, "protections": _stored(live.document if live else ps.draft)}
+    _allowed(ctx, {**(ps.draft or {"version": 1}), "protections": document["protections"]}, _document(document))
+    out = _queue(db, ctx, ps, document, f"restored from version {number}")
+    ps.draft, ps.draft_updated_at = document, utcnow()
     db.commit()
     return out
 
@@ -215,7 +229,7 @@ def apply_template(body: TemplateIn, ctx: Ctx = Depends(require(BUILD)), db: Ses
     users = {r["id"]: r["user"] for r in rows if not r["problems"]}
     if not users:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "no_users", "detail": "Add at least one user (one per line).", "rows": rows})
-    doc = _document(templates.build(body.template, body.site_id, body.location, number, users))
+    doc = _kept(_document(templates.build(body.template, body.site_id, body.location, number, users)), _stored(ps.draft))
     _allowed(ctx, ps.draft, doc)
     ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
     audit.record(db, **_who(ctx), action="phone_system.template_applied", target_type="phone_system", target_id=ps.id, template=body.template,
@@ -236,7 +250,7 @@ def clone_draft(body: CloneIn, ctx: Ctx = Depends(require(BUILD)), db: Session =
     source = db.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == body.from_tenant_id)).scalar_one_or_none() if other else None
     if other is None or not other.can(VIEW) or source is None or body.from_tenant_id == ctx.tenant_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_source", "detail": "There is no such phone system to copy from."})
-    doc = _document(cloning.clone(source.draft, ps.draft))
+    doc = _kept(_document(cloning.clone(source.draft, ps.draft)), _stored(ps.draft))
     _allowed(ctx, ps.draft, doc)
     ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
     audit.record(db, **_who(ctx), action="phone_system.cloned", target_type="phone_system", target_id=ps.id, source=str(body.from_tenant_id))
@@ -262,7 +276,7 @@ def import_users(body: ImportIn, ctx: Ctx = Depends(require(BUILD)), db: Session
     rows = importer.preview(body.text, ps.draft, body.site_id, sites)
     out: Dict[str, Any] = {"rows": rows, "ready": sum(1 for r in rows if not r["problems"])}
     if body.apply:
-        doc = _document(importer.apply(ps.draft, rows, body.group))
+        doc = _kept(_document(importer.apply(ps.draft, rows, body.group)), _stored(ps.draft))
         _allowed(ctx, ps.draft, doc)
         ps.draft, ps.draft_updated_at = doc.model_dump(mode="json"), utcnow()
         audit.record(db, **_who(ctx), action="phone_system.users_imported", target_type="phone_system", target_id=ps.id, users=out["ready"])

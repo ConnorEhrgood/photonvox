@@ -678,3 +678,45 @@ def test_an_address_cannot_add_lines_to_the_carriers_email(client, world, built)
     req = CarrierRequest(id=uuid.UUID(int=1), items=[{"number": MAIN, "action": "add", "address": {"street": "1 Main\rSt", "city": "X\n", "state": "PA", "zip": "1"}}])
     msg = emergency.compose(req, "Cedar\nWorks")
     assert "\r" not in msg["body"] and msg["body"].count("\n  Add") == 1 and "\n" not in msg["subject"]
+
+
+def _set_protections(world, value):
+    """What Photon staff's `manage protect-apply` (or an operator's undo) does to the draft."""
+    with SystemSession() as s:
+        ps = s.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == uuid.UUID(world.a))).scalar_one()
+        ps.draft = {**ps.draft, "protections": value}
+        s.commit()
+
+
+def test_protections_stay_as_stored_whatever_a_customer_route_sends(client, world, built, connect):
+    """Audit VOX-A-1: no owner or admin (site-limited or not) switches protections on or off: a saved draft, a template, an import, a clone and
+    an undo all keep the stored value."""
+    _set_protections(world, True)
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    assert d["protections"] is True
+    without = {k: v for k, v in d.items() if k != "protections"}
+    for sub in ("a-admin-s1", "tech", "a-owner"):
+        for sent in ({**d, "protections": False}, {**d, "protections": None}, without):
+            r = client.put(f"{built}/phone-system/draft", headers=auth(sub), json={"document": sent})
+            assert r.status_code == 200, r.text
+            assert r.json()["draft"]["protections"] is True
+    r = client.post(f"{built}/phone-system/draft/template", headers=auth("tech"),
+                    json={"template": "ring-everyone", "site_id": world.a1, "location": "main", "main_number": "(724) 555-0100", "users": USERS})
+    assert r.status_code == 200 and r.json()["draft"]["protections"] is True
+    r = client.post(f"{built}/phone-system/import", headers=auth("tech"), json={"text": "Name,Ext\nCy New,120\n", "site_id": world.a1, "apply": True})
+    assert r.status_code == 200 and r.json()["phone_system"]["draft"]["protections"] is True
+    assert ps_row(world).draft["protections"] is True
+
+    # Version 1 is published with protections on; staff then switch them off (version 2). An undo to version 1 brings back its phone system,
+    # not its protections: they stay as the live version has them.
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 202
+    run(connect)
+    _set_protections(world, False)
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 202
+    run(connect)
+    r = client.post(f"{built}/phone-system/versions/1/restore", headers=auth("tech"))
+    assert r.status_code == 202, r.text
+    with SystemSession() as s:
+        v3 = s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.number == 3)).scalar_one()
+        assert v3.document["protections"] is False
+    assert ps_row(world).draft["protections"] is False

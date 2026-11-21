@@ -133,3 +133,11 @@ def test_only_numbers_assigned_to_the_organization_compile():
                                      ("800", False), ("979", False), ("1876", True), ("1212", False)])
 def test_only_whole_country_codes_can_be_switched_on(code, ok):
     assert classes.is_valid_international(code) is ok
+
+
+def test_nobody_changes_protections_on_a_customer_route():
+    """Audit VOX-A-1: switching an adopted system's protections on or off is Photon staff's step, never an owner's or an admin's draft."""
+    on = doc(protections=True)
+    for old, new in ((BASE, on), (on, BASE), (on, doc(protections=False))):
+        assert "Only Photon staff" in policy.refusal(old, new, OWNER, True, set())
+    assert policy.refusal(on, doc(protections=True), OWNER, True, set()) == ""

@@ -5,7 +5,9 @@
   toll-free switched back on, a higher spend limit) or switches on eavesdrop or intercept needs `vox.calling.policy` (owners);
 - a change to the organization's numbers needs `vox.number.manage`;
 - someone limited to some sites may change only those sites' people, numbers, doors and site settings, nothing organization-wide (hours, menus,
-  groups, mailboxes, calling, features, voice).
+  groups, mailboxes, calling, features, voice);
+- nobody changes `protections` on these routes (audit VOX-A-1): it is Photon staff's cutover step (the operator's protect-apply and republish), and
+  the routes keep the stored value, so this refusal is the second line.
 """
 from __future__ import annotations
 
@@ -62,6 +64,8 @@ def touched_sites(old: PhoneSystem, new: PhoneSystem) -> Set[str]:
 
 def refusal(old: PhoneSystem, new: PhoneSystem, can: Any, reach_all: bool, reach_sites: Set[str]) -> str:
     """Why this person may not make this change, in a sentence; empty when they may. `can(capability)` is their role's check."""
+    if old.protections != new.protections:
+        return "Only Photon staff can switch the phone system's protections on or off."
     opened = widened(old, new)
     if opened and not can("vox.calling.policy"):
         return "Only an owner can open up calling: " + "; ".join(opened) + "."
