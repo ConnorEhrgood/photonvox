@@ -10,6 +10,10 @@ cd "$(dirname "$0")/.."
 HOST=${VOX_TEST_SSH:-lxc800}
 DIR=${VOX_TEST_DIR:-/root/vox-test/suite}     # its own subfolder: /root/vox-test/sipp (scripts/sipp.sh) lives beside it
 PROJECT=photonvox-test
+# Never production (audit VOX-B-15): this removes $DIR and a compose project's volumes on the host it is given.
+case "$HOST" in prod|*144.202.2.169*) echo "refused: $HOST is production" >&2; exit 1;; esac
+case "$DIR" in /root/vox-test/*) ;; *) echo "refused: VOX_TEST_DIR must be under /root/vox-test" >&2; exit 1;; esac
+ssh "$HOST" 'test ! -e /opt/photon' || { echo "refused: $HOST has /opt/photon (a production host), or did not answer" >&2; exit 1; }
 ARGS="$(printf '%q ' "$@")"       # keeps quoting intact (-k "a or b") through the remote shell
 if [ "${COVERAGE:-}" = 1 ]; then PYTEST="sh -c 'pytest --cov=app --cov-branch --cov-report=term-missing:skip-covered --cov-report=json:/tmp/cov.json $ARGS && python tests/check_critical.py /tmp/cov.json'"; else PYTEST="pytest $ARGS"; fi
 

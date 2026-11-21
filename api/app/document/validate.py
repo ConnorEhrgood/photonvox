@@ -15,6 +15,9 @@ from app.document.model import PhoneSystem, Target, ToGroup, ToMenu, ToUser, ToV
 
 # N11 service codes and 933 (address read-back): never extensions. 911 is among them.
 SERVICE_CODES = frozenset({"211", "311", "411", "511", "611", "711", "811", "911", "933", "988"})
+# A service code after an outside-line digit (8911, 9933...): an extension with that number would take the call of someone who dials 8 or 9 first
+# for an outside line at any site, 911 included, because an extension is matched before every outbound route (audit VOX-B-2).
+RESERVED = SERVICE_CODES | frozenset(p + c for p in ("8", "9") for c in SERVICE_CODES)
 
 
 @dataclass(frozen=True, order=True)
@@ -130,8 +133,8 @@ def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str
             out.append(Problem(f"{p}.site", "unknown_site", "This user's site is not in the phone system."))
         elif doc.sites[u.site].outside_prefix and u.extension.startswith(doc.sites[u.site].outside_prefix):
             out.append(Problem(f"{p}.extension", "extension_prefix", f"At this site {doc.sites[u.site].outside_prefix} starts an outside call, so no extension may start with it."))
-        if u.extension in SERVICE_CODES:
-            out.append(Problem(f"{p}.extension", "extension_reserved", f"{u.extension} is a service number (911, 988, 311…) and can't be an extension."))
+        if u.extension in RESERVED:
+            out.append(Problem(f"{p}.extension", "extension_reserved", f"{u.extension} is a service number (911, 988, 311…), or one dialed after 8 or 9 for an outside line, and can't be an extension."))
         if u.extension in by_ext:
             out.append(Problem(f"{p}.extension", "extension_taken", f"Extension {u.extension} is already {by_ext[u.extension]}'s."))
         else:
@@ -154,8 +157,8 @@ def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str
             out.append(Problem(f"{p}.site", "unknown_site", "This door's site is not in the phone system."))
         elif doc.sites[d.site].outside_prefix and d.extension.startswith(doc.sites[d.site].outside_prefix):
             out.append(Problem(f"{p}.extension", "extension_prefix", f"At this site {doc.sites[d.site].outside_prefix} starts an outside call, so no extension may start with it."))
-        if d.extension in SERVICE_CODES:
-            out.append(Problem(f"{p}.extension", "extension_reserved", f"{d.extension} is a service number (911, 988, 311…) and can't be an extension."))
+        if d.extension in RESERVED:
+            out.append(Problem(f"{p}.extension", "extension_reserved", f"{d.extension} is a service number (911, 988, 311…), or one dialed after 8 or 9 for an outside line, and can't be an extension."))
         if d.extension in by_ext:
             out.append(Problem(f"{p}.extension", "extension_taken", f"Extension {d.extension} is already {by_ext[d.extension]}'s."))
         else:
@@ -177,8 +180,8 @@ def problems(doc: PhoneSystem, validated_locations: Mapping[str, AbstractSet[str
             out.append(Problem(f"{p}.site", "unknown_site", "This paging group's site is not in the phone system."))
         elif doc.sites[pg.site].outside_prefix and pg.extension.startswith(doc.sites[pg.site].outside_prefix):
             out.append(Problem(f"{p}.extension", "extension_prefix", f"At this site {doc.sites[pg.site].outside_prefix} starts an outside call, so no extension may start with it."))
-        if pg.extension in SERVICE_CODES:
-            out.append(Problem(f"{p}.extension", "extension_reserved", f"{pg.extension} is a service number (911, 988, 311…) and can't be an extension."))
+        if pg.extension in RESERVED:
+            out.append(Problem(f"{p}.extension", "extension_reserved", f"{pg.extension} is a service number (911, 988, 311…), or one dialed after 8 or 9 for an outside line, and can't be an extension."))
         if pg.extension in by_ext:
             out.append(Problem(f"{p}.extension", "extension_taken", f"Extension {pg.extension} is already {by_ext[pg.extension]}'s."))
         else:

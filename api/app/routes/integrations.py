@@ -153,7 +153,7 @@ AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|\+00:00)$")
 @entry.get("/door-calls")
 def door_calls(station: str = Query(..., max_length=64), at: str = Query(..., max_length=40), window_s: int = Query(60),
                tenant_id: uuid.UUID = Depends(entry_tenant), connect: service.Connect = Depends(get_connect)) -> Dict[str, Any]:
-    if not AT.match(at) or not 1 <= window_s <= 600:
+    if not AT.fullmatch(at) or not 1 <= window_s <= 600:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "at: an ISO 8601 UTC time; window_s: 1 to 600")
     when = datetime.fromisoformat(at.replace("Z", "+00:00"))
     moment = int(when.timestamp())

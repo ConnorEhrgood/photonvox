@@ -62,8 +62,8 @@ class Hours(Strict):
     def _spans(cls, week: Dict[str, List[str]]) -> Dict[str, List[str]]:
         for day, spans in week.items():
             for span in spans:
-                m = SPAN.match(span)
-                if not m or (m.group(1), m.group(2)) >= (m.group(3), m.group(4)):
+                m = SPAN.fullmatch(span)          # whole: `$` alone lets a trailing newline through (audit VOX-B-16)
+                if not m or (m.group(1), m.group(2)) >= (m.group(3), m.group(4)) or (m.group(3) == "24" and m.group(4) != "00"):
                     raise ValueError(f"{day}: {span!r} is not a span like 08:00-17:00")
         return week
 
@@ -99,7 +99,7 @@ class Menu(Strict):
     @field_validator("greeting")
     @classmethod
     def _recording_name(cls, g: str) -> str:
-        if g.startswith("recording:") and not RECORDING.match(g):
+        if g.startswith("recording:") and not RECORDING.fullmatch(g):
             raise ValueError("a recording is named by its file: letters, digits, dots, dashes and underscores")
         return g
 
@@ -211,7 +211,7 @@ class PhoneSystem(Strict):
     @field_validator("numbers")
     @classmethod
     def _numbers_are_e164(cls, numbers: Dict[str, Number]) -> Dict[str, Number]:
-        bad = [n for n in numbers if not re.match(E164, n)]
+        bad = [n for n in numbers if not re.fullmatch(E164, n)]
         if bad:
             raise ValueError(f"not a North American number in +1 form: {', '.join(sorted(bad))}")
         return numbers

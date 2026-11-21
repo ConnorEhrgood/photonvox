@@ -267,7 +267,7 @@ def held_numbers(who: Who = Depends(platform_admin), db: Session = Depends(get_d
 @router.put("/numbers/{number}")
 def put_number(number: str, body: NumberIn, who: Who = Depends(platform_admin)) -> Dict[str, Any]:
     """Add a number to Photon's stock, or assign it to an organization (or back to the stock). As the system: only staff assign numbers."""
-    if not re.match(E164, number):
+    if not re.fullmatch(E164, number):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "bad_number", "detail": "A North American number in +1 form."})
     with SystemSession() as s:
         n = s.get(HeldNumber, number) or HeldNumber(number=number)

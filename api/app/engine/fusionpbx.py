@@ -573,9 +573,9 @@ def check_xml(xml: str) -> None:
             raise ValueError("the only Lua a PhotonVox dial plan runs is FusionPBX's ring groups and paging")
         if app in ("set", "export"):
             var = el.get("data", "").split("=", 1)[0].removeprefix("nolocal:")
-            if re.match(r"^(api_|execute_on_|exec_after_bridge|bridge_pre_execute)", var) and not DOOR_ANSWERED.match(el.get("data", "")):
+            if re.match(r"^(api_|execute_on_|exec_after_bridge|bridge_pre_execute)", var) and not DOOR_ANSWERED.fullmatch(el.get("data", "")):
                 raise ValueError(f"a PhotonVox dial plan never sets {var!r} (it would run a command), except the door's own answer log")
-        if app == "bridge" and not re.match(r"^sofia/gateway/[0-9a-f-]{36}/\$\{photonvox_dial\}$", el.get("data", "")):
+        if app == "bridge" and not re.fullmatch(r"^sofia/gateway/[0-9a-f-]{36}/\$\{photonvox_dial\}$", el.get("data", "")):
             raise ValueError("a PhotonVox dial plan bridges only to an upstream gateway")
 
 

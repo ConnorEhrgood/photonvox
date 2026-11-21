@@ -15,8 +15,13 @@ fresh() {   # restart the answering phones and the upstream, so each test counts
   $SIPP start upstreamB -sf /scenarios/upstream-uas.xml -i 10.10.0.80 -p 5071 -mi 10.10.0.80
   sleep 1
 }
+never() {   # 911, 933, 988 and N11 codes (alone, or after 1, 8 or 9) are never dialed by a test (the operator's rule, 2026-11-14; audit VOX-B-10)
+  [[ "${1#+}" =~ ^[189]?(911|933|988|[2-8]11)$ ]] && { echo "refused: $1 is never dialed in a test" >&2; exit 2; }
+  return 0
+}
 out() {     # <name> <ext> <number> [scenario args]: a phone calls out; prints SIPp's exit code
   local name=$1 ext=$2 num=$3; shift 3
+  never "$num"
   $SIPP run "$name" -sf /scenarios/call.xml -s "$num" -set from "$ext" -set domain proto.vox.test -au "$ext" -ap "$(pw "$ext")" \
     -i 10.10.0.80 -p 5084 -m 1 -d 1000 -timeout 15s 10.10.0.60:5060 > /dev/null 2>&1; echo $?
 }
@@ -45,11 +50,9 @@ done
 fresh; check "2001 calls a national number" "$(out o-national 2001 2125550123)" 0
 check "  it leaves by the directly written gateway" "$(invites upstreamB)" 1
 check "  with the outbound caller ID" "$($SIPP log upstreamB | grep -c 'sip:+12125550200@')" 1
-fresh; check "2001 calls 911" "$(out o-911 2001 911)" 0
-check "  with the emergency caller ID" "$($SIPP log upstreamB | grep -c 'sip:+12125550299@')" 1
+# The emergency route is no longer proved by calling 911 (it was, before 2026-11-14): engine/staging/prove-publish.sh reads it instead.
 fresh; check "2002 (allowed only international-44) calls a national number: refused" "$( [ "$(out o-refused 2002 2125550123)" != 0 ] && echo refused)" refused
 check "  nothing reached the upstream" "$(invites upstreamB)" 0
-fresh; check "2002 calls 911 (no call class needed)" "$(out o-911b 2002 911)" 0
 
 check "the upstream's address added to providers (direct write)" "$(acl on)" true
 fresh; check "+12125550200 rings 2001" "$(inbound i-ext +12125550200 call.xml -d 1000)" 0

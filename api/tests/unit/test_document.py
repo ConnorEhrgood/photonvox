@@ -159,3 +159,25 @@ def test_menu_options_are_choices_not_loops_and_a_chain_to_a_person_ends():
 def test_a_users_own_caller_id_must_be_one_of_the_organizations_numbers():
     assert ("users.u-cy.caller_id", "not_held") in codes(doc(**{"users__u-cy__caller_id": "+17245557777"}))
     assert ("users.u-cy.caller_id", "not_held") not in codes(doc(**{"users__u-cy__caller_id": "+17245550123"}))
+
+
+@pytest.mark.parametrize("ext", ["8911", "8933", "8988", "8711", "8311"])
+def test_a_service_code_after_an_outside_line_digit_is_never_an_extension_at_any_site(ext):
+    """Audit VOX-B-2: with one site dialing 8 for outside lines, an extension 8911 at another site would take that site's 8-911 calls."""
+    assert ("users.u-cy.extension", "extension_reserved") in codes(doc(**{"users__u-cy__extension": ext}))
+
+
+@pytest.mark.parametrize("span", ["09:00-17:00\n", "09:00-24:30", "09:00-24:01"])
+def test_a_span_with_a_trailing_newline_or_past_midnight_is_refused(span):
+    """Audit VOX-B-16: Python's `$` lets a final newline through; 24 is an end only as 24:00."""
+    from app.document.model import Hours
+    with pytest.raises(ValidationError):
+        Hours.model_validate({"week": {"mon": [span]}})
+    assert Hours.model_validate({"week": {"mon": ["09:00-24:00"]}})
+
+
+def test_a_number_key_with_a_trailing_newline_is_refused():
+    d = copy.deepcopy(SAMPLE)
+    d["numbers"]["+17245550100\n"] = d["numbers"].pop(next(iter(d["numbers"])))
+    with pytest.raises(ValidationError):
+        PhoneSystem.model_validate(d)

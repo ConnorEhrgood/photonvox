@@ -9,7 +9,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional
 
 from app.document.model import E164
-from app.document.validate import SERVICE_CODES
+from app.document.validate import RESERVED
 
 COLUMNS = ("name", "extension", "email", "direct_number", "site")
 ALIASES = {"full name": "name", "ext": "extension", "e-mail": "email", "direct": "direct_number", "did": "direct_number",
@@ -57,7 +57,7 @@ def preview(text: str, document: Mapping[str, Any], default_site: str, sites: Ma
         problems: List[str] = []
         if not r.get("name"):
             problems.append("no name")
-        elif not NAME_OK.match(r["name"]):
+        elif not NAME_OK.fullmatch(r["name"]):
             problems.append("the name has characters that cannot be used (<, >, %) or is over 100 characters")
         site = default_site
         if r.get("site"):
@@ -66,18 +66,18 @@ def preview(text: str, document: Mapping[str, Any], default_site: str, sites: Ma
                 problems.append(f"no site called {r['site']!r}")
         ext = r.get("extension", "")
         if ext:
-            if not re.match(r"^[1-8][0-9]{1,4}$", ext) or ext in SERVICE_CODES:
+            if not re.fullmatch(r"^[1-8][0-9]{1,4}$", ext) or ext in RESERVED:
                 problems.append(f"{ext!r} cannot be an extension (2–5 digits, not starting 0 or 9, not a service code)")
             elif ext in taken_ext:
                 problems.append(f"extension {ext} is taken")
         else:
-            ext = next(str(n) for n in range(100, 100000) if str(n) not in taken_ext and str(n) not in SERVICE_CODES)
+            ext = next(str(n) for n in range(100, 100000) if str(n) not in taken_ext and str(n) not in RESERVED)
         taken_ext.add(ext)
         email = r.get("email", "")
-        if email and not EMAIL.match(email):
+        if email and not EMAIL.fullmatch(email):
             problems.append(f"{email!r} is not an email address")
         direct: Optional[str] = _number(r["direct_number"]) if r.get("direct_number") else None
-        if direct and not re.match(E164, direct):
+        if direct and not re.fullmatch(E164, direct):
             problems.append(f"{r['direct_number']!r} is not a North American number")
         elif direct and direct not in held:
             problems.append(f"{direct} is not one of the organization's numbers")

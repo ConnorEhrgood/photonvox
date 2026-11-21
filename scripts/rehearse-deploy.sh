@@ -8,6 +8,9 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 HOST=${VOX_TEST_SSH:-lxc800}
 DIR=/root/vox-test/rehearsal
+# Never production (audit VOX-B-15): this removes a compose project and its volumes on the host it is given.
+case "$HOST" in prod|*144.202.2.169*) echo "refused: $HOST is production" >&2; exit 1;; esac
+ssh "$HOST" 'test ! -e /opt/photon' || { echo "refused: $HOST has /opt/photon (a production host), or did not answer" >&2; exit 1; }
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 tar --exclude=node_modules --exclude=coverage --exclude=screenshots --exclude=dist --exclude='.env' --exclude=__pycache__ --exclude=tests \
     -czf "$TMP/r.tgz" api web docker-compose.yml docker-compose.prod.yml deploy
@@ -18,10 +21,11 @@ set -uo pipefail
 cd /root/vox-test/rehearsal && tar -xzf r.tgz && rm r.tgz
 pass=0; fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok    $1"; pass=$((pass+1)); else echo "FAIL  $1 (got $2, wanted $3)"; fail=$((fail+1)); fi; }
-C="docker compose -p photonvox -f docker-compose.yml -f docker-compose.prod.yml"
+# Its own project name, never production's (`photonvox`): a mistaken host still cannot take that stack down.
+C="docker compose -p photonvox-rehearsal -f docker-compose.yml -f docker-compose.prod.yml"
 P=vox-rehearsal-proxy
 leftovers() {
-  docker compose -p photonvox down -v --remove-orphans > /dev/null 2>&1     # by project label: works before .env exists
+  docker compose -p photonvox-rehearsal down -v --remove-orphans > /dev/null 2>&1     # by project label: works before .env exists
   docker rm -f $P > /dev/null 2>&1; docker network rm vox-edge vox-rehearsal-other > /dev/null 2>&1
 }
 cleanup() {
@@ -85,8 +89,8 @@ check "api healthy" "$($C ps --format '{{.Health}}' api)" healthy
 check "web healthy" "$($C ps --format '{{.Health}}' web)" healthy
 check "worker running" "$($C ps --format '{{.State}}' worker)" running
 check "migrations ran" "$($C ps -a --format '{{.State}} {{.ExitCode}}' migrate)" "exited 0"
-check "no host ports published" "$(docker ps --filter label=com.docker.compose.project=photonvox --format '{{.Ports}}' | grep -c '0.0.0.0\|127.0.0.1')" 0
-check "vox-api and vox-web on vox-edge" "$(docker network inspect vox-edge -f '{{range .Containers}}{{.Name}} {{end}}' | tr ' ' '\n' | grep -c 'photonvox-\(api\|web\)-1')" 2
+check "no host ports published" "$(docker ps --filter label=com.docker.compose.project=photonvox-rehearsal --format '{{.Ports}}' | grep -c '0.0.0.0\|127.0.0.1')" 0
+check "vox-api and vox-web on vox-edge" "$(docker network inspect vox-edge -f '{{range .Containers}}{{.Name}} {{end}}' | tr ' ' '\n' | grep -c 'photonvox-rehearsal-\(api\|web\)-1')" 2
 
 echo "== the proxy joins vox-edge and reloads (never recreated)"
 docker network connect vox-edge $P
@@ -117,8 +121,8 @@ check "the dump is larger than 4096 bytes (the script's sanity check)" "$([ "$DU
 echo "   dump: $DUMP bytes"
 
 echo "== memory"
-docker stats --no-stream --format '   {{.Name}} {{.MemUsage}}' $(docker ps -q --filter label=com.docker.compose.project=photonvox)
+docker stats --no-stream --format '   {{.Name}} {{.MemUsage}}' $(docker ps -q --filter label=com.docker.compose.project=photonvox-rehearsal)
 if [ -n "${KEEP:-}" ]; then echo "(kept running: run the script again without KEEP to remove it)"; else cleanup; fi
-check "cleaned up" "$( [ -n "${KEEP:-}" ] || { docker ps -aq --filter label=com.docker.compose.project=photonvox; docker ps -aq --filter name=$P; docker network ls -q --filter name=vox-edge; } | wc -l)" 0
+check "cleaned up" "$( [ -n "${KEEP:-}" ] || { docker ps -aq --filter label=com.docker.compose.project=photonvox-rehearsal; docker ps -aq --filter name=$P; docker network ls -q --filter name=vox-edge; } | wc -l)" 0
 echo "$pass passed, $fail failed"; [ $fail = 0 ]
 REMOTE
