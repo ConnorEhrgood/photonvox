@@ -114,3 +114,57 @@ def test_a_request_left_with_nothing_to_ask_is_set_aside(setup):
 def test_a_rejected_number_then_given_up_is_just_forgotten(setup):
     confirm(sync(setup, "main", [N1])["id"], ok=False)
     assert sync(setup, "main", []) is None and numbers() == {}
+
+
+def _open_request(tenant_id, number):
+    with SystemSession() as s:
+        req = CarrierRequest(id=uuid.uuid4(), tenant_id=uuid.UUID(tenant_id), items=[{"number": number, "action": "add", "address": ADDR}])
+        s.add(req)
+        s.commit()
+        return req.id
+
+
+def test_a_failed_send_never_resends_the_others_and_waits_before_trying_again(world, monkeypatch):
+    """Audit VOX-A-6: each request is committed as soon as it is sent; one that fails is tried again after a growing wait, not every tick."""
+    monkeypatch.setattr(settings, "htc_e911_email", "911@htc.example")
+    monkeypatch.setattr(emergency, "_retry", {})
+    good, bad = _open_request(world.a, N1), _open_request(world.b, N2)
+    sent, now = [], [1000.0]
+
+    def sender(to, subject, body):
+        if N2 in body:
+            raise RuntimeError("Postmark said no")
+        sent.append(subject)
+        return "msg-1"
+    with SystemSession() as s:
+        assert emergency.send_open(s, sender, lambda: now[0]) == 1
+    with SystemSession() as s:
+        assert s.get(CarrierRequest, good).status == "sent" and s.get(CarrierRequest, bad).status == "open"
+    calls = []
+    with SystemSession() as s:                                  # the next tick: nothing is sent twice, the failed one waits
+        assert emergency.send_open(s, lambda *a: calls.append(a) or "x", lambda: now[0] + 15) == 0
+    assert calls == [] and len(sent) == 1
+    now[0] += emergency.RETRY_FIRST_S + 1
+    with SystemSession() as s:                                  # its wait is over: it fails again, and waits twice as long
+        assert emergency.send_open(s, sender, lambda: now[0]) == 0
+    assert emergency._retry[bad][1] == 2 * emergency.RETRY_FIRST_S
+    now[0] += 2 * emergency.RETRY_FIRST_S + 1
+    with SystemSession() as s:
+        assert emergency.send_open(s, lambda *a: "msg-2", lambda: now[0]) == 1
+    with SystemSession() as s:
+        assert s.get(CarrierRequest, bad).status == "sent" and bad not in emergency._retry
+
+
+def test_a_demo_organizations_request_is_never_sent_to_a_carrier(world, monkeypatch):
+    """Audit DEMO-1: even a request that exists (made before the publisher's guard, or by hand) is closed unsent."""
+    from app.models import Tenant
+    monkeypatch.setattr(settings, "htc_e911_email", "911@htc.example")
+    with SystemSession() as s:
+        s.get(Tenant, uuid.UUID(world.a)).demo = True
+        s.commit()
+    req = _open_request(world.a, N1)
+    with SystemSession() as s:
+        assert emergency.send_open(s, lambda *a: (_ for _ in ()).throw(AssertionError("mailed the carrier"))) == 0
+    with SystemSession() as s:
+        r = s.get(CarrierRequest, req)
+        assert r.status == "superseded" and "never sent" in r.note and r.sent_at is None

@@ -214,6 +214,8 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
     try:
         if plan.get("adopted"):
             raise _Kept()           # an adopted domain's 911 stays hand-built: no registrations or carrier requests until the protections version
+        if instance.simulated or (tenant is not None and tenant.demo):
+            raise _Kept()           # a demo's numbers are fictional: never registered, never sent to a carrier (docs/DEMO.md; audit DEMO-1)
         with db.begin_nested():
             sync_numbers(db, ps, v.document)
     except _Kept:

@@ -720,3 +720,20 @@ def test_protections_stay_as_stored_whatever_a_customer_route_sends(client, worl
         v3 = s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.number == 3)).scalar_one()
         assert v3.document["protections"] is False
     assert ps_row(world).draft["protections"] is False
+
+
+def test_a_demo_publish_registers_no_911_numbers_and_asks_no_carrier(client, world, built, connect, monkeypatch):
+    """Audit DEMO-1: the demo's numbers are fictional; its publish (to a simulated engine) makes no carrier request, so nothing is mailed."""
+    from app.models import PbxInstance, Tenant
+    with SystemSession() as s:
+        s.get(Tenant, uuid.UUID(world.a)).demo = True
+        for i in s.execute(select(PbxInstance)).scalars():
+            i.simulated = True
+        s.commit()
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 202
+    run(connect)
+    assert client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["state"] == "ready"
+    monkeypatch.setattr(settings, "htc_e911_email", "911@htc.example")
+    with SystemSession() as s:
+        assert s.execute(select(CarrierRequest)).scalars().all() == [] and s.execute(select(EmergencyNumber)).scalars().all() == []
+        assert emergency.send_open(s, lambda *a: (_ for _ in ()).throw(AssertionError("mailed the carrier"))) == 0

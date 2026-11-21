@@ -7,9 +7,11 @@ answer, and the numbers follow it. A number is unconfirmed from the moment its a
 """
 from __future__ import annotations
 
+import logging
 import re
+import time
 import uuid
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,6 +19,11 @@ from sqlalchemy.orm import Session
 from app import mail
 from app.config import settings
 from app.models import CarrierRequest, EmergencyLocation, EmergencyNumber, PhoneSystem, Tenant, utcnow
+
+log = logging.getLogger("photonvox.emergency")
+RETRY_FIRST_S, RETRY_MAX_S = 60.0, 3600.0
+# A request whose email failed waits before the next try, doubling up to an hour (per worker process; a restart tries again at once).
+_retry: Dict[uuid.UUID, Tuple[float, float]] = {}       # request id -> (next try, current wait)
 
 
 def _clean(v: Any) -> str:
@@ -100,20 +107,37 @@ def compose(req: CarrierRequest, organization: str) -> Dict[str, str]:
     return {"subject": f"911 address update {ref}: {organization} ({len(req.items)} number{'s' if len(req.items) != 1 else ''})", "body": body}
 
 
-def send_open(db: Session, sender: mail.Sender = mail.send) -> int:
-    """Email every open request to the carrier's contact. Without an address or a mail token, requests stay open for staff to send by hand."""
+def send_open(db: Session, sender: mail.Sender = mail.send, clock: Callable[[], float] = time.monotonic) -> int:
+    """Email every open request to the carrier's contact. Without an address or a mail token, requests stay open for staff to send by hand.
+
+    Each request is committed as soon as it is sent, so a later one failing never sends it again (audit VOX-A-6); a failed one is logged and
+    tried again after a growing wait. A demo organization's request is never sent to a carrier (audit DEMO-1): it is closed unsent."""
     if not settings.htc_e911_email:
         return 0
     sent = 0
     for req in db.execute(select(CarrierRequest).where(CarrierRequest.status == "open", CarrierRequest.method == "email")).scalars().all():
         tenant = db.get(Tenant, req.tenant_id)
+        if tenant is not None and tenant.demo:
+            req.status, req.closed_at, req.note = "superseded", utcnow(), "demo organization: never sent to a carrier"
+            db.commit()
+            continue
+        now = clock()
+        if _retry.get(req.id, (now, 0.0))[0] > now:
+            continue
         msg = compose(req, tenant.name if tenant else str(req.tenant_id))
-        ref = sender(settings.htc_e911_email, msg["subject"], msg["body"])
+        try:
+            ref = sender(settings.htc_e911_email, msg["subject"], msg["body"])
+        except Exception as e:  # noqa: BLE001 - one request's failure must not hold back (or resend) the others
+            wait = min(RETRY_MAX_S, max(RETRY_FIRST_S, _retry.get(req.id, (0.0, 0.0))[1] * 2))
+            _retry[req.id] = (now + wait, wait)
+            log.warning("carrier request %s not sent (next try in %d s): %s", req.id, wait, type(e).__name__)
+            continue
+        _retry.pop(req.id, None)
         if ref is None:
             continue
         mark_sent(db, req, ref)
+        db.commit()
         sent += 1
-    db.commit()
     return sent
 
 
