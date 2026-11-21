@@ -159,8 +159,7 @@ def publish_draft(ctx: Ctx = Depends(require(BUILD, sites=True)), db: Session = 
 
 
 def _queue(db: Session, ctx: Ctx, ps: PhoneSystem, document: Dict[str, Any], note: str) -> Dict[str, Any]:
-    busy = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id,
-                                                       PhoneSystemVersion.state.in_(("queued", "publishing")))).scalars().first()
+    busy = service.busy(db, ps)
     if busy:
         raise HTTPException(status.HTTP_409_CONFLICT, {"code": "busy", "detail": f"Version {busy.number} is still being published."})
     doc = _document(document)

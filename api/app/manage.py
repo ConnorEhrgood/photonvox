@@ -14,6 +14,8 @@ decision 32), where no browser sign-in is involved. Secrets come on standard inp
     protect <organization id> <caller extension> [<dial plan to retire> ...]       the protections version as a dry run (reads only)
     protect-apply <organization id> [<dial plan to retire> ...]                     mark it protected (the next publish is the protections version)
     show <organization id>                                                          the phone system's state, versions and last drift check
+    busy                                                                            how many versions are queued or being published (deploys wait for 0)
+    recover <organization id>                                                       a version left "publishing" by a stopped process: marked failed now
     set-911 <organization id> <site id> <key> <street> <city> <state> <zip> <note>    a site's 911 address, validated (the carrier has it on file:
                                                                                     the note says who confirmed it, and when)
 """
@@ -40,6 +42,13 @@ def _ps(s, tenant: str) -> PhoneSystem:
     if ps is None:
         raise SystemExit("this organization has no phone system")
     return ps
+
+
+def _not_busy(s, ps: PhoneSystem) -> None:
+    """The operator waits for a version in flight like everyone else (audit VOX-A-3): two versions written at once would race on the engine."""
+    v = service.busy(s, ps)
+    if v is not None:
+        raise SystemExit(f"version {v.number} is still {v.state}; wait for it (or, if a stopped process left it, `recover <organization id>`)")
 
 
 def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Connect = service.connect, agent=None) -> int:
@@ -98,6 +107,7 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
         elif cmd == "publish":
             tenant, note = args
             ps = _ps(s, tenant)
+            _not_busy(s, ps)
             v = service.queue(s, ps, ps.draft, None, OPERATOR, note)
             s.flush()
             audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="phone_system.publish_requested",
@@ -113,6 +123,7 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
                                                              PhoneSystemVersion.number == int(number))).scalar_one_or_none()
             if old is None:
                 raise SystemExit(f"this phone system has no version {number}")
+            _not_busy(s, ps)
             ps.draft = old.document                 # the draft too: the next publish does not bring back what was undone
             v = service.queue(s, ps, old.document, None, OPERATOR, note)
             s.flush()
@@ -176,6 +187,11 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
                          target_type="emergency_location", target_id=loc.id, site=str(sid), key=key, note=note.strip())
             s.commit()
             json.dump({"id": str(loc.id), "site_id": site, "key": key, "address": loc.address, "status": loc.status}, out)
+        elif cmd == "busy":
+            out.write(str(len(s.execute(select(PhoneSystemVersion.id).where(PhoneSystemVersion.state.in_(service.BUSY))).all())))
+        elif cmd == "recover":
+            ps = _ps(s, args[0])
+            json.dump({"recovered": service.recover_interrupted(s, 0, ps.id)}, out)
         elif cmd == "show":
             ps = _ps(s, args[0])
             versions = s.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id).order_by(PhoneSystemVersion.number)).scalars()

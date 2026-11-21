@@ -803,3 +803,59 @@ def test_numbers_and_carrier_requests_are_shown_only_for_the_sites_a_person_view
     assert [n["number"] for n in main["numbers"]] == [MAIN] and [i["number"] for i in main["requests"][0]["items"]] == [MAIN]
     annex = client.get(f"/tenants/{world.a}/emergency", headers=auth("a-admin-s2")).json()
     assert annex == {"locations": [], "numbers": [], "requests": []}
+
+
+def test_a_version_left_publishing_by_a_stopped_process_is_recovered(client, world, built, connect):
+    """Audit VOX-A-3, VOX-B-6: a worker stopped mid-publish left the version "publishing" and every later publish and undo refused. Now the
+    worker marks it failed once it is older than a publish can take (nothing written to the engine), and the operator's commands wait too."""
+    import io
+    from datetime import timedelta
+    from app import manage
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 202
+    with SystemSession() as s:             # the worker took it, then stopped
+        v = s.execute(select(PhoneSystemVersion)).scalar_one()
+        v.state = "publishing"
+        s.commit()
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 409
+    out = io.StringIO()
+    with pytest.raises(SystemExit, match="still publishing"):
+        manage.main(["publish", world.a, "again"], io.StringIO(), out, connect)
+    manage.main(["busy"], io.StringIO(), out, connect)
+    assert out.getvalue().startswith("1")
+    with SystemSession() as s:
+        assert service.recover_interrupted(s) == 0                     # too recent: it may still be running somewhere
+        v = s.execute(select(PhoneSystemVersion)).scalar_one()
+        v.created_at = v.created_at - timedelta(seconds=service.INTERRUPTED_AFTER_S + 1)
+        s.commit()
+    from app.worker import engine_jobs
+    engine_jobs({}, 0.0, connect)                                     # the worker's next pass
+    v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
+    assert v["state"] == "failed" and "interrupted" in v["error"]
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 202
+    run(connect)
+    assert client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["state"] == "ready"
+
+
+def test_the_operator_can_recover_a_stuck_version_at_once(client, world, built, connect):
+    import io
+    import json
+    from app import manage
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    with SystemSession() as s:
+        s.execute(select(PhoneSystemVersion)).scalar_one().state = "publishing"
+        s.commit()
+    out = io.StringIO()
+    manage.main(["recover", world.a], io.StringIO(), out, connect)
+    assert json.loads(out.getvalue()) == {"recovered": 1}
+    assert client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["state"] == "failed"
+
+
+def test_anything_that_fails_before_the_engine_is_reached_fails_the_version(client, world, built, connect, monkeypatch):
+    """Audit VOX-A-3: a stored document that no longer validates, an unreadable key or a connection that cannot be made."""
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+
+    def broken(_instance):
+        raise RuntimeError("no route to the engine")
+    run(broken)
+    v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
+    assert v["state"] == "failed" and "could not prepare it" in v["error"] and "route" not in v["error"]

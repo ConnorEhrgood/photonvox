@@ -40,6 +40,9 @@ def run_job(what: str, job: Callable[[Any], Any]) -> Any:
 
 def engine_jobs(state: dict, now: float, connect: service.Connect = service.connect) -> None:
     """Publishing comes first and every tick (an integrator is waiting); hand edits every few minutes; carrier requests every tick."""
+    interrupted = run_job("interrupted publishes", service.recover_interrupted)
+    if interrupted:
+        log.warning("marked %d interrupted publish(es) failed", interrupted)
     published = run_job("publish", lambda db: service.publish_queued(db, connect))
     if published:
         log.info("published %d version(s)", published)

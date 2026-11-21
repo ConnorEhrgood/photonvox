@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import uuid
+from datetime import timedelta
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from sqlalchemy import delete, select, text
@@ -178,9 +179,19 @@ def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = conne
     """Publish one queued version; returns its final state. Commits as it goes, so a crash leaves an honest record."""
     v = db.get(PhoneSystemVersion, version_id)
     ps = db.get(PhoneSystem, v.phone_system_id)
-    instance = db.get(PbxInstance, ps.instance_id)
     v.state, ps.status = "publishing", "publishing"
     db.commit()
+    try:
+        return _publish(db, ps, v, connect)
+    except Exception as e:  # noqa: BLE001 - whatever fails before the engine is reached (a stored document, a key, a connection) is recorded
+        # (audit VOX-A-3): a version never stays "publishing" while this process lives.
+        db.rollback()
+        log.warning("publish of %s version %s failed before reaching the engine: %s: %s", ps.id, v.number, type(e).__name__, e)
+        return _fail(db, ps, v, "publish failed: PhotonVox could not prepare it (Photon has been told)", None)
+
+
+def _publish(db: Session, ps: PhoneSystem, v: PhoneSystemVersion, connect: Connect) -> str:
+    instance = db.get(PbxInstance, ps.instance_id)
     tenant = db.get(Tenant, ps.tenant_id)
     if bool(tenant is not None and tenant.demo) != bool(instance.simulated):
         # Never a demo on a live engine, never a customer on a simulated one (docs/DEMO.md): refused before anything is compiled or connected.
@@ -270,6 +281,33 @@ def queue(db: Session, ps: PhoneSystem, document: Mapping[str, Any], who_id: Opt
                            created_by=who_id, created_by_label=who_label[:320])
     db.add(v)
     return v
+
+
+INTERRUPTED_AFTER_S = 20 * 60      # a publish takes seconds to a few minutes; older than this, nobody is still publishing it
+BUSY = ("queued", "publishing")
+
+
+def busy(db: Session, ps: PhoneSystem) -> Optional[PhoneSystemVersion]:
+    """A version of this phone system still waiting or being published (a new one waits for it: the API's and the operator's rule)."""
+    return db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id, PhoneSystemVersion.state.in_(BUSY))
+                      .order_by(PhoneSystemVersion.number)).scalars().first()
+
+
+def recover_interrupted(db: Session, older_than_s: float = INTERRUPTED_AFTER_S, phone_system_id: Optional[uuid.UUID] = None) -> int:
+    """Versions left "publishing" by a process that stopped mid-way (a deploy, a crash; audit VOX-A-3, VOX-B-6) are marked failed so the phone
+    system can be published or undone again. The engine is not written here: it may hold that version whole (the write is one transaction)
+    or not at all, and its cache may not have been cleared; the drift check that follows shows which, and the next publish or undo puts the
+    phone system right. The worker runs this at start and every tick, for versions older than a publish can take."""
+    cutoff = utcnow() - timedelta(seconds=older_than_s)
+    q = select(PhoneSystemVersion).where(PhoneSystemVersion.state == "publishing", PhoneSystemVersion.created_at <= cutoff)
+    if phone_system_id is not None:
+        q = q.where(PhoneSystemVersion.phone_system_id == phone_system_id)
+    found = db.execute(q).scalars().all()
+    for v in found:
+        log.warning("version %s of %s was left publishing: marked failed", v.number, v.phone_system_id)
+        ps = db.get(PhoneSystem, v.phone_system_id)
+        _fail(db, ps, v, "publish interrupted (PhotonVox stopped while publishing it); the engine may hold part of it: publish again or undo", None)
+    return len(found)
 
 
 def publish_queued(db: Session, connect: Connect = connect) -> int:

@@ -16,6 +16,14 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 git archive HEAD api web docker-compose.yml docker-compose.prod.yml deploy | tar -x -C "$TMP"
 # --delete removes files the commit no longer has; .env is excluded, so it is never deleted (and --delete-excluded is never used).
 rsync -az --delete --exclude .env "$TMP/" "$HOST:$DEST/"
+# Build first, then wait until no version is being published before the worker is recreated (audit VOX-B-6): a publish cut off half-way
+# leaves the phone system to be published again. An older image without `manage busy` cannot say: then the deploy goes ahead (as before).
+ssh "$HOST" "cd $DEST && BUILD_SHA=$SHA $C build 2>&1 | tail -3"
+for i in $(seq 1 60); do
+  n=$(ssh "$HOST" "cd $DEST && $C exec -T worker python -m app.manage busy" 2>/dev/null) || { echo "the running worker cannot say whether it is publishing: going ahead"; break; }
+  [ "$n" = 0 ] && break
+  echo "waiting: $n version(s) queued or being published"; sleep 5
+done
 ssh "$HOST" "cd $DEST && BUILD_SHA=$SHA $C up -d --build --remove-orphans 2>&1 | tail -8 && $C ps --format '{{.Service}} {{.State}} {{.Health}}'"
 for i in $(seq 1 20); do curl -fsS -o /dev/null https://api.vox.photonind.com/healthz && break; sleep 3; done
 curl -s -o /dev/null -w "api %{http_code}\n" https://api.vox.photonind.com/healthz
