@@ -111,12 +111,14 @@ class FakeDirectory:
         self.seq = seq
 
     def organization(self, id: Optional[str] = None, name: str = "Organization", region: str = "us-east", partner_id: Optional[str] = None, plan_key: str = "standard",
-                     status: str = "active", products: Optional[List[str]] = None, slug: Optional[str] = None, former_slugs: Optional[List[str]] = None) -> Doc:
+                     status: str = "active", products: Optional[List[str]] = None, slug: Optional[str] = None, former_slugs: Optional[List[str]] = None,
+                     demo: bool = False) -> Doc:
         """`products`: the other products the organization has switched on; this product's own key is always in the list, which is sorted (as the directory sends it).
-        `slug`: its address in every product (/org/<slug>/; default: from the name); `former_slugs`: the ones it had, which redirect."""
+        `slug`: its address in every product (/org/<slug>/; default: from the name); `former_slugs`: the ones it had, which redirect.
+        `demo`: Photon's demo organization (left out of billing, usage counts and platform alerts)."""
         doc = {"id": id or str(uuid.uuid4()), "name": name, "slug": slug or _slugify(name), "former_slugs": sorted(former_slugs or []),
                "partner_id": partner_id or str(uuid.uuid4()), "home_region": region, "status": status, "plan_key": plan_key,
-               "products": sorted({self.product, *(products or [])})}
+               "products": sorted({self.product, *(products or [])}), "demo": demo}
         self.put("organization", doc["id"], doc)
         return doc
 

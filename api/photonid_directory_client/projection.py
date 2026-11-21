@@ -2,12 +2,14 @@
 
 The directory sends four kinds of thing, each keyed by a string:
 
-  organization   key = organization id.   {id, name, slug, former_slugs, partner_id, home_region, status, plan_key, products}
+  organization   key = organization id.   {id, name, slug, former_slugs, partner_id, home_region, status, plan_key, products, demo}
                  `slug`: the organization's address in every product, /org/<slug>/ (the suite's URL convention; only the directory gives it).
                  `former_slugs`: every slug it had before: a link with one of them redirects to /org/<slug>/ (never to another organization).
                  `products`: the keys of ALL the products the organization has switched on (sorted; always includes the product you are, because you are
                  only told about organizations that have you), e.g. ["board", "guard"]. Keys only: no plans, counts or other products' data. Switching any product
                  on or off sends the organization again to every product it still has. `plan_key` is YOUR plan only.
+                 `demo`: true only for Photon's demo organization (simulated devices, shown to prospects; photon-suite DEMO.md): leave it out of billing,
+                 usage counts and platform alerts. Added 2026-11-14: treat a document without it (a copy pulled before) as false.
   site           key = site id.           {id, organization_id, slug, name, address, timezone, latitude, longitude, status}
   person         key = person id.         {id, sub, email, name, status, platform_admin, partners}
                  `sub` is the OIDC subject; null until the person has an account.

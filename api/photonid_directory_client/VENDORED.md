@@ -1,1 +1,1 @@
-Vendored from photonid/directory/client at commit f186d54 (main), 2026-11-14: organization slugs (slug, former_slugs). Do not edit: re-copy from photonid. SOURCE.sha256 is checked by tests/unit/test_vendored.py.
+Vendored from photonid/directory/client at commit 632e879 (main), re-copied 2026-11-21 (audit XP-10): organization slugs, and the demo flag in the documented interface and the test helper. Do not edit: re-copy from photonid. SOURCE.sha256 is checked by tests/unit/test_vendored.py.
