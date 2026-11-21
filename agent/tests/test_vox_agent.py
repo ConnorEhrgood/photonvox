@@ -144,8 +144,8 @@ def test_a_synthetic_call_reports_what_it_found(agent):
     assert call(agent, "POST", "/v1/check", body) == (200, {"found": "reached 301"})
     assert FakeESL.commands[-1].startswith("originate {photonvox_synthetic=inbound,photonvox_token=0123456789abcdef,")
     assert FakeESL.commands[-1].endswith("}loopback/+17245550100/public &park()")
-    code, r = call(agent, "POST", "/v1/check", {**body, "kind": "route", "number": "911"})
-    assert code == 200 and FakeESL.commands[-1].endswith("}loopback/911/x.sip.test &park()")
+    code, r = call(agent, "POST", "/v1/check", {**body, "kind": "route", "number": "+12125550123"})
+    assert code == 200 and FakeESL.commands[-1].endswith("}loopback/+12125550123/x.sip.test &park()")
     for field, bad in (("kind", "shell"), ("number", "911;status"), ("domain_name", "X Y"), ("domain_uuid", "x"), ("token", "zz")):
         assert call(agent, "POST", "/v1/check", {**body, field: bad})[0] == 400
 
@@ -207,7 +207,7 @@ def test_the_replay_window_forgets_old_signatures():
 def test_configuration(tmp_path):
     with pytest.raises(SystemExit):
         va.Config({"VOX_AGENT_SECRET": "short"})
-    assert va.esl_password(str(tmp_path / "missing.xml")) == "ClueCon"
+    assert va.esl_password(str(tmp_path / "missing.xml")) == ""          # never FreeSWITCH's well-known default (VOX-B-11)
     cfg = va.Config({"VOX_AGENT_SECRET": SECRET, "VOX_AGENT_ESL_PASSWORD": "pw"})
     assert cfg.bind == ("127.0.0.1", 8780) and cfg.esl_password == "pw" and cfg.cache == "/var/cache/fusionpbx"
 
@@ -305,7 +305,7 @@ def test_the_password_is_read_from_the_event_socket_configuration(tmp_path):
     conf.write_text('<c><settings><param name="listen-ip" value="127.0.0.1"/><param name="password" value="Secret1"/></settings></c>')
     assert va.esl_password(str(conf)) == "Secret1"
     conf.write_text('<c><settings><param name="listen-ip" value="127.0.0.1"/></settings></c>')
-    assert va.esl_password(str(conf)) == "ClueCon"
+    assert va.esl_password(str(conf)) == ""
 
 
 def test_photonvoxs_own_client_speaks_to_this_agent(agent):
@@ -317,7 +317,9 @@ def test_photonvoxs_own_client_speaks_to_this_agent(agent):
     a.rescan(["external"], [UUID1])
     a.reload_acl()
     a.seed_domain()
-    assert a.check("route", "911", "x.sip.test", UUID1, "fedcba9876543210") == "reached 301" and a.status()["registrations"] == 2
+    assert a.check("route", "19005550100", "x.sip.test", UUID1, "fedcba9876543210") == "reached 301" and a.status()["registrations"] == 2
+    with pytest.raises(AgentError, match="400"):
+        a.check("route", "911", "x.sip.test", UUID1, "fedcba9876543211")
     with pytest.raises(AgentError, match="401"):
         HttpAgent(agent["url"], "x" * 40).reload_acl()
 
@@ -360,3 +362,137 @@ def test_a_domain_that_is_not_a_dotted_name_is_refused(agent, domain):
     import base64
     body = {"domain_name": domain, "name": "photonvox-" + "c" * 32 + ".wav", "data": base64.b64encode(b"RIFF\x00\x00\x00\x00WAVE").decode()}
     assert call(agent, "POST", "/v1/sound", body)[0] == 400
+
+
+@pytest.mark.parametrize("number", ["911", "+911", "9911", "1911", "*911", "933", "8933", "988", "+1988", "211", "311", "711", "811", "9711"])
+def test_an_emergency_or_service_number_is_never_dialed_whatever_the_caller_asks(agent, number):
+    """Audit VOX-B-3: the agent itself refuses, so a mistake in the control plane (or a holder of the secret) cannot place such a call."""
+    before = list(FakeESL.commands)
+    for kind in ("route", "inbound"):
+        body = {"kind": kind, "number": number, "domain_name": "x.sip.test", "domain_uuid": UUID1, "token": "0123456789abcdef"}
+        code, r = call(agent, "POST", "/v1/check", body)
+        assert code == 400 and "never dialed" in r["error"]
+    assert FakeESL.commands == before
+
+
+@pytest.mark.parametrize("number", ["19005550100", "+17245550100", "7245550100", "100", "9112", "4111"])
+def test_ordinary_numbers_are_still_checked(agent, number):
+    body = {"kind": "route", "number": number, "domain_name": "x.sip.test", "domain_uuid": UUID1, "token": "0123456789abcdef"}
+    assert call(agent, "POST", "/v1/check", body)[0] == 200
+
+
+def test_with_a_domain_list_only_those_domains_are_served(agent):
+    """VOX_AGENT_DOMAINS (audit VOX-B-3): checks, live reads, door calls and greetings for other domains are refused."""
+    agent["cfg"].domains = va.Config({"VOX_AGENT_SECRET": SECRET, "VOX_AGENT_ESL_PASSWORD": "pw", "VOX_AGENT_DOMAINS": "x.test, x.sip.test"}).domains
+    check = {"kind": "route", "number": "19005550100", "domain_uuid": UUID1, "token": "0123456789abcdef"}
+    assert call(agent, "POST", "/v1/check", {**check, "domain_name": "x.sip.test"})[0] == 200
+    for path, body in (("/v1/check", check), ("/v1/live", {}), ("/v1/door-calls", {"extension": "150", "since": 0}),
+                       ("/v1/sound", {"name": "photonvox-" + "d" * 32 + ".wav", "data": ""})):
+        code, r = call(agent, "POST", path, {**body, "domain_name": "other.test"})
+        assert code == 400 and "not a domain PhotonVox manages" in r["error"]
+    assert call(agent, "POST", "/v1/live", {"domain_name": "x.test"})[0] == 200
+    with pytest.raises(SystemExit, match="VOX_AGENT_DOMAINS"):
+        va.Config({"VOX_AGENT_SECRET": SECRET, "VOX_AGENT_DOMAINS": "x.test,bad domain"})
+
+
+@pytest.mark.parametrize("field,value", [("domain_name", "x.sip.test\n"), ("number", "100\n"), ("token", "0123456789abcdef\n"),
+                                         ("domain_uuid", UUID1 + "\n")])
+def test_a_trailing_newline_is_refused(agent, field, value):
+    """Audit VOX-B-17: Python's `$` matches before a final newline; the agent's patterns are matched whole."""
+    body = {"kind": "route", "number": "19005550100", "domain_name": "x.sip.test", "domain_uuid": UUID1, "token": "0123456789abcdef"}
+    assert call(agent, "POST", "/v1/check", {**body, field: value})[0] == 400
+    assert call(agent, "POST", "/v1/cache/delete", {"keys": ["dialplan.x.test\n"]})[0] == 400
+
+
+def test_without_an_event_socket_password_nothing_is_tried(agent):
+    agent["cfg"].esl_password = ""
+    n = len(FakeESL.commands)
+    assert call(agent, "POST", "/v1/reloadacl", {}) == (500, {"error": "ConnectionError"})
+    assert len(FakeESL.commands) == n
+
+
+def test_a_body_is_read_only_with_a_current_signature_header_and_small_except_for_a_greeting(agent):
+    """Audit VOX-B-11: an unsigned or stale request is refused before its body is read; only a greeting may be large."""
+    import http.client
+    host, port = agent["url"][7:].split(":")
+
+    def send(path, length, sig=None):
+        conn = http.client.HTTPConnection(host, int(port), timeout=5)
+        conn.putrequest("POST", path)
+        conn.putheader("Content-Length", str(length))
+        if sig is not None:
+            conn.putheader("X-PhotonVox-Signature", sig)
+        conn.endheaders()          # the body is never sent: an answer proves it was not waited for
+        return conn.getresponse().status
+
+    assert send("/v1/cache/delete", 1000) == 401
+    assert send("/v1/cache/delete", 1000, va.sign(SECRET, "POST", "/v1/cache/delete", b"", int(time.time()) - 400)) == 401
+    assert send("/v1/cache/delete", va.MAX_SMALL + 1, va.sign(SECRET, "POST", "/v1/cache/delete", b"")) == 413
+    assert send("/v1/sound", va.MAX_BODY + 1, va.sign(SECRET, "POST", "/v1/sound", b"")) == 413
+    assert va.plausible(va.sign(SECRET, "GET", "/v1/status", b"")) and not va.plausible("t=1,n=zz,v1=x")
+
+
+def test_connections_beyond_the_limit_are_closed(agent, monkeypatch):
+    import socket
+    srv = va.serve(agent["cfg"])
+    srv.slots = threading.BoundedSemaphore(1)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    held = socket.create_connection(srv.server_address)          # takes the one slot and sends nothing
+    time.sleep(0.2)
+    extra = socket.create_connection(srv.server_address)
+    extra.settimeout(5)
+    assert extra.recv(10) == b""                                  # closed unanswered
+    held.close()
+    time.sleep(0.2)
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    assert call({"url": url}, "GET", "/v1/status")[0] == 200      # the slot is free again
+    srv.shutdown()
+
+
+def _installer(tmp_path):
+    """agent/install.sh with ssh, scp, chown and systemctl played locally: the engine's /etc and /opt are folders under tmp_path."""
+    import subprocess
+    root, bin_ = tmp_path / "engine", tmp_path / "bin"
+    (root / "etc" / "systemd" / "system").mkdir(parents=True)
+    bin_.mkdir()
+    (bin_ / "ssh").write_text(f'#!/bin/bash\ncmd="${{@: -1}}"\ncmd="${{cmd//\\/etc\\//{root}/etc/}}"\ncmd="${{cmd//\\/opt\\//{root}/opt/}}"\nexec bash -c "$cmd"\n')
+    (bin_ / "scp").write_text(f'#!/bin/bash\nsrc="${{@: -2:1}}"; dst="${{@: -1}}"; cp "$src" "{root}${{dst#*:}}"\n')
+    for name in ("chown", "systemctl"):
+        (bin_ / name).write_text("#!/bin/bash\n[ \"$1\" = is-active ] && echo active\nexit 0\n")
+    for f in bin_.iterdir():
+        f.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "HOME": str(tmp_path / "home")}
+    script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "install.sh")
+
+    def run(*args):
+        return subprocess.run(["bash", script, "root@engine", "key", *args], env=env, capture_output=True, text=True, timeout=30)
+    return root / "etc" / "vox-agent.env", run
+
+
+def test_an_update_keeps_the_engines_settings_and_changes_only_what_it_is_given(tmp_path):
+    """Audit VOX-B-7: re-running the installer on the live engine must not switch every operation back on (nor move its address or secret)."""
+    envfile, run = _installer(tmp_path)
+    live = "VOX_AGENT_SECRET=" + "k" * 64 + "\nVOX_AGENT_BIND=10.10.0.21:8781\nVOX_AGENT_OPERATIONS=status,cache/delete,check\nVOX_AGENT_DOMAINS=x.test\n"
+    envfile.write_text(live)
+    r = run()
+    assert r.returncode == 0, r.stderr
+    assert envfile.read_text() == live and "is kept" in r.stdout
+    assert not (tmp_path / "home" / ".config").exists()                        # no local secret needed or made for an update
+    r = run("", "status,cache/delete,check,door-calls")
+    assert r.returncode == 0, r.stderr
+    assert envfile.read_text() == live.replace("VOX_AGENT_OPERATIONS=status,cache/delete,check\n", "") + \
+        "VOX_AGENT_OPERATIONS=status,cache/delete,check,door-calls\n"
+    assert run("", "status,reboot").returncode != 0                             # an unknown operation is refused before anything is touched
+    assert "door-calls" in envfile.read_text()
+    envfile.write_text("VOX_AGENT_BIND=1.2.3.4:1\n")
+    assert run().returncode != 0                                                 # a file without a secret is not "repaired"
+
+
+def test_a_first_install_writes_the_secret_bind_and_operations(tmp_path):
+    envfile, run = _installer(tmp_path)
+    r = run("10.10.0.60:8780", "status,check")
+    assert r.returncode == 0, r.stderr
+    lines = envfile.read_text().splitlines()
+    secret = (tmp_path / "home" / ".config" / "photonvox" / "agent-engine.secret").read_text().strip()
+    assert lines == [f"VOX_AGENT_SECRET={secret}", "VOX_AGENT_BIND=10.10.0.60:8780", "VOX_AGENT_OPERATIONS=status,check"]
+    assert (envfile.parent.parent / "opt" / "vox-agent" / "vox_agent.py").exists()

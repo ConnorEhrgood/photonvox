@@ -22,10 +22,15 @@ Every request carries `X-PhotonVox-Signature: t=<unix seconds>,n=<random hex non
 passed to FreeSWITCH or to programs as arguments.
 
 Configuration (environment, from /etc/vox-agent.env): VOX_AGENT_SECRET (required, 32+ characters), VOX_AGENT_BIND (default 127.0.0.1:8780),
-and optionally VOX_AGENT_ESL (host:port), VOX_AGENT_ESL_PASSWORD (default: read from FreeSWITCH's event_socket.conf.xml), VOX_AGENT_CACHE,
-VOX_AGENT_LOG, VOX_AGENT_FUSIONPBX, VOX_AGENT_PHP, and VOX_AGENT_OPERATIONS: the operations this engine allows, comma-separated (default all).
-An engine PhotonVox only adopted (decision 32) allows "status,cache/delete,check": it never seeds a domain, rescans profiles, reloads the ACL or
-takes a greeting; anything else is refused as if it did not exist.
+and optionally VOX_AGENT_ESL (host:port), VOX_AGENT_ESL_PASSWORD (default: read from FreeSWITCH's event_socket.conf.xml; when neither gives
+one, every operation that needs the event socket fails rather than trying FreeSWITCH's well-known default), VOX_AGENT_CACHE, VOX_AGENT_LOG,
+VOX_AGENT_FUSIONPBX, VOX_AGENT_PHP, VOX_AGENT_OPERATIONS: the operations this engine allows, comma-separated (default all), and
+VOX_AGENT_DOMAINS: the domains PhotonVox manages here, comma-separated (default any); `check`, `sound`, `live` and `door-calls` refuse any
+other. An engine PhotonVox only adopted (decision 32) allows "status,cache/delete,check": it never seeds a domain, rescans profiles, reloads
+the ACL or takes a greeting; anything else is refused as if it did not exist.
+
+Whatever the caller asks, a synthetic call is never placed to an emergency or service number (911, 933, 988, N11, with or without a leading
+1 or an outside-line digit): the operator's rule, kept here too so a mistake in the caller cannot place one (audit VOX-B-3).
 """
 from __future__ import annotations
 
@@ -45,7 +50,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 VERSION = "0.1.0"
 SKEW_S = 300
-MAX_BODY = 8 * 1024 * 1024        # a greeting's audio; everything else is a few hundred bytes
+MAX_BODY = 8 * 1024 * 1024        # a greeting's audio (POST /v1/sound only)
+MAX_SMALL = 256 * 1024            # every other operation: a few hundred bytes, a cache delete's 500 keys at most
+MAX_CONNECTIONS = 16              # requests served at once; more are dropped (each may hold a thread and its body)
 MAX_SOUND = 6 * 1024 * 1024
 SAFE = re.compile(r"^[A-Za-z0-9@.+_:-]{1,200}$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -54,6 +61,9 @@ NUMBER = re.compile(r"^\+?[0-9*#]{1,20}$")
 DOMAIN = re.compile(r"^(?=.{1,200}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")   # dotted labels; never ".."
 TOKEN = re.compile(r"^[0-9a-f]{16,64}$")
 SOUND = re.compile(r"^photonvox-[0-9a-f]{32}\.wav$")
+# The digits of a number no synthetic call may go to: 911, 933 (emergency), 988 (crisis line), N11 service codes, each also after a 1 or an
+# outside-line digit (9911, 1911, 8933...). The same list as engine/live/test_calls.sh.
+NEVER_DIALED = re.compile(r"1?[0-9]?(?:911|933|988|[2-8]11)")
 FOUND = re.compile(r"PhotonVox-synthetic token=(\w+) (?:reached=([^\s)]+)|route=([^\s)]+) gateways=([^\s)]+) dial=([^\s)]*))"
                    r"|PhotonVox blocked (\w+) .* token=(\w+)")
 
@@ -80,6 +90,10 @@ class Config:
         self.fusionpbx = e.get("VOX_AGENT_FUSIONPBX", "/var/www/fusionpbx")
         self.php = e.get("VOX_AGENT_PHP", "/usr/bin/php")
         self.recordings = e.get("VOX_AGENT_RECORDINGS", "/var/lib/freeswitch/recordings")
+        self.domains = frozenset(d.strip() for d in e.get("VOX_AGENT_DOMAINS", "").split(",") if d.strip())
+        bad = [d for d in self.domains if not DOMAIN.fullmatch(d)]
+        if bad:
+            raise SystemExit(f"VOX_AGENT_DOMAINS: not a domain name: {', '.join(sorted(bad))}")
         names = {path[len("/v1/"):]: key for key in ROUTES for _m, path in [key]}
         wanted = [w.strip() for w in e.get("VOX_AGENT_OPERATIONS", ",".join(names)).split(",") if w.strip()]
         unknown = [w for w in wanted if w not in names]
@@ -89,19 +103,23 @@ class Config:
 
 
 def esl_password(path: str) -> str:
+    """The event socket's password from FreeSWITCH's configuration, or "" when it cannot be read: then nothing is tried (never the
+    well-known default, audit VOX-B-11) and every operation that needs the event socket fails."""
     try:
         for p in ET.parse(path).getroot().iter("param"):
             if p.get("name") == "password":
                 return p.get("value", "")
     except (OSError, ET.ParseError):
         pass
-    return "ClueCon"
+    return ""
 
 
 # ---- FreeSWITCH's event socket (inbound mode, localhost) ----
 
 def esl_api(cfg: Config, command: str, timeout: float = 30.0) -> str:
     """Run one `api` command and return its body."""
+    if not cfg.esl_password:
+        raise ConnectionError("no event socket password configured")
     with socket.create_connection(cfg.esl, timeout=timeout) as s:
         f = s.makefile("rb")
 
@@ -135,16 +153,24 @@ def esl_api(cfg: Config, command: str, timeout: float = 30.0) -> str:
 
 def _list(body: Dict[str, Any], key: str, pattern: re.Pattern, limit: int = 500) -> List[str]:
     values = body.get(key, [])
-    if not isinstance(values, list) or len(values) > limit or not all(isinstance(v, str) and pattern.match(v) for v in values):
+    if not isinstance(values, list) or len(values) > limit or not all(isinstance(v, str) and pattern.fullmatch(v) for v in values):
         raise Refused(f"{key}: a list of up to {limit} values matching {pattern.pattern}")
     return values
 
 
 def _str(body: Dict[str, Any], key: str, pattern: re.Pattern) -> str:
     v = body.get(key)
-    if not isinstance(v, str) or not pattern.match(v):
+    if not isinstance(v, str) or not pattern.fullmatch(v):      # fullmatch: `$` alone lets a trailing newline through (VOX-B-17)
         raise Refused(f"{key}: must match {pattern.pattern}")
     return v
+
+
+def _domain(cfg: Config, body: Dict[str, Any]) -> str:
+    """The request's domain, which must be one this engine lets PhotonVox manage (VOX_AGENT_DOMAINS; any when that is empty)."""
+    domain = _str(body, "domain_name", DOMAIN)
+    if cfg.domains and domain not in cfg.domains:
+        raise Refused("domain_name: not a domain PhotonVox manages on this engine")
+    return domain
 
 
 def status(cfg: Config, _body: Dict[str, Any]) -> Dict[str, Any]:
@@ -198,7 +224,7 @@ def seed_domain(cfg: Config, _body: Dict[str, Any]) -> Dict[str, Any]:
 
 def sound(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
     """A greeting spoken at publish (PhotonVox's text-to-speech), written whole or not at all into the domain's recordings."""
-    domain, name = _str(body, "domain_name", DOMAIN), _str(body, "name", SOUND)
+    domain, name = _domain(cfg, body), _str(body, "name", SOUND)
     data = body.get("data")
     try:
         audio = base64.b64decode(data, validate=True) if isinstance(data, str) else b""
@@ -233,7 +259,7 @@ def door_calls(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
     """The door station's calls since `since`, from the lines its dial plan logs (FreeSWITCH's log; the newest 32 MB, minutes on a busy
     engine; only NOTICE lines, not FreeSWITCH's echo of the dial plan): when each started, and when it was answered and by whom (the
     extension it was bridged to, or the number sent out). Read only."""
-    domain, ext = _str(body, "domain_name", DOMAIN), _str(body, "extension", EXTENSION)
+    domain, ext = _domain(cfg, body), _str(body, "extension", EXTENSION)
     since = body.get("since")
     if not isinstance(since, int) or isinstance(since, bool) or since < 0:
         raise Refused("since: unix seconds")
@@ -267,7 +293,7 @@ def live(cfg: Config, body: Dict[str, Any]) -> Dict[str, Any]:
     Never its network address. Channels whose call is in the domain (its context, first or now, its account code or its presence): each
     leg's direction, whether it is on a gateway, its numbers, state and start. Every gateway's state, status and call counts since
     FreeSWITCH started (no names, logins or addresses besides the gateway's id)."""
-    domain = _str(body, "domain_name", DOMAIN)
+    domain = _domain(cfg, body)
     profiles = [line.split()[0] for line in esl_api(cfg, "sofia status").splitlines()
                 if len(line.split()) >= 4 and line.split()[1] == "profile" and "RUNNING" in line and PROFILE.match(line.split()[0])]
     registrations = []
@@ -326,7 +352,9 @@ def _tail(path: str, size: int = 512 * 1024) -> str:
 
 def check(cfg: Config, body: Dict[str, Any], wait_s: float = 3.0) -> Dict[str, Any]:
     kind = _str(body, "kind", re.compile(r"^(inbound|route)$"))
-    number, domain = _str(body, "number", NUMBER), _str(body, "domain_name", DOMAIN)
+    number, domain = _str(body, "number", NUMBER), _domain(cfg, body)
+    if NEVER_DIALED.fullmatch(re.sub(r"[^0-9]", "", number)):
+        raise Refused("number: an emergency or service number is never dialed, not even by a synthetic call")
     domain_uuid, token = _str(body, "domain_uuid", UUID), _str(body, "token", TOKEN)
     context = "public" if kind == "inbound" else domain
     synthetic = "inbound" if kind == "inbound" else "route"
@@ -375,15 +403,29 @@ class Replay:
             return True
 
 
-def verify(secret: str, header: str, method: str, path: str, body: bytes, replay: Replay, now: Optional[float] = None) -> bool:
-    now = time.time() if now is None else now
+def _parts(header: str, now: float) -> Optional[Tuple[int, str, str]]:
+    """The signature header's time, nonce and MAC, provided it is well formed and within the window; None otherwise."""
     try:
         parts = dict(p.split("=", 1) for p in header.split(","))
         t, nonce, given = int(parts["t"]), parts["n"], parts["v1"]
     except (ValueError, KeyError):
+        return None
+    if abs(now - t) > SKEW_S or not re.fullmatch(r"[0-9a-f]{16,64}", nonce):
+        return None
+    return t, nonce, given
+
+
+def plausible(header: str, now: Optional[float] = None) -> bool:
+    """Checked before a body is read (VOX-B-11): a request without a well-formed, current signature header is refused unread."""
+    return _parts(header, time.time() if now is None else now) is not None
+
+
+def verify(secret: str, header: str, method: str, path: str, body: bytes, replay: Replay, now: Optional[float] = None) -> bool:
+    now = time.time() if now is None else now
+    found = _parts(header, now)
+    if found is None:
         return False
-    if abs(now - t) > SKEW_S or not re.match(r"^[0-9a-f]{16,64}$", nonce):
-        return False
+    t, nonce, given = found
     want = sign(secret, method, path, body, t, nonce).split("v1=", 1)[1]
     return hmac.compare_digest(want, given) and replay.first(nonce, now)
 
@@ -414,10 +456,13 @@ def make_handler(cfg: Config, replay: Replay):
                 length = -1
             if length < 0:
                 return self._send(400, {"error": "bad length"})
-            if length > MAX_BODY:
+            if length > (MAX_BODY if self.path == "/v1/sound" else MAX_SMALL):
                 return self._send(413, {"error": "too large"})
+            signature = self.headers.get("X-PhotonVox-Signature", "")
+            if not plausible(signature):          # nothing is read for a request that cannot be signed (VOX-B-11)
+                return self._send(401, {"error": "bad signature"})
             body = self.rfile.read(length) if length else b""
-            if not verify(cfg.secret, self.headers.get("X-PhotonVox-Signature", ""), self.command, self.path, body, replay):
+            if not verify(cfg.secret, signature, self.command, self.path, body, replay):
                 return self._send(401, {"error": "bad signature"})
             op = ROUTES.get((self.command, self.path)) if (self.command, self.path) in cfg.operations else None
             if op is None:
@@ -438,8 +483,34 @@ def make_handler(cfg: Config, replay: Replay):
     return Handler
 
 
+class Server(ThreadingHTTPServer):
+    """At most MAX_CONNECTIONS requests at once (VOX-B-11): a connection beyond that is closed unanswered, so nobody can hold every
+    thread and its memory."""
+    daemon_threads = True
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
+
+
 def serve(cfg: Config) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer(cfg.bind, make_handler(cfg, Replay()))
+    return Server(cfg.bind, make_handler(cfg, Replay()))
 
 
 if __name__ == "__main__":  # pragma: no cover
