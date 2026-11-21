@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -18,11 +18,15 @@ router = APIRouter(prefix="/tenants/{tenant_id}")
 
 # What the customer sees in place of a partner's staff member (suite §5: partner access is shown as "Partner support" and is not editable there).
 PARTNER_LABEL = "Partner support"
+MEMBERS = "vox.members.view"
 
 
-def visible_sites(db: Session, ctx: Ctx) -> List[Site]:
+def visible_sites(db: Session, ctx: Ctx, capability: Optional[str] = None) -> List[Site]:
+    """The organization's sites the person reaches; with a capability, only those where they hold it (a site-limited admin who is a
+    whole-organization user sees every site, but views or builds the phone system only at theirs)."""
     rows = db.execute(select(Site).where(Site.tenant_id == ctx.tenant_id, Site.status == "active").order_by(Site.name)).scalars().all()
-    keep = access.visible_site_ids(ctx.grant, {s.id for s in rows})     # row-level security already says the same; this keeps the rule in one place too
+    grant = ctx.reach(capability) if capability else ctx.grant
+    keep = access.visible_site_ids(grant, {s.id for s in rows})     # row-level security already says the same; this keeps the rule in one place too
     return [s for s in rows if s.id in keep]
 
 
@@ -39,13 +43,13 @@ def list_sites(ctx: Ctx = Depends(tenant_ctx), db: Session = Depends(get_db)) ->
 
 
 @router.get("/members")
-def list_members(ctx: Ctx = Depends(require("vox.members.view")), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+def list_members(ctx: Ctx = Depends(require(MEMBERS, sites=True)), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     """PhotonVox's view of the people the directory says have access here. People are added, removed and given roles in the directory ("Manage
     organization"); phone users (people who only have a phone) are PhotonVox's own and arrive with Step 3."""
     rows = db.execute(select(Access, Person).join(Person, Person.id == Access.person_id).where(Access.tenant_id == ctx.tenant_id)).all()
     out = []
     for a, p in rows:
-        if not p.active or not access.sees_member(ctx.grant, Grant.from_row(a)):
+        if not p.active or not access.sees_member(ctx.reach(MEMBERS), Grant.from_row(a)):
             continue
         partner = a.source == "partner"
         out.append({"person_id": str(p.id), "name": PARTNER_LABEL if partner else p.name, "email": "" if partner else p.email, "role": a.role,

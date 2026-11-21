@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
@@ -149,6 +149,14 @@ class Ctx:
     def can(self, capability: str, site_id: Optional[uuid.UUID] = None) -> bool:
         return access.allowed(self.grant, capability, utcnow(), site_id)
 
+    def can_everywhere(self, capability: str) -> bool:
+        """The capability for the whole organization (no site limit on the entry that gives it)."""
+        return access.allowed_everywhere(self.grant, capability, utcnow())
+
+    def reach(self, capability: str) -> Grant:
+        """The grant narrowed to where the capability applies (its `reach_all` and `reach_sites` are that capability's)."""
+        return access.narrowed(self.grant, capability)
+
     @property
     def capabilities(self) -> FrozenSet[str]:
         return access.capabilities(self.grant, utcnow())
@@ -170,10 +178,20 @@ def tenant_ctx(tenant_id: uuid.UUID, who: Who = Depends(current_person), db: Ses
     return ctx
 
 
-def require(capability: str):
-    """A dependency: the tenant context, provided the person's role has `capability` (403 otherwise). Site checks happen where a site is named."""
+# Every `require` dependency made, with what it asks: tests walk every route through this (audit 2026-11-17 §3.1).
+REQUIRED: Dict[Any, Tuple[str, bool]] = {}
+
+
+def require(capability: str, sites: bool = False):
+    """A dependency: the tenant context, provided the person has `capability` (403 otherwise).
+
+    By default the route acts on the whole organization, so the capability must come from an entry covering the whole organization: a person
+    limited to some sites is refused, whatever their role there (audit 2026-11-17 §3.1). `sites=True` marks a route that looks after sites
+    itself (it lists only `visible_site_ids`, checks the site it acts on, or runs the site policy of app/document/policy.py): there the
+    person's strongest role decides, and the route narrows."""
     def dep(ctx: Ctx = Depends(tenant_ctx)) -> Ctx:
-        if not ctx.can(capability):
+        if not (ctx.can(capability) if sites else ctx.can_everywhere(capability)):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed")
         return ctx
+    REQUIRED[dep] = (capability, sites)
     return dep

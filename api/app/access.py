@@ -6,7 +6,8 @@ limits (which extension is yours, which inboxes you see) arrive with the feature
 
 Site scope: a capability asked about a particular site is refused outside the grant's sites. A capability asked with no site is a role question
 only; the caller then lists data through `visible_site_ids`, so a site-limited person never sees another site's rows (row-level security enforces
-the same for sites).
+the same for sites). A route that acts on the whole organization asks `allowed_everywhere` instead: an entry covering the whole organization must
+hold the capability, so a person limited to some sites is refused (audit 2026-11-17 §3.1; app/deps.py `require`).
 """
 from __future__ import annotations
 
@@ -83,11 +84,32 @@ def allowed(grant: Grant, capability: str, now: datetime, site_id: Optional[uuid
     return role is not None and capability in ROLES[role].capabilities
 
 
+def narrowed(grant: Grant, capability: str) -> Grant:
+    """The grant cut down to the entries whose role holds `capability`: its reach is where the person may use it. A site-limited admin who is
+    also a whole-organization user reaches every site, but builds only at theirs (audit 2026-11-17 §3.1)."""
+    keep = [e for e in grant.entries if e.role in ROLES and capability in ROLES[e.role].capabilities]
+    if not keep:
+        return Grant(grant.role, False, frozenset(), grant.source, grant.expires_at)      # reaches no site
+    first, *rest = keep
+    return Grant(first.role, first.scope_all, first.site_ids, grant.source, grant.expires_at, tuple(rest))
+
+
+def allowed_everywhere(grant: Grant, capability: str, now: datetime) -> bool:
+    """The capability for the whole organization: an entry that covers every site holds it."""
+    return is_active(grant, now) and narrowed(grant, capability).reach_all
+
+
+# Capabilities used only on organization-wide routes (app/deps.py `require` without `sites`): held through a site-limited entry they allow
+# nothing, so `capabilities` does not offer them there (the web app would show a page the API refuses).
+ORG_ONLY = frozenset({"vox.entry.manage"})
+
+
 def capabilities(grant: Grant, now: datetime) -> FrozenSet[str]:
     """Everything the grant allows somewhere (the web app gates its buttons on this; the API checks again per request and per site)."""
     if not is_active(grant, now):
         return frozenset()
-    return frozenset().union(*(ROLES[e.role].capabilities for e in grant.entries if e.role in ROLES))
+    found = frozenset().union(*(ROLES[e.role].capabilities for e in grant.entries if e.role in ROLES))
+    return frozenset(c for c in found if c not in ORG_ONLY or narrowed(grant, c).reach_all)
 
 
 def visible_site_ids(grant: Grant, all_site_ids: AbstractSet[uuid.UUID]) -> FrozenSet[uuid.UUID]:

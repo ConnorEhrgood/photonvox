@@ -44,6 +44,8 @@ def _hash(token: str) -> str:
 
 
 # ---- the organization's admins: make, list and revoke tokens ----
+# Organization-wide routes (`require` without sites): a token reads every site's door stations, so a person limited to some sites may not make,
+# list or revoke one (audit VOX-A-5).
 
 class NewToken(BaseModel):
     label: str = Field("PhotonEntry", min_length=1, max_length=100, pattern=r"^[^<>%\x00-\x1f\x7f]+$")

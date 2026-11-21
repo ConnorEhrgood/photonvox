@@ -82,7 +82,7 @@ def _summary(db: Session, ps: PhoneSystem) -> Dict[str, Any]:
 
 
 @router.get("/phone-system")
-def get_phone_system(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_phone_system(ctx: Ctx = Depends(require(VIEW, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     return _summary(db, _ps(db, ctx))
 
 
@@ -113,9 +113,10 @@ class DraftIn(BaseModel):
 
 
 def _allowed(ctx: Ctx, old_raw: Dict[str, Any], new: Document) -> None:
-    """Refuse a change this person may not make (app/document/policy.py: owners open up calling; site-limited people stay in their sites)."""
-    reason = policy.refusal(Document.model_validate(old_raw or {"version": 1}), new, ctx.can, ctx.grant.reach_all,
-                            {str(s) for s in ctx.grant.reach_sites})
+    """Refuse a change this person may not make (app/document/policy.py: owners open up calling; site-limited people stay in their sites).
+    The sites are those where the person may build: a site-limited admin who is a whole-organization user builds only at their sites."""
+    reach = ctx.reach(BUILD)
+    reason = policy.refusal(Document.model_validate(old_raw or {"version": 1}), new, ctx.can, reach.reach_all, {str(s) for s in reach.reach_sites})
     if reason:
         raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "not_allowed_change", "detail": reason})
 
@@ -139,7 +140,7 @@ def _document(raw: Dict[str, Any]) -> Document:
 
 
 @router.put("/phone-system/draft")
-def save_draft(body: DraftIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def save_draft(body: DraftIn, ctx: Ctx = Depends(require(BUILD, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Save the draft. Problems (an unvalidated address, a dangling reference) do not stop saving; they stop publishing."""
     ps = _ps(db, ctx)
     doc = _kept(_document(body.document), _stored(ps.draft))
@@ -151,7 +152,7 @@ def save_draft(body: DraftIn, ctx: Ctx = Depends(require(BUILD)), db: Session = 
 
 
 @router.post("/phone-system/publish", status_code=202)
-def publish_draft(ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def publish_draft(ctx: Ctx = Depends(require(BUILD, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Queue the draft for publishing. Refused while it has problems or another version is still being published."""
     ps = _ps(db, ctx)
     return _queue(db, ctx, ps, ps.draft, "")
@@ -163,6 +164,7 @@ def _queue(db: Session, ctx: Ctx, ps: PhoneSystem, document: Dict[str, Any], not
     if busy:
         raise HTTPException(status.HTTP_409_CONFLICT, {"code": "busy", "detail": f"Version {busy.number} is still being published."})
     doc = _document(document)
+    _within_sites(db, ctx, ps, doc)
     try:
         compile_plan(doc, service.context(db, ps, _instance(ps)))
     except CompileError as e:
@@ -175,23 +177,43 @@ def _queue(db: Session, ctx: Ctx, ps: PhoneSystem, document: Dict[str, Any], not
     return _version(v)
 
 
+def _live(db: Session, ps: PhoneSystem) -> Optional[PhoneSystemVersion]:
+    if ps.published_version is None:
+        return None
+    return db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id,
+                                                       PhoneSystemVersion.number == ps.published_version)).scalar_one_or_none()
+
+
+def _within_sites(db: Session, ctx: Ctx, ps: PhoneSystem, doc: Document) -> None:
+    """A person who may build only at some sites publishes only changes to those sites (audit VOX-A-5): what the version would change against
+    the live one, by the same test as a draft save (a draft may hold another admin's saved changes to other sites, or organization-wide ones)."""
+    reach = ctx.reach(BUILD)
+    if reach.reach_all:
+        return
+    live = _live(db, ps)
+    touched = policy.touched_sites(Document.model_validate(live.document if live else {"version": 1}), doc)
+    if "*" in touched or not touched <= {str(s) for s in reach.reach_sites}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "not_allowed_change", "detail":
+                            "Your access is limited to some sites: this would publish changes to other sites or to the whole organization. "
+                            "Ask an admin of the whole organization to publish it."})
+
+
 @router.get("/phone-system/versions")
-def versions(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+def versions(ctx: Ctx = Depends(require(VIEW, sites=True)), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     ps = _ps(db, ctx)
     rows = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id).order_by(PhoneSystemVersion.number.desc())).scalars()
     return [_version(v) for v in rows]
 
 
 @router.post("/phone-system/versions/{number}/restore", status_code=202)
-def restore(number: int, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def restore(number: int, ctx: Ctx = Depends(require(BUILD, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Undo: publish an earlier version's document again, as a new version. The draft becomes that document too, so the builder shows it."""
     ps = _ps(db, ctx)
     old = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id, PhoneSystemVersion.number == number)).scalar_one_or_none()
     if old is None or old.state not in ("ready", "superseded"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_version", "detail": f"There is no published version {number}."})
     # The undo brings back the earlier version's phone system, never its protections: those stay as the live version has them (VOX-A-1).
-    live = db.execute(select(PhoneSystemVersion).where(PhoneSystemVersion.phone_system_id == ps.id,
-                                                       PhoneSystemVersion.number == ps.published_version)).scalar_one_or_none()
+    live = _live(db, ps)
     document = {**old.document, "protections": _stored(live.document if live else ps.draft)}
     _allowed(ctx, {**(ps.draft or {"version": 1}), "protections": document["protections"]}, _document(document))
     out = _queue(db, ctx, ps, document, f"restored from version {number}")
@@ -203,7 +225,7 @@ def restore(number: int, ctx: Ctx = Depends(require(BUILD)), db: Session = Depen
 # ---- templates and bulk import ----
 
 @router.get("/phone-system/templates")
-def list_templates(ctx: Ctx = Depends(require(VIEW))) -> List[Dict[str, str]]:
+def list_templates(ctx: Ctx = Depends(require(VIEW, sites=True))) -> List[Dict[str, str]]:
     return templates.catalog()
 
 
@@ -216,12 +238,12 @@ class TemplateIn(BaseModel):
 
 
 @router.post("/phone-system/draft/template")
-def apply_template(body: TemplateIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def apply_template(body: TemplateIn, ctx: Ctx = Depends(require(BUILD, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Replace the draft with a template built from the answers (and the pasted users). Only rows without problems are taken; the rest come back."""
     ps = _ps(db, ctx)
     if body.template not in templates.TEMPLATES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_template", "detail": "There is no such template."})
-    sites = {str(s.id): s.name for s in visible_sites(db, ctx)}
+    sites = {str(s.id): s.name for s in visible_sites(db, ctx, BUILD)}
     if body.site_id not in sites:
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_site", "detail": "There is no such site."})
     number = importer._number(body.main_number)
@@ -243,7 +265,7 @@ class CloneIn(BaseModel):
 
 
 @router.post("/phone-system/draft/clone")
-def clone_draft(body: CloneIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def clone_draft(body: CloneIn, ctx: Ctx = Depends(require(BUILD, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Copy another customer's call flows, hours, calling policy and features into this draft (the integrator must see both)."""
     ps = _ps(db, ctx)
     other = load_ctx(db, ctx.who, body.from_tenant_id)
@@ -266,11 +288,11 @@ class ImportIn(BaseModel):
 
 
 @router.post("/phone-system/import")
-def import_users(body: ImportIn, ctx: Ctx = Depends(require(BUILD)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def import_users(body: ImportIn, ctx: Ctx = Depends(require(BUILD, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Bulk import into the draft: with `apply` false, the review (each row with its problems); with `apply` true, the rows without problems
     are added (and to `group`, if named)."""
     ps = _ps(db, ctx)
-    sites = {str(s.id): s.name for s in visible_sites(db, ctx)}
+    sites = {str(s.id): s.name for s in visible_sites(db, ctx, BUILD)}
     if body.site_id not in sites:
         raise HTTPException(status.HTTP_404_NOT_FOUND, {"code": "no_site", "detail": "There is no such site."})
     rows = importer.preview(body.text, ps.draft, body.site_id, sites)
@@ -300,7 +322,7 @@ class LocationIn(BaseModel):
 
 
 @router.post("/sites/{site_id}/emergency-locations", status_code=201)
-def add_location(site_id: uuid.UUID, body: LocationIn, ctx: Ctx = Depends(require(EMERGENCY)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+def add_location(site_id: uuid.UUID, body: LocationIn, ctx: Ctx = Depends(require(EMERGENCY, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """An emergency address for a site, pending until Photon staff validate it (the R1 staff queue, ARCHITECTURE §11)."""
     if not ctx.can(EMERGENCY, site_id) or str(site_id) not in {str(s.id) for s in visible_sites(db, ctx)}:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
@@ -318,20 +340,33 @@ def _location(loc: EmergencyLocation) -> Dict[str, Any]:
 
 
 @router.get("/emergency")
-def emergency(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Sites' emergency addresses, each number's 911 registration with the carrier, and the requests in flight (decision 31)."""
-    locs = db.execute(select(EmergencyLocation).where(EmergencyLocation.tenant_id == ctx.tenant_id).order_by(EmergencyLocation.created_at)).scalars()
-    nums = db.execute(select(EmergencyNumber).where(EmergencyNumber.tenant_id == ctx.tenant_id).order_by(EmergencyNumber.number)).scalars()
-    reqs = db.execute(select(CarrierRequest).where(CarrierRequest.tenant_id == ctx.tenant_id).order_by(CarrierRequest.created_at.desc()).limit(20)).scalars()
+def emergency(ctx: Ctx = Depends(require(VIEW, sites=True)), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Sites' emergency addresses, each number's 911 registration with the carrier, and the requests in flight (decision 31). A person who
+    views only some sites sees those sites' addresses, numbers and request lines (audit VOX-A-5)."""
+    locs = db.execute(select(EmergencyLocation).where(EmergencyLocation.tenant_id == ctx.tenant_id).order_by(EmergencyLocation.created_at)).scalars().all()
+    nums = db.execute(select(EmergencyNumber).where(EmergencyNumber.tenant_id == ctx.tenant_id).order_by(EmergencyNumber.number)).scalars().all()
+    reqs = db.execute(select(CarrierRequest).where(CarrierRequest.tenant_id == ctx.tenant_id).order_by(CarrierRequest.created_at.desc()).limit(20)).scalars().all()
+    if not ctx.reach(VIEW).reach_all:
+        sites = {s.id for s in visible_sites(db, ctx, VIEW)}
+        locs = [x for x in locs if x.site_id in sites]
+        mine = {x.id for x in locs}
+        nums = [n for n in nums if (n.location_id or n.confirmed_location_id) in mine]
+        numbers = {n.number for n in nums}
+        reqs = [r for r in ({**_request(r), "items": [i for i in r.items if i["number"] in numbers]} for r in reqs) if r["items"]]
+    else:
+        reqs = [_request(r) for r in reqs]
     return {"locations": [_location(x) for x in locs],
             "numbers": [{"number": n.number, "status": n.status, "location_id": str(n.location_id) if n.location_id else None,
                          "confirmed_at": n.confirmed_at.isoformat() if n.confirmed_at else None} for n in nums],
-            "requests": [{"id": str(r.id), "status": r.status, "items": r.items, "reference": r.reference, "sent_at": r.sent_at.isoformat() if r.sent_at else None}
-                         for r in reqs]}
+            "requests": reqs}
+
+
+def _request(r: CarrierRequest) -> Dict[str, Any]:
+    return {"id": str(r.id), "status": r.status, "items": r.items, "reference": r.reference, "sent_at": r.sent_at.isoformat() if r.sent_at else None}
 
 
 @router.get("/numbers")
-def assigned_numbers(ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db)) -> List[Dict[str, str]]:
+def assigned_numbers(ctx: Ctx = Depends(require(VIEW, sites=True)), db: Session = Depends(get_db)) -> List[Dict[str, str]]:
     """The numbers Photon has assigned to this organization: the only ones its phone system may use (review C2)."""
     return [{"number": n.number, "carrier": n.carrier} for n in
             db.execute(select(HeldNumber).where(HeldNumber.tenant_id == ctx.tenant_id).order_by(HeldNumber.number)).scalars()]

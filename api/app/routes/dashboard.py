@@ -36,9 +36,9 @@ def _address(a: Dict[str, Any]) -> str:
 
 
 @router.get("/dashboard")
-def get_dashboard(site: Optional[str] = Query(None, max_length=80), ctx: Ctx = Depends(require(VIEW)), db: Session = Depends(get_db),
+def get_dashboard(site: Optional[str] = Query(None, max_length=80), ctx: Ctx = Depends(require(VIEW, sites=True)), db: Session = Depends(get_db),
                   connect: service.Connect = Depends(get_connect)) -> Dict[str, Any]:
-    sites = [{"id": str(s.id), "slug": s.slug, "name": s.name, "timezone": s.timezone or "America/New_York"} for s in visible_sites(db, ctx)]
+    sites = [{"id": str(s.id), "slug": s.slug, "name": s.name, "timezone": s.timezone or "America/New_York"} for s in visible_sites(db, ctx, VIEW)]
     chosen: Optional[str] = None
     if site:
         chosen = next((s["id"] for s in sites if site in (s["slug"], s["id"])), None)

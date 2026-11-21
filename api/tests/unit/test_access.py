@@ -93,7 +93,7 @@ def test_a_weaker_entry_never_lowers_a_stronger_one():
 
 def test_capabilities_are_everything_allowed_somewhere():
     grant = Grant("user", scope_all=False, site_ids=frozenset({S1}), others=(Entry("admin", False, frozenset({S2})), Entry("operator")))
-    assert access.capabilities(grant, NOW) == EXPECTED["admin"]
+    assert access.capabilities(grant, NOW) == EXPECTED["admin"] - access.ORG_ONLY      # site-limited: nothing organization-wide only
 
 
 def test_visible_sites_and_reach():
@@ -119,3 +119,26 @@ def test_a_grant_is_read_from_its_row_with_its_others():
     assert grant.others == (Entry("user"), Entry("user", False, frozenset({S2})))
     empty = Grant.from_row(SimpleNamespace(role="user", scope_all=True, site_ids=None, source="direct", expires_at=None, others=None))
     assert empty.others == () and empty.site_ids == frozenset()
+
+
+def test_a_capability_for_the_whole_organization_needs_an_entry_that_covers_it():
+    """Audit 2026-11-17 §3.1: a site-limited admin who is a whole-organization user builds only at their site; the whole-organization check
+    (routes that act on everything) refuses them, and their reach for building is their site."""
+    mixed = g("admin", [S1], others=(Entry("user"),))
+    assert access.allowed(mixed, "vox.phone_system.build", NOW)                     # the role question alone says yes
+    assert not access.allowed_everywhere(mixed, "vox.phone_system.build", NOW)
+    assert access.allowed_everywhere(mixed, "vox.self.manage", NOW)
+    assert access.allowed_everywhere(g("admin"), "vox.phone_system.build", NOW)
+    assert not access.allowed_everywhere(g("admin", expires_at=NOW - timedelta(seconds=1)), "vox.phone_system.build", NOW)
+    build = access.narrowed(mixed, "vox.phone_system.build")
+    assert not build.reach_all and build.reach_sites == {S1} and mixed.reach_all
+    two = access.narrowed(g("admin", [S1], others=(Entry("admin", False, frozenset({S2})), Entry("user"))), "vox.phone_system.build")
+    assert two.reach_sites == {S1, S2} and not two.reach_all
+    none = access.narrowed(g("user"), "vox.phone_system.build")
+    assert not none.reach_all and none.reach_sites == frozenset()
+
+
+def test_an_organization_wide_capability_is_not_offered_through_a_site_limited_entry():
+    assert "vox.entry.manage" not in access.capabilities(g("admin", [S1], others=(Entry("user"),)), NOW)
+    assert "vox.phone_system.build" in access.capabilities(g("admin", [S1]), NOW)
+    assert "vox.entry.manage" in access.capabilities(g("admin"), NOW)

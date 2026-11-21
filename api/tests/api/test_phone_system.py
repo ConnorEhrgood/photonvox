@@ -737,3 +737,69 @@ def test_a_demo_publish_registers_no_911_numbers_and_asks_no_carrier(client, wor
     with SystemSession() as s:
         assert s.execute(select(CarrierRequest)).scalars().all() == [] and s.execute(select(EmergencyNumber)).scalars().all() == []
         assert emergency.send_open(s, lambda *a: (_ for _ in ()).throw(AssertionError("mailed the carrier"))) == 0
+
+
+def test_a_site_limited_admin_publishes_only_changes_to_their_sites(client, world, built, connect):
+    """Audit VOX-A-5 (c): publishing compares the version with the live one, so a site-limited admin cannot publish another admin's saved
+    changes to other sites or to the whole organization."""
+    assert client.post(f"{built}/phone-system/publish", headers=auth("a-admin-s1")).status_code == 403     # the first publish is everything
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    mine = {**d, "users": {**d["users"], "u-ada-front": {**d["users"]["u-ada-front"], "name": "Ada F"}}}
+    assert client.put(f"{built}/phone-system/draft", headers=auth("a-admin-s1"), json={"document": mine}).status_code == 200
+    assert client.post(f"{built}/phone-system/publish", headers=auth("a-admin-s1")).status_code == 202    # only their site changed
+    run(connect)
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    hours = {**d, "hours": {"office": {"week": {"mon": ["09:00-17:00"]}, "holidays": "none"}}}
+    assert client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": hours}).status_code == 200
+    r = client.post(f"{built}/phone-system/publish", headers=auth("a-admin-s1"))
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "not_allowed_change"
+    assert client.post(f"{built}/phone-system/versions/1/restore", headers=auth("a-admin-s1")).status_code == 403
+    assert client.post(f"{built}/phone-system/publish", headers=auth("tech")).status_code == 202
+
+
+def test_a_mixed_grant_builds_only_at_its_admin_site(client, fake, world, built):
+    """Audit 2026-11-17 §3.1: admin of a1 and user of the whole organization. Before, the user entry's reach let the draft policy treat them
+    as an admin of every site."""
+    pid = fake.add_person("a-mixed", name="Mixed")
+    fake.grant(pid, world.a, "admin", [world.a1], others=[{"role": "user", "scope": {"type": "all"}, "source": "direct"}])
+    from tests.api.conftest import pull
+    assert pull(fake).ok
+    d = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    other = {**d, "users": {**d["users"], "u-cy": {"name": "Cy", "extension": "130", "site": world.a2}}}
+    r = client.put(f"{built}/phone-system/draft", headers=auth("a-mixed"), json={"document": other})
+    assert r.status_code == 403 and "another site" in r.json()["detail"]["detail"]
+    hours = {**d, "hours": {"office": {"week": {"mon": ["09:00-17:00"]}, "holidays": "none"}}}
+    assert client.put(f"{built}/phone-system/draft", headers=auth("a-mixed"), json={"document": hours}).status_code == 403
+    mine = {**d, "users": {**d["users"], "u-ada-front": {**d["users"]["u-ada-front"], "name": "Ada F"}}}
+    assert client.put(f"{built}/phone-system/draft", headers=auth("a-mixed"), json={"document": mine}).status_code == 200
+    r = client.post(f"{built}/phone-system/import", headers=auth("a-mixed"), json={"text": "Name,Ext\nCy New,131\n", "site_id": world.a2})
+    assert r.status_code == 404                                   # a site where they may not build is not offered
+
+
+def test_a_site_limited_person_sees_only_their_sites_911_addresses_and_makes_no_entry_token(client, world, built):
+    """Audit VOX-A-5 (a), (b)."""
+    other = client.post(f"/tenants/{world.a}/sites/{world.a2}/emergency-locations", headers=auth("tech"),
+                        json={"key": "annex", "street": "2 Annex Rd", "city": "Pittsburgh", "state": "PA", "zip": "15222"})
+    assert other.status_code == 201
+    everyone = client.get(f"/tenants/{world.a}/emergency", headers=auth("tech")).json()
+    assert {x["key"] for x in everyone["locations"]} == {"main", "annex"}
+    mine = client.get(f"/tenants/{world.a}/emergency", headers=auth("a-admin-s1")).json()
+    assert {x["key"] for x in mine["locations"]} == {"main"}
+    assert client.post(f"/tenants/{world.a}/integrations/entry-tokens", headers=auth("a-admin-s1"), json={}).status_code == 403
+    assert client.get(f"/tenants/{world.a}/integrations/entry-tokens", headers=auth("a-admin-s1")).status_code == 403
+    assert client.post(f"/tenants/{world.a}/integrations/entry-tokens", headers=auth("a-admin"), json={}).status_code == 201
+
+
+def test_numbers_and_carrier_requests_are_shown_only_for_the_sites_a_person_views(client, fake, world, built, connect):
+    pid = fake.add_person("a-admin-s2", name="Annex Admin")
+    fake.grant(pid, world.a, "admin", [world.a2])
+    from tests.api.conftest import pull
+    assert pull(fake).ok
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    main = client.get(f"/tenants/{world.a}/emergency", headers=auth("a-admin-s1")).json()
+    assert [n["number"] for n in main["numbers"]] == [MAIN] and [i["number"] for i in main["requests"][0]["items"]] == [MAIN]
+    annex = client.get(f"/tenants/{world.a}/emergency", headers=auth("a-admin-s2")).json()
+    assert annex == {"locations": [], "numbers": [], "requests": []}
