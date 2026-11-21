@@ -215,6 +215,32 @@ def test_a_put_back_with_an_agent_rewrites_the_row_and_clears_its_cache(client, 
     assert row.effective_caller_id_name == "Pastor" and row.password == "sip-secret-101"          # the live value back, the secret untouched
 
 
+def test_what_phone_users_set_survives_a_republish_of_an_adopted_domain(client, world, instance, eng):
+    """Audit VOX-B-4: forwarding and do-not-disturb set with feature codes after the takeover were put back to the adoption day's values by
+    the next publish of anything. They are not PhotonVox's: neither written nor compared."""
+    cleared = []
+
+    class Agent:
+        def clear_cache(self, entries):
+            cleared.extend(entries)
+
+    with_agent = lambda i: (eng, Agent())     # noqa: E731
+    adopt(client, world, instance)
+    client.post(f"/tenants/{world.a}/phone-system/publish", headers=auth("a-owner"))
+    run(with_agent)
+    with eng.begin() as c:                    # *72 and *78 on extension 101; a hand edit of a column PhotonVox does own on the same row
+        c.execute(text("update v_extensions set forward_all_enabled = 'true', do_not_disturb = 'true', effective_caller_id_name = 'Hand Edit' "
+                       "where extension = '101'"))
+    with SystemSession() as s:
+        found = service.check_drift(s, s.execute(select(PhoneSystem)).scalar_one(), with_agent)
+    assert [(x["table"], x["columns"]) for x in found["changed"]] == [("v_extensions", ["effective_caller_id_name"])]     # not the user's
+    client.post(f"/tenants/{world.a}/phone-system/publish", headers=auth("a-owner"))
+    run(with_agent)
+    with eng.connect() as c:
+        row = c.execute(text("select forward_all_enabled, do_not_disturb, effective_caller_id_name from v_extensions where extension = '101'")).first()
+    assert row.forward_all_enabled == "true" and row.do_not_disturb == "true" and row.effective_caller_id_name == "Pastor"
+
+
 def test_the_operator_commands_do_the_takeover_without_a_browser(client, world, eng):
     import io
     from app import manage

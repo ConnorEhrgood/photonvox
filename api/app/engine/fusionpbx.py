@@ -57,6 +57,13 @@ def norm(v: Any) -> Any:
 
 # What the protections version writes on every adopted extension, whatever else stays as it was: its call classes, and what its 911 calls show.
 PROTECTED = {"v_extensions": ("toll_allow", "emergency_caller_id_number")}
+# What phone users and FusionPBX change on an adopted row after the takeover (feature codes *72/*73, *78/*79, follow-me, a chosen greeting), and
+# that PhotonVox never generates: left out of what is written and compared for adopted rows, so a publish of anything else never puts back the
+# adoption day's value (audit VOX-B-4). A row PhotonVox builds itself never names these columns at all.
+USER_STATE = {"v_extensions": frozenset({"forward_all_enabled", "forward_all_destination", "forward_busy_enabled", "forward_busy_destination",
+                                         "forward_no_answer_enabled", "forward_no_answer_destination", "follow_me_enabled", "follow_me_uuid",
+                                         "follow_me_destinations", "do_not_disturb"}),
+              "v_voicemails": frozenset({"greeting_id"})}
 TABLES = ("v_extensions", "v_voicemails", "v_ring_groups", "v_ring_group_destinations", "v_ivr_menus", "v_ivr_menu_options", "v_dialplans",
           "v_dialplan_details", "v_destinations")
 KEYS = {"v_extensions": "extension_uuid", "v_voicemails": "voicemail_uuid", "v_ring_groups": "ring_group_uuid",
@@ -311,7 +318,7 @@ class _Builder:
                 for table, cols in built:
                     self.b.rows[table].remove(cols)
                 for table, uid in live:
-                    row = {**self.a.rows[f"{table}:{uid}"]}
+                    row = {c: v for c, v in self.a.rows[f"{table}:{uid}"].items() if c not in USER_STATE.get(table, ())}
                     for c in prot.get(table, ()):
                         if (table, uid) in by_id and norm(row.get(c)) != norm(by_id[(table, uid)].get(c)):
                             row[c] = by_id[(table, uid)][c]
@@ -323,7 +330,7 @@ class _Builder:
                 base = self.a.rows.get(f"{table}:{cols[KEYS[table]]}")
                 if base:
                     fresh = self.a.fresh.get(f"{table}:{cols[KEYS[table]]}")
-                    merged = {k: v for k, v in base.items() if k not in AUDIT}
+                    merged = {k: v for k, v in base.items() if k not in AUDIT and k not in USER_STATE.get(table, ())}
                     for c, v in cols.items():
                         if fresh is None or c not in fresh or c in prot.get(table, ()) or norm(fresh[c]) != norm(v) or isinstance(v, Secret):
                             merged[c] = v
