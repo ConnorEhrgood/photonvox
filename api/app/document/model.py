@@ -169,6 +169,7 @@ class Calling(Strict):
     national: bool = True
     toll_free: bool = True
     international: List[str] = Field(default_factory=list)       # country calling codes switched on by an owner ("44", "52"); empty = none
+    # Stored and guarded by policy (raising it is an owner's), but NOT enforced yet: no spend breaker exists (audit VOX-B-8, ARCHITECTURE §15).
     spend_limit_usd: int = Field(50, ge=0, le=100_000)
     blocking: Blocking = Field(default_factory=Blocking)
 
