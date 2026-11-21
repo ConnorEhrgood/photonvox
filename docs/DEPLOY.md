@@ -13,7 +13,7 @@ version live (BUILD-LOG 2026-11-14). What it can do there, and how to take it aw
 | What | Where | Can |
 |---|---|---|
 | `photonvox_ro` (GATE 1c, `engine/live/gate-1c.sql`) | Postgres on CT 600, `pg_hba` from 10.2.1.5 only | read 15 tables, column by column, every domain (no SIP passwords, PINs or gateway logins) |
-| `photonvox_rw` (`engine/live/gate-rw.sql`) | the same, from 10.2.1.5 only; the instance `live-a` logs in with it | insert, update and delete on nine tables, **every domain**: PhotonVox scopes each statement to its domain, the role does not (audit VOX-B-1) |
+| `photonvox_rw` (`engine/live/gate-rw.sql`) | the same, from 10.2.1.5 only; the instance `live-a` logs in with it | insert, update and delete on nine tables, **every domain**: PhotonVox scopes each statement to its domain, the role does not (audit VOX-B-1; `engine/live/gate-rw-scope.sql` is the proposed fix, not applied) |
 | vox-agent 0.1.0 | CT 600, 10.10.0.21:8781 (iptables: from 10.2.1.5 on wg-mgmt only), as www-data, writing only FusionPBX's cache (`engine/live/vox-agent-live.conf`) | `status`, `cache/delete`, `check` only (`engine/live/vox-agent-live.env`) |
 
 - **Credentials:** sealed in PhotonVox's database (`SECRETS_KEY`). Copies of record with Connor. The runner still had plaintext copies in
