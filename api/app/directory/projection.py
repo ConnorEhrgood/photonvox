@@ -2,8 +2,10 @@
 
 Only the system role writes these tables. The copy is eventually consistent and order-tolerant: the four kinds arrive in the order the directory
 changed them, page by page, so no foreign keys tie them together (migration 0002 drops them). Every method is idempotent. Nothing is hard-deleted that
-PhotonVox's own data will point at: an organization that is no longer entitled is marked `removed` (its access ends, its history stays), as are
-sites; a person who is removed is deactivated and loses all access.
+PhotonVox's own data will point at: an organization that is no longer entitled is marked `removed` (its access rows and integration tokens end,
+its history stays), as are sites; a person who is removed is deactivated and loses all access. An archived organization is also `removed`, with
+its access rows kept for when it comes back; app/deps.py serves a `removed` organization to nobody but Photon staff, and a `suspended` one read
+only.
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.models import Access, Person, Site, SyncState, Tenant
+from app.models import Access, IntegrationToken, Person, Site, SyncState, Tenant, utcnow
 from app.roles import ROLES
 from photonid_directory_client.projection import Doc, Projection
 
@@ -102,7 +104,8 @@ class DbProjection(Projection):
         row.partner_id = _uuid(doc["partner_id"]) if doc.get("partner_id") else None
         row.products = sorted(doc.get("products") or [])
         row.demo = doc.get("demo") is True            # documents from before the directory sent it are not demos
-        # An archived organization is not ours to serve: its access is kept but the tenant is "removed" like one that lost its entitlement.
+        # An archived organization is not ours to serve: its access rows are kept (for when it comes back), but the tenant is "removed" like one
+        # that lost its entitlement, and app/deps.py serves it to nobody but Photon staff.
         row.status = {"active": "active", "suspended": "suspended"}.get(doc["status"], "removed")
         self.db.flush()
 
@@ -164,6 +167,9 @@ class DbProjection(Projection):
             self.db.execute(update(Tenant).where(Tenant.id == tid).values(status="removed"))
             self.db.execute(delete(Access).where(Access.tenant_id == tid))
             self.db.execute(update(Site).where(Site.tenant_id == tid).values(status="removed"))
+            # Its integration tokens end with it (audit XP-1): a token kept by a former admin no longer reads its door stations.
+            self.db.execute(update(IntegrationToken).where(IntegrationToken.tenant_id == tid, IntegrationToken.revoked_at.is_(None))
+                            .values(revoked_at=utcnow()))
         elif kind == "site":
             self.db.execute(update(Site).where(Site.id == _uuid(key)).values(status="removed"))
         elif kind == "person":

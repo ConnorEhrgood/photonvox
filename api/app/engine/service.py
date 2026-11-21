@@ -276,7 +276,13 @@ def publish_queued(db: Session, connect: Connect = connect) -> int:
     """The worker's job: publish queued versions, oldest first (a phone system's versions in order)."""
     done = 0
     for vid in db.execute(select(PhoneSystemVersion.id).where(PhoneSystemVersion.state == "queued").order_by(PhoneSystemVersion.created_at)).scalars().all():
-        publish_version(db, vid, connect)
+        v = db.get(PhoneSystemVersion, vid)
+        tenant = db.get(Tenant, v.tenant_id)
+        if tenant is None or tenant.status != "active":
+            # Queued before the directory suspended or removed the organization (audit VOX-A-2): not published, nothing on the engine touched.
+            _fail(db, db.get(PhoneSystem, v.phone_system_id), v, "not published: the organization is suspended or no longer served", None)
+        else:
+            publish_version(db, vid, connect)
         done += 1
     return done
 

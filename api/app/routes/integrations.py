@@ -29,7 +29,7 @@ from app.db import SystemSession, get_db
 from app.deps import Ctx, require
 from app.document.model import PhoneSystem as Document
 from app.engine import service
-from app.models import Access, EngineSecret, IntegrationToken, PbxInstance, Person, PhoneSystem, PhoneSystemVersion, utcnow
+from app.models import Access, EngineSecret, IntegrationToken, PbxInstance, Person, PhoneSystem, PhoneSystemVersion, Tenant, utcnow
 from app.routes.phone_system import _who
 from app.routes.platform import get_connect
 
@@ -90,7 +90,8 @@ def revoke_token(token_id: uuid.UUID, ctx: Ctx = Depends(require(MANAGE)), db: S
 # ---- PhotonEntry, with its token ----
 
 def entry_tenant(authorization: Optional[str] = Header(None)) -> uuid.UUID:
-    """The organization a live `vox:entry` token belongs to: 401 for none, an unknown or a revoked one; 403 for a token of another scope."""
+    """The organization a live `vox:entry` token belongs to: 401 for none, an unknown or a revoked one, or one of an organization the directory
+    removed or archived (audit XP-1); 403 for a token of another scope."""
     unauthorized = HTTPException(status.HTTP_401_UNAUTHORIZED, "Unauthorized", headers={"WWW-Authenticate": "Bearer"})
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not token:
@@ -101,6 +102,9 @@ def entry_tenant(authorization: Optional[str] = Header(None)) -> uuid.UUID:
             raise unauthorized
         if t.scope != SCOPE:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "This token is not for PhotonEntry")
+        tenant = s.get(Tenant, t.tenant_id)
+        if tenant is None or tenant.status == "removed":
+            raise unauthorized
         now = utcnow()
         if t.last_used_at is None or now - t.last_used_at > timedelta(minutes=1):
             t.last_used_at = now

@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Optional, Tuple
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,7 @@ from app import access, rls
 from app.access import Grant
 from app.config import settings
 from app.db import SystemSession, get_db
-from app.models import Access, Person, utcnow
+from app.models import Access, Person, Tenant, utcnow
 from app.oidc import TokenError, TokenVerifier, default_verifier
 from app.sync import DirectoryFactory, resolve
 from app.throttle import Throttle
@@ -163,18 +163,29 @@ class Ctx:
 
 
 def load_ctx(db: Session, who: Who, tenant_id: uuid.UUID) -> Optional[Ctx]:
-    """The person's context in a tenant, or None if they have no live access there."""
+    """The person's context in a tenant, or None if they have no live access there. An organization the directory removed or archived is
+    served to nobody but Photon staff (audit VOX-A-2)."""
     row = db.execute(select(Access).where(Access.person_id == who.id, Access.tenant_id == tenant_id)).scalar_one_or_none()
     if row is None or not access.is_active(Grant.from_row(row), utcnow()):
+        return None
+    tenant = db.get(Tenant, tenant_id)
+    if (tenant is None or tenant.status == "removed") and not who.is_staff:
         return None
     return Ctx(who, tenant_id, Grant.from_row(row))
 
 
-def tenant_ctx(tenant_id: uuid.UUID, who: Who = Depends(current_person), db: Session = Depends(get_db)) -> Ctx:
-    """404 (not 403) for organizations the caller has no access to, so organization ids can't be probed."""
+READS = ("GET", "HEAD", "OPTIONS")
+
+
+def tenant_ctx(request: Request, tenant_id: uuid.UUID, who: Who = Depends(current_person), db: Session = Depends(get_db)) -> Ctx:
+    """404 (not 403) for organizations the caller has no access to, so organization ids can't be probed. A suspended organization is read
+    only (audit VOX-A-2): nothing is saved or published until the directory makes it active again; Photon staff are not held back."""
     ctx = load_ctx(db, who, tenant_id)
     if ctx is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if request.method not in READS and not who.is_staff and db.get(Tenant, tenant_id).status != "active":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "organization_suspended",
+                            "detail": "This organization is suspended: its phone system keeps running, but nothing can be changed. Contact Photon."})
     return ctx
 
 
