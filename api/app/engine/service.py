@@ -168,13 +168,18 @@ def _write(db: Session, ps: PhoneSystem, instance: PbxInstance, plan: Optional[M
     if plan is not None and provider is not None and plan["ivr_menus"]:
         speak(db, provider, agent, plan)
     t = target(ps, instance, provider is not None)
+
+    def written(res: writer.Result) -> None:
+        # Recorded and committed the moment the engine has it, before the cache clear can fail (audit VOX-B-5).
+        _record(db, ps, res)
+        db.commit()
     if plan is None:
         with eng.begin() as conn:
             res = writer.write(conn, fusionpbx.Build(), t.domain_uuid, manifest(db, ps))
+        written(res)
         agent.clear_cache(res.cache)
     else:
-        res = publish.publish(eng, agent, plan, t, manifest(db, ps))
-    _record(db, ps, res)
+        res = publish.publish(eng, agent, plan, t, manifest(db, ps), written)
     return res
 
 

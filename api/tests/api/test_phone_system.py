@@ -903,3 +903,31 @@ def test_an_agent_is_reached_over_plain_http_only_inside_private_networks(client
                     ("http://10.10.0.21:8781", True), ("http://100.64.1.2:8781/", True), ("http://127.0.0.1:8780", True)):
         r = client.post("/platform/instances", headers=auth("staff"), json={**base, "name": f"colo-{abs(hash(url)) % 10**6}", "agent_url": url})
         assert (r.status_code == 201) == ok, (url, r.text)
+
+
+def test_a_failed_cache_clear_leaves_a_record_that_matches_the_engine(client, world, built, connect, agent, eng):
+    """Audit VOX-B-5: the engine committed, then the cache clear failed; nothing was recorded, so the next publish never removed the rows the
+    failed one added and the new extension's SIP password was lost. Now the write is recorded as soon as the engine has it."""
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    v1 = client.get(f"{built}/phone-system", headers=auth("tech")).json()["draft"]
+    d = {**v1, "users": {**v1["users"], "u-cy": {"name": "Cy New", "extension": "130", "site": world.a1}}}
+    assert client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": d}).status_code == 200
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    agent.fail_cache_after = agent.calls.count("cache")           # this publish's clear fails, and so does the put-back's
+    run(connect)
+    v = client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]
+    assert v["state"] == "failed" and "failed too" in v["error"]
+    with SystemSession() as s:
+        assert any(e.label.endswith(":130") for e in s.execute(select(EngineSecret)).scalars())   # the password it gave is kept
+        recorded = {str(o.object_uuid) for o in s.execute(select(EngineObject)).scalars()}
+    with eng.connect() as c:
+        on_engine = {str(x) for x in c.execute(text("select extension_uuid from v_extensions")).scalars()}
+    assert on_engine <= recorded                                   # nothing on the engine that PhotonVox does not know it wrote
+    agent.fail_cache_after = None
+    assert client.put(f"{built}/phone-system/draft", headers=auth("tech"), json={"document": v1}).status_code == 200
+    client.post(f"{built}/phone-system/publish", headers=auth("tech"))
+    run(connect)
+    assert client.get(f"{built}/phone-system/versions", headers=auth("tech")).json()[0]["state"] == "ready"
+    with eng.connect() as c:
+        assert c.execute(text("select count(*) from v_extensions where extension = '130'")).scalar() == 0
