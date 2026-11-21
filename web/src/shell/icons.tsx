@@ -1,4 +1,4 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 // Icons are Material Design Icons by Pictogrammers (https://pictogrammers.com/library/mdi/), Apache-2.0: see NOTICE in photon-ui.
 // Only the paths in use are included (from @mdi/js 7.4.47), so apps take no dependency and ship nothing else. To add one, take its
 // path from @mdi/js (the export name is in the comment beside each) and add a line here.

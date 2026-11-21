@@ -1,4 +1,4 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { AppSwitcher, type SwitcherData } from './AppSwitcher'
@@ -56,7 +56,7 @@ export interface AppShellProps {
   banner?: ReactNode
   account: { name: string; detail?: string; actions: AccountAction[] }
   /** The suite's app switcher (AppSwitcher.tsx): this product's key and how to load the list for the organization and site on screen. */
-  apps?: { current: string; load: () => Promise<SwitcherData>; homeUrl?: string }
+  apps?: { current: string; load: () => Promise<SwitcherData>; loadKey?: string; homeUrl?: string }
   children: ReactNode
 }
 

@@ -1,9 +1,9 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { AppSwitcher, loadApps, type SwitcherData } from './AppSwitcher'
+import { AppSwitcher, checkSwitcherData, loadApps, type SwitcherData } from './AppSwitcher'
 
 const DATA: SwitcherData = {
   home: 'https://account.photonind.com/',
@@ -103,6 +103,24 @@ describe('AppSwitcher', () => {
     expect(await screen.findByText('In Other')).toBeInTheDocument()
   })
 
+  it('with a loadKey, a new load function at every render does not reload the list; a new key does', async () => {
+    function Keyed({ k, name }: { k: string; name: string }) {
+      const [open, setOpen] = useState(true)
+      // a new closure at every render, as some products write it
+      return <AppSwitcher current="vox" loadKey={k} load={() => calls(name)} open={open} onOpenChange={setOpen} />
+    }
+    const calls = vi.fn(async (name: string) => ({ ...DATA, organization: { ...DATA.organization, name }, site: null }))
+    const { rerender } = render(<Keyed k="huepc" name="HUEPC" />)
+    await screen.findByText('In HUEPC')
+    rerender(<Keyed k="huepc" name="HUEPC" />)
+    rerender(<Keyed k="huepc" name="HUEPC" />)
+    expect(calls).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()     // no flash back to "Loading your apps"
+    rerender(<Keyed k="other" name="Other" />)
+    expect(await screen.findByText('In Other')).toBeInTheDocument()
+    expect(calls).toHaveBeenCalledTimes(2)
+  })
+
   it('ignores an answer that arrives after it was closed', async () => {
     let resolve!: (d: SwitcherData) => void
     const { unmount } = render(<Harness load={() => new Promise<SwitcherData>((r) => { resolve = r })} start />)
@@ -133,6 +151,41 @@ describe('loadApps', () => {
     await expect(loadApps('https://a', 't', 'x', null, refuse as unknown as typeof fetch)).rejects.toThrow('404')
     const hang = vi.fn((_u: string, init: RequestInit) => new Promise<Response>((_r, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted')))))
     await expect(loadApps('https://a', 't', 'x', null, hang as unknown as typeof fetch, 10)).rejects.toThrow('aborted')
+  })
+
+  it('checks the answer: a malformed one is a failed load', async () => {
+    for (const body of [{}, { organization: {}, apps: [] }, { organization: { name: 'X' } }, null, []]) {
+      const f = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }))
+      await expect(loadApps('https://api.account.photonind.com', 't', 'x', null, f as unknown as typeof fetch)).rejects.toThrow('unexpected')
+    }
+  })
+
+  it('keeps only links that lead to Photon: https on photonind.com, or the directory\'s own host', () => {
+    const raw = {
+      ...DATA,
+      home: 'https://evil.example/',
+      apps: [
+        { key: 'console', name: 'PhotonConsole', state: 'open', url: 'https://console.photonind.com/org/huepc/' },
+        { key: 'board', name: 'PhotonBoard', state: 'open', url: 'https://photonind.com.evil.example/' },
+        { key: 'guard', name: 'PhotonGuard', state: 'open', url: 'http://guard.photonind.com/' },
+        { key: 'vox', name: 'PhotonVox', state: 'open', url: 'javascript:alert(1)' },
+        { key: 'entry', name: 'PhotonEntry', state: 'coming' },
+        { key: 'edge', name: 'PhotonEdge', state: 'weird' },
+        { key: 'dev', name: 'Dev', state: 'open', url: 'http://localhost:5173/org/x/' },
+      ],
+    }
+    const d = checkSwitcherData(raw, 'https://api.account.photonind.com')
+    expect(d.home).toBe('')                                            // falls back to the product's homeUrl
+    expect(d.apps.map((a) => a.key)).toEqual(['console', 'entry'])
+    const dev = checkSwitcherData(raw, 'http://localhost:8000')
+    expect(dev.apps.map((a) => a.key)).toEqual(['console', 'entry', 'dev'])
+  })
+
+  it('a dropped Home falls back to the dashboard address in the switcher', async () => {
+    const load = async () => checkSwitcherData({ ...DATA, home: 'https://evil.example/' }, 'https://api.account.photonind.com')
+    render(<Harness load={load} start />)
+    await screen.findByText('In HUEPC · Main Office')
+    expect(screen.getByRole('link', { name: /Home/ })).toHaveAttribute('href', 'https://account.photonind.com/')
   })
 
   it('uses the browser fetch by default', async () => {

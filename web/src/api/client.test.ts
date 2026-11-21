@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, createApi, describeError } from './client'
+import { RenewalError } from '../ph-auth/signin'
+import { ApiError, createApi, describeError, RENEWAL_FAILED } from './client'
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status })
 
@@ -59,6 +60,29 @@ describe('createApi', () => {
   it('tolerates a non-JSON error body', async () => {
     const { a } = api((async () => new Response('<html>', { status: 502 })) as unknown as typeof fetch)
     await expect(a.get('/x')).rejects.toMatchObject({ detail: 'Request failed (HTTP 502).' })
+  })
+
+  it('PhotonID unreachable while renewing (RenewalError) is a retryable request error, not a sign-out, and sends nothing', async () => {
+    const f = vi.fn(async () => json(200, {}))
+    const onUnauthorized = vi.fn()
+    const a = createApi({ baseUrl: 'https://x.test', getToken: async () => { throw new RenewalError() }, onUnauthorized, fetchImpl: f as unknown as typeof fetch })
+    await expect(a.get('/x')).rejects.toMatchObject({ name: 'ApiError', status: 0, detail: RENEWAL_FAILED })
+    expect(f).not.toHaveBeenCalled()
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+
+  it('any other failure of the token source is passed on as it is', async () => {
+    const a = createApi({ baseUrl: 'https://x.test', getToken: async () => { throw new Error('storage broken') }, onUnauthorized: vi.fn(), fetchImpl: vi.fn() as unknown as typeof fetch })
+    await expect(a.get('/x')).rejects.toThrow('storage broken')
+  })
+
+  it('PATCH sends a JSON body', async () => {
+    const f = vi.fn(async () => json(200, { ok: 2 }))
+    const { a } = api(f as unknown as typeof fetch)
+    expect(await a.patch('/things/1', { b: 2 })).toEqual({ ok: 2 })
+    const init = (f.mock.calls[0] as unknown as [string, RequestInit])[1]
+    expect(init.method).toBe('PATCH')
+    expect(init.body).toBe('{"b":2}')
   })
 
   it('reports network failures plainly', async () => {

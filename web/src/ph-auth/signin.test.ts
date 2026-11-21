@@ -1,6 +1,11 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { LOOP_WINDOW_MS, PhotonSignIn, SignInError, currentPath, safeReturnPath, type UserManagerLike } from './signin'
+import { LOOP_WINDOW_MS, PhotonSignIn, RenewalError, SignInError, currentPath, safeReturnPath, type UserManagerLike } from './signin'
+
+/** What oidc-client-ts throws when the token endpoint answers with an OIDC error. */
+function refusal(error: string) {
+  return Object.assign(new Error(error), { name: 'ErrorResponse', error })
+}
 
 function user(over: Record<string, unknown> = {}) {
   return { access_token: 'at', refresh_token: 'rt', id_token: 'idt', expired: false, expires_in: 300, state: '/', ...over }
@@ -11,6 +16,7 @@ function fakeManager(initial: ReturnType<typeof user> | null = user()) {
   const m = {
     getUser: vi.fn(async () => current),
     removeUser: vi.fn(async () => { current = null }),
+    revokeTokens: vi.fn(async (_types?: string[]) => {}),
     signinRedirect: vi.fn(async (_args?: unknown) => {}),
     signinRedirectCallback: vi.fn(async (_url?: string) => user({ state: '/o/1/team?tab=a#x' })),
     signinSilent: vi.fn(async () => (current = user({ access_token: 'renewed' }))),
@@ -34,6 +40,9 @@ describe('safeReturnPath', () => {
   it.each([
     ['/o/1/team?x=1#h', '/o/1/team?x=1#h'], ['/', '/'], ['//evil.example', '/'], ['/\\evil.example', '/'], ['https://evil.example/', '/'],
     ['', '/'], [undefined, '/'], [42, '/'], ['/auth/callback?code=1', '/'], ['/auth/signed-out', '/'], ['/auth/callbacks', '/auth/callbacks'],
+    // browsers drop tab, CR and LF from an address, so these are `//evil.example` (another site)
+    ['/\t/evil.example/x', '/'], ['/\n/evil.example', '/'], ['/\r\\evil.example', '/'], ['/a\u0000b', '/'], ['/a\u007fb', '/'],
+    ['/a\\b?x=1', '/a\\b?x=1'],
   ])('%s -> %s', (input, want) => expect(safeReturnPath(input)).toBe(want))
 
   it('reads the whole current address', () => {
@@ -66,12 +75,53 @@ describe('the access token', () => {
     expect(m.removeUser).toHaveBeenCalled()
   })
 
-  it('a refused renewal forgets the session', async () => {
+  it('a renewal PhotonID refuses (invalid_grant) forgets the session', async () => {
     const m = fakeManager(user({ expired: true }))
-    m.signinSilent.mockRejectedValueOnce(new Error('invalid_grant'))
+    m.signinSilent.mockRejectedValueOnce(refusal('invalid_grant'))
     const { auth } = make(m)
     expect(await auth.getAccessToken()).toBeNull()
     expect(await m.getUser()).toBeNull()
+  })
+
+  it.each([
+    ['a network error', new TypeError('Failed to fetch')],
+    ['a timeout', Object.assign(new Error('timed out'), { name: 'ErrorTimeout' })],
+    ['a 5xx without an OIDC error', new Error('Internal Server Error')],
+    ['a temporary OIDC error', refusal('temporarily_unavailable')],
+  ])('%s keeps the session: the token while it still works, else a retryable error', async (_what, err) => {
+    const early = fakeManager(user({ expires_in: 10 }))
+    early.signinSilent.mockRejectedValueOnce(err)
+    expect(await make(early).auth.getAccessToken()).toBe('at')
+    expect(early.removeUser).not.toHaveBeenCalled()
+
+    const late = fakeManager(user({ expired: true }))
+    late.signinSilent.mockRejectedValueOnce(err)
+    const { auth } = make(late)
+    const e = await auth.getAccessToken().catch((x) => x)
+    expect(e).toBeInstanceOf(RenewalError)
+    expect(e.retryable).toBe(true)
+    expect(late.removeUser).not.toHaveBeenCalled()
+    expect(await auth.getAccessToken()).toBe('renewed')          // the next try works once PhotonID answers
+  })
+
+  it('callers that find the token due at the same time share one renewal (refresh tokens may be single use)', async () => {
+    const m = fakeManager(user({ expired: true }))
+    let finish: (v: unknown) => void = () => {}
+    m.signinSilent.mockImplementationOnce(() => new Promise((r) => { finish = r }).then(() => { m.set(user({ access_token: 'renewed' })); return user({ access_token: 'renewed' }) }) as never)
+    const { auth } = make(m)
+    const all = Promise.all([auth.getAccessToken(), auth.getAccessToken(), auth.getAccessToken()])
+    await new Promise((r) => setTimeout(r, 0))
+    finish(null)
+    expect(await all).toEqual(['renewed', 'renewed', 'renewed'])
+    expect(m.signinSilent).toHaveBeenCalledTimes(1)
+  })
+
+  it('a refusal does not delete a session stored meanwhile by another renewal', async () => {
+    const m = fakeManager(user({ expired: true, refresh_token: 'old' }))
+    m.signinSilent.mockImplementationOnce(async () => { m.set(user({ refresh_token: 'new', access_token: 'other' })); throw refusal('invalid_grant') })
+    expect(await make(m).auth.getAccessToken()).toBeNull()
+    expect(m.removeUser).not.toHaveBeenCalled()
+    expect((await m.getUser())?.access_token).toBe('other')
   })
 
   it('a renewal that answers nothing is no token', async () => {
@@ -222,13 +272,40 @@ describe('a 401 from the product', () => {
 })
 
 describe('signing out', () => {
-  it('ends the PhotonID session with the id token and forgets everything here', async () => {
+  it('revokes the refresh token first, then forgets everything here and ends the PhotonID session with the id token', async () => {
     const { auth, m } = make()
     sessionStorage.setItem('ph-auth:callback-at', '1')
     await auth.signOut()
-    expect(m.removeUser).toHaveBeenCalled()
+    expect(m.revokeTokens).toHaveBeenCalledWith(['refresh_token'])
+    expect(m.revokeTokens.mock.invocationCallOrder[0]).toBeLessThan(m.removeUser.mock.invocationCallOrder[0])
+    expect(m.removeUser.mock.invocationCallOrder[0]).toBeLessThan(m.signoutRedirect.mock.invocationCallOrder[0])
     expect(m.signoutRedirect).toHaveBeenCalledWith({ id_token_hint: 'idt' })
     expect(sessionStorage.getItem('ph-auth:callback-at')).toBeNull()
+  })
+
+  it('a revocation that fails does not stop the sign-out', async () => {
+    const m = fakeManager()
+    m.revokeTokens.mockRejectedValueOnce(new Error('offline'))
+    await make(m).auth.signOut()
+    expect(m.removeUser).toHaveBeenCalled()
+    expect(m.signoutRedirect).toHaveBeenCalledWith({ id_token_hint: 'idt' })
+  })
+
+  it('when PhotonID cannot be reached it rejects and lets the person try again (no stuck latch)', async () => {
+    const m = fakeManager()
+    m.signoutRedirect.mockRejectedValueOnce(new Error('Failed to fetch'))
+    const { auth } = make(m)
+    await expect(auth.signOut()).rejects.toThrow('Failed to fetch')
+    await auth.signIn('/')
+    expect(m.signinRedirect).toHaveBeenCalledTimes(1)               // the latch was released
+  })
+
+  it('a page restored from the back/forward cache after leaving may sign in again', async () => {
+    const { auth, m } = make()
+    await auth.signIn('/')
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+    await auth.signIn('/')
+    expect(m.signinRedirect).toHaveBeenCalledTimes(2)
   })
 
   it('a sign-in asked for while the page leaves for PhotonID does not race the sign-out', async () => {
@@ -238,9 +315,10 @@ describe('signing out', () => {
     expect(m.signinRedirect).not.toHaveBeenCalled()
   })
 
-  it('works without a stored session (a new tab)', async () => {
+  it('works without a stored session (a new tab): nothing to revoke', async () => {
     const { auth, m } = make(fakeManager(null))
     await auth.signOut()
+    expect(m.revokeTokens).not.toHaveBeenCalled()
     expect(m.signoutRedirect).toHaveBeenCalledWith(undefined)
   })
 

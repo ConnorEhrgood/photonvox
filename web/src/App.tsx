@@ -36,6 +36,7 @@ function Protected() {
   if (status === 'problem') return <SignInProblem logo={logo} onRetry={() => void signIn()} onSignOut={out} detail="PhotonID signed you in, but PhotonVox did not accept the sign-in." />
   if (status === 'pending') return <AccessPending logo={logo} product="PhotonVox" onSignOut={out} />
   if (status === 'noAccess') return <NoAccess logo={logo} product="PhotonVox" detail={error} onSignOut={out} />
+  if (status === 'signOutFailed') return <div className="ph-auth"><div className="ph-card"><h1>Sign out</h1><p className="ph-error" role="alert">Sign-out did not complete. Try again.</p><button className="ph-btn" onClick={out}>Try again</button></div></div>
   if (status === 'error') return <div className="ph-auth"><div className="ph-card"><h1>Something went wrong</h1><p className="ph-error">{error}</p><button className="ph-btn" onClick={() => location.reload()}>Try again</button></div></div>
   return (
     <TenantProvider>

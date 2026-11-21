@@ -1,4 +1,4 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 /**
  * The suite's app switcher (photonid docs/HOME-PLAN.md): a grid button in the shell's header that lists, for the organization (and site) on screen,
  * every Photon product: the ones you can open link to the SAME organization and site there; the others say why not (no access, not switched on for
@@ -30,6 +30,50 @@ export interface SwitcherData {
 /** How long the switcher waits for the directory. */
 export const SWITCHER_TIMEOUT_MS = 4000
 
+/** Links in the switcher go only to Photon's own sites (https, this domain or a subdomain), or to the directory's own host (local development). */
+export const PHOTON_DOMAIN = 'photonind.com'
+
+function trustedUrl(value: unknown, directoryApi: string): string | null {
+  if (typeof value !== 'string' || !value) return null
+  let u: URL
+  try { u = new URL(value) } catch { return null }
+  const host = u.hostname.toLowerCase()
+  if (u.protocol === 'https:' && (host === PHOTON_DOMAIN || host.endsWith(`.${PHOTON_DOMAIN}`))) return u.href
+  try {
+    const dir = new URL(directoryApi)
+    if (u.protocol === dir.protocol && u.hostname === dir.hostname && (u.protocol === 'https:' || u.protocol === 'http:')) return u.href
+  } catch { /* no usable directory address */ }
+  return null
+}
+
+const STATES: readonly AppState[] = ['open', 'no_access', 'not_enabled', 'coming']
+
+/** Checks the directory's answer instead of trusting it: a malformed answer is a failed load; a link that does not lead to Photon is dropped. */
+export function checkSwitcherData(raw: unknown, directoryApi: string): SwitcherData {
+  const d = raw as Partial<SwitcherData> | null
+  const org = d?.organization as Partial<SwitcherData['organization']> | undefined
+  if (!d || typeof d !== 'object' || !org || typeof org.name !== 'string' || !Array.isArray(d.apps)) {
+    throw new Error('The directory answered something unexpected')
+  }
+  const site = d.site && typeof d.site === 'object' && typeof d.site.name === 'string' ? d.site : null
+  const apps: SwitcherApp[] = []
+  for (const a of d.apps as Partial<SwitcherApp>[]) {
+    if (!a || typeof a.key !== 'string' || typeof a.name !== 'string' || !STATES.includes(a.state as AppState)) continue
+    if (a.state === 'open') {
+      const url = trustedUrl(a.url, directoryApi)
+      if (url) apps.push({ key: a.key, name: a.name, state: 'open', url })
+      continue                                     // an open app without a Photon address is left out, never linked
+    }
+    apps.push({ key: a.key, name: a.name, state: a.state as AppState })
+  }
+  return {
+    home: trustedUrl(d.home, directoryApi) ?? '',  // '' falls back to the product's homeUrl
+    organization: { id: String(org.id ?? ''), slug: String(org.slug ?? ''), name: org.name },
+    site,
+    apps,
+  }
+}
+
 /** Reads the switcher's list from the directory with the product's own token (it carries the directory's audience too). */
 export async function loadApps(directoryApi: string, token: string | null, organization: string, site?: string | null,
                                fetchImpl: typeof fetch = fetch, timeoutMs = SWITCHER_TIMEOUT_MS): Promise<SwitcherData> {
@@ -41,7 +85,7 @@ export async function loadApps(directoryApi: string, token: string | null, organ
       headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: ctrl.signal,
     })
     if (!r.ok) throw new Error(`The directory answered ${r.status}`)
-    return (await r.json()) as SwitcherData
+    return checkSwitcherData(await r.json(), directoryApi)
   } finally {
     clearTimeout(timer)
   }
@@ -56,35 +100,41 @@ const WHY: Record<Exclude<AppState, 'open'>, string> = {
 export interface AppSwitcherProps {
   /** The product this is (its key: "guard", "vox"): marked "here". */
   current: string
-  /** Loads the list (usually `() => loadApps(DIRECTORY_URL, token, orgSlug, siteSlug)`); called on the first open and again when it changes. */
+  /** Loads the list (usually `() => loadApps(DIRECTORY_URL, token, orgSlug, siteSlug)`); called on the first open and again when the place
+   * changes: when `loadKey` changes if it is given, else when `load` is a different function (so wrap it in useCallback, or pass `loadKey`). */
   load: () => Promise<SwitcherData>
+  /** What the list depends on, e.g. `${orgSlug}/${siteSlug}`. With it, a new `load` function at every render does not reload the list. */
+  loadKey?: string
   /** Where Home goes if the list cannot be loaded (the dashboard). */
   homeUrl?: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-export function AppSwitcher({ current, load, homeUrl = 'https://account.photonind.com/', open, onOpenChange }: AppSwitcherProps) {
+export function AppSwitcher({ current, load, loadKey, homeUrl = 'https://account.photonind.com/', open, onOpenChange }: AppSwitcherProps) {
   const [data, setData] = useState<SwitcherData | null>(null)
   const [failed, setFailed] = useState(false)
   const [filter, setFilter] = useState('')
-  const loadedFor = useRef<(() => Promise<SwitcherData>) | null>(null)   // the list is asked for once per place (load), not at every open
+  const key: unknown = loadKey ?? load
+  const loadRef = useRef(load)
+  loadRef.current = load
+  const loadedFor = useRef<unknown>(null)   // the list is asked for once per place (loadKey, else load), not at every open
   const root = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
   const input = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (!open || loadedFor.current === load) return
+    if (!open || loadedFor.current === key) return
     let live = true, done = false
-    loadedFor.current = load
+    loadedFor.current = key
     setData(null)
     setFailed(false)
-    load().then((d) => live && setData(d)).catch(() => live && setFailed(true)).finally(() => { done = true })
+    loadRef.current().then((d) => live && setData(d)).catch(() => live && setFailed(true)).finally(() => { done = true })
     return () => {
       live = false
       if (!done) loadedFor.current = null   // closed before the answer came: ask again at the next open
     }
-  }, [open, load])
+  }, [open, key])
 
   useEffect(() => {
     if (!open) return

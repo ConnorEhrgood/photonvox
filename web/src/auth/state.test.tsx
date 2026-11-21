@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App'
+import { RenewalError } from '../ph-auth/signin'
 import { ME, FakeSource, fakeFetch } from '../test/helpers'
 import { AuthProvider, PENDING_RETRY_MS, useAuth } from './AuthContext'
 import { TenantProvider, useTenant } from './TenantContext'
@@ -56,6 +57,14 @@ describe('the states between signed out and ready', () => {
     vi.stubGlobal('fetch', async () => { throw new TypeError('offline') })
     render(<MemoryRouter><AuthProvider source={new FakeSource()} baseUrl="https://api.test"><Probe /></AuthProvider></MemoryRouter>)
     expect(await screen.findByText('status: error')).toBeInTheDocument()
+  })
+  it('PhotonID unreachable while renewing is an error to retry, never signed out', async () => {
+    const source = new FakeSource()
+    source.getAccessToken = async () => { throw new RenewalError() }
+    const { calls } = mount({}, source)
+    expect(await screen.findByText('status: error')).toBeInTheDocument()
+    expect(source.unauthorized).not.toHaveBeenCalled()
+    expect(calls.length).toBe(0)
   })
   it('a non-Error rejection is still reported', async () => {
     vi.stubGlobal('fetch', async () => { throw 'weird' })    // eslint-disable-line no-throw-literal

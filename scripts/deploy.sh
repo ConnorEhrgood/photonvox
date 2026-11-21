@@ -9,6 +9,8 @@ cd "$(dirname "$0")/.."
 HOST=${VOX_HOST:-prod}; DEST=/opt/photon/vox
 C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 [ -z "$(git status --porcelain)" ] || { echo "commit first: the host gets exactly a commit" >&2; exit 1; }
+# the shared shell, sign-in and styles must be photon-ui's, unedited (fails when ../photon-ui is missing)
+node ../photon-ui/scripts/sync-vendored.mjs web/src --css --base --auth --check
 SHA=$(git rev-parse --short HEAD)
 ssh "$HOST" "[ -f $DEST/.env ] && docker network inspect vox-edge > /dev/null" \
   || { echo "the host is not set up yet ($DEST/.env, the vox-edge network): docs/DEPLOY.md, the first deploy" >&2; exit 1; }

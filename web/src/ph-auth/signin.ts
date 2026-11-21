@@ -1,4 +1,4 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 /**
  * Sign-in with PhotonID, the same in every Photon product (photonid/docs/SIGNIN-PLAN.md section 4, decided by Connor 2026-11-13).
  *
@@ -7,9 +7,13 @@
  *  3. Deep links survive: the same-site path, query and hash travel in the OIDC state.
  *  4. No loops: a 401 from the product's own API soon after coming back from PhotonID is a problem to show, not a reason to redirect again
  *     (`unauthorized` says which). A 403 is never a redirect: the product shows a page (`pages.tsx`).
- *  5. Sign-out ends the PhotonID session, which sends the browser back to `/auth/signed-out`; that route goes straight to PhotonID's sign-in
- *     form (`prompt=login`), so nobody is signed in again silently and there is no signed-out page of our own.
+ *  5. Sign-out revokes the refresh token at PhotonID, forgets the tokens and ends the PhotonID session, which sends the browser back to
+ *     `/auth/signed-out`; that route goes straight to PhotonID's sign-in form (`prompt=login`), so nobody is signed in again silently and
+ *     there is no signed-out page of our own.
  *  6. Tokens live in sessionStorage only.
+ *  7. One renewal at a time: callers that find the token due while a renewal is running wait for that one (refresh tokens may be single use).
+ *     Only a refusal from PhotonID (`invalid_grant` and the like) ends the session; a network error, a timeout or a 5xx keeps it and is
+ *     reported as `RenewalError` (retryable) when the stored token is already out of date.
  * Each product registers two addresses at PhotonID: `<origin>/auth/callback` (redirect) and `<origin>/auth/signed-out` (post-logout).
  */
 import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts'
@@ -36,7 +40,7 @@ export interface SignInConfig {
 }
 
 /** The part of oidc-client-ts's UserManager this module uses (tests pass a fake). */
-export type UserManagerLike = Pick<UserManager, 'getUser' | 'removeUser' | 'signinRedirect' | 'signinRedirectCallback' | 'signinSilent' | 'signoutRedirect'>
+export type UserManagerLike = Pick<UserManager, 'getUser' | 'removeUser' | 'revokeTokens' | 'signinRedirect' | 'signinRedirectCallback' | 'signinSilent' | 'signoutRedirect'>
 
 export type Prompt = 'login' | 'create' | 'select_account'
 
@@ -50,9 +54,35 @@ export class SignInError extends Error {
   }
 }
 
-/** Only same-site paths: one leading slash, never `//host` or `/\host` (browsers treat those as other sites); never the auth routes themselves. */
+/** The renewal could not reach PhotonID (network, timeout, 5xx) and the stored token is out of date. The session is kept: try again later. */
+export class RenewalError extends Error {
+  readonly retryable = true
+  constructor(message?: string) {
+    super(message || 'renewal_failed')
+    this.name = 'RenewalError'
+  }
+}
+
+/** OIDC error codes from the token endpoint that mean "this refresh token is finished", not "try again". */
+const TRANSIENT_OIDC_ERRORS = new Set(['server_error', 'temporarily_unavailable'])
+
+/** PhotonID answered the refresh with an OIDC error (oidc-client-ts's ErrorResponse), other than a temporary one. */
+function isRefusal(e: unknown): boolean {
+  const err = e as { name?: unknown; error?: unknown } | null
+  return !!err && err.name === 'ErrorResponse' && typeof err.error === 'string' && !TRANSIENT_OIDC_ERRORS.has(err.error)
+}
+
+const PROBE_ORIGIN = 'https://photon.invalid'
+
+/** Only same-site paths: one leading slash, never `//host` or `/\host` (browsers treat those as other sites), no control characters (browsers drop
+ * tab, CR and LF, so `/<tab>/host` is `//host`), and it must resolve on this site; never the auth routes themselves. */
 export function safeReturnPath(value: unknown): string {
-  if (typeof value !== 'string' || !/^\/(?![/\\])/.test(value)) return '/'
+  if (typeof value !== 'string' || !/^\/(?![/\\])/.test(value) || /[\u0000-\u001f\u007f]/.test(value)) return '/'
+  try {
+    if (new URL(value, PROBE_ORIGIN).origin !== PROBE_ORIGIN) return '/'
+  } catch {
+    return '/'
+  }
   const path = value.split(/[?#]/, 1)[0]
   return path === CALLBACK_PATH || path === SIGNED_OUT_PATH ? '/' : value
 }
@@ -68,6 +98,7 @@ export class PhotonSignIn {
   private readonly scope: string
   private redirecting = false
   private callback: Promise<string> | null = null
+  private renewing: Promise<string | null> | null = null
 
   constructor(cfg: SignInConfig, mgr?: UserManagerLike, store: Storage = window.sessionStorage, now: () => number = Date.now) {
     const origin = cfg.origin ?? window.location.origin
@@ -85,20 +116,35 @@ export class PhotonSignIn {
       stateStore: new WebStorageStateStore({ store }),
       automaticSilentRenew: false, // renewed on demand in getAccessToken, by refresh token only
     })
+    // Back from the back/forward cache after leaving for PhotonID: the page did not leave after all, so a sign-in may start again.
+    if (typeof window !== 'undefined') window.addEventListener('pageshow', (e) => { if (e.persisted) this.redirecting = false })
   }
 
-  /** The access token to send, renewed by refresh token when it is (nearly) out of date; null when there is no usable session. Never opens an iframe. */
+  /** The access token to send, renewed by refresh token when it is (nearly) out of date; null when there is no usable session. Never opens an iframe.
+   * Throws `RenewalError` when PhotonID cannot be reached and the stored token has already run out (the session is kept: retry). */
   async getAccessToken(): Promise<string | null> {
+    if (this.renewing) return this.renewing
     const u = await this.mgr.getUser()
     if (!u) return null
     if (this.startedWithLessScope(u)) { await this.mgr.removeUser(); return null }
     if (!this.needsRenewal(u)) return u.access_token
     if (!u.refresh_token) { await this.mgr.removeUser(); return null }
+    this.renewing ??= this.renew(u).finally(() => { this.renewing = null })
+    return this.renewing
+  }
+
+  private async renew(u: User): Promise<string | null> {
     try {
       return (await this.mgr.signinSilent())?.access_token ?? null
-    } catch {
-      await this.mgr.removeUser()
-      return null
+    } catch (e) {
+      if (isRefusal(e)) {
+        // The refresh token is finished. Forget the session, unless something stored a newer one meanwhile.
+        const now = await this.mgr.getUser()
+        if (!now || now.refresh_token === u.refresh_token) await this.mgr.removeUser()
+        return null
+      }
+      if (!u.expired) return u.access_token // renewed early and PhotonID is unreachable: the token still works for a moment
+      throw new RenewalError((e as Error)?.message)
     }
   }
 
@@ -166,13 +212,27 @@ export class PhotonSignIn {
     return 'redirect'
   }
 
-  /** Sign out: end the PhotonID session; PhotonID then sends the browser to `/auth/signed-out`. */
+  /** Sign out: revoke the refresh token at PhotonID (so no copy of it works any more), forget the tokens, end the PhotonID session;
+   * PhotonID then sends the browser to `/auth/signed-out`. Rejects when PhotonID cannot be reached: the product should say that sign-out did
+   * not complete and offer to try again (the tokens of this tab are gone either way). */
   async signOut(): Promise<void> {
     this.redirecting = true // the page is leaving for PhotonID: a sign-in asked for now (the app saw "signed out") must not race it
     this.store.removeItem(STAMP)
-    const u = await this.mgr.getUser()
-    await this.mgr.removeUser()
-    await this.mgr.signoutRedirect(u?.id_token ? { id_token_hint: u.id_token } : undefined)
+    try {
+      const u = await this.mgr.getUser()
+      if (u?.refresh_token) {
+        try {
+          await this.mgr.revokeTokens(['refresh_token'])
+        } catch {
+          // Best effort: the session end below is still attempted, and fails loudly if PhotonID is unreachable.
+        }
+      }
+      await this.mgr.removeUser()
+      await this.mgr.signoutRedirect(u?.id_token ? { id_token_hint: u.id_token } : undefined)
+    } catch (e) {
+      this.redirecting = false // still on this page: let the person try again
+      throw e
+    }
   }
 
   /** On `/auth/signed-out`: straight to PhotonID's sign-in form (never a silent sign-in), and home afterwards. */

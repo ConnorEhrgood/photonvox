@@ -52,6 +52,8 @@ export function Layout() {
       apps={current ? {
         current: 'vox', homeUrl: 'https://account.photonind.com/',
         load: async () => loadApps(config.directoryApiUrl, await source.getAccessToken(), current.slug || current.id, siteMatch?.params.siteSlug ?? null),
+        // the list is asked for once per organization and site, not again at every re-render (load is a new function each time)
+        loadKey: `${current.slug || current.id}/${siteMatch?.params.siteSlug ?? ''}`,
       } : undefined}
       groups={groups}
       footer={footer}

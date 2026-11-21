@@ -1,4 +1,4 @@
-/* GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. */
+/* GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1 */
 /* Photon design tokens. The original colour values are lifted verbatim from PhotonConsole's web/src/index.css so all
    products look identical. Change a token here, not in an app (apps that cannot depend on this package, like
    PhotonConsole, get a vendored copy: `node scripts/sync-vendored.mjs <src> --css`, checked by `--check`). */

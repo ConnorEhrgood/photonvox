@@ -72,6 +72,8 @@ describe('coming back from PhotonID', () => {
     app('/overview', s, { 'GET /me': new Response('{"detail":"Invalid token"}', { status: 401 }) })
     expect(await screen.findByRole('heading', { name: "We couldn't sign you in" })).toBeInTheDocument()
     expect(s.fake.signIn).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(s.signIn).toHaveBeenCalledWith('/overview')
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(s.signOut).toHaveBeenCalled()
   })
@@ -108,6 +110,17 @@ describe('a 403 is always a page', () => {
 })
 
 describe('signing out', () => {
+  it('Sign out that cannot reach PhotonID says so and offers to try again, instead of signing back in', async () => {
+    const s = production('tok')
+    let n = 0
+    s.signOut = vi.fn(async () => { if (n++ === 0) throw new TypeError('Failed to fetch') })
+    app('/overview', s, { 'GET /me': reply(403, 'no_access', 'This account has no access to PhotonVox.') })
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sign-out did not complete. Try again.')
+    expect(s.fake.signIn).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(s.signOut).toHaveBeenCalledTimes(2)
+  })
   it('/auth/signed-out (PhotonID’s post-logout address) goes straight on to the sign-in form', async () => {
     const s = production()
     app('/auth/signed-out', s)

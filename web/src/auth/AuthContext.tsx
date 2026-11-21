@@ -1,13 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ApiError, createApi, type Api } from '../api/client'
+import { ApiError, createApi, RENEWAL_FAILED, type Api } from '../api/client'
+import { RenewalError } from '../ph-auth/signin'
 import type { Me } from '../api/types'
 import type { TokenSource } from './tokenSource'
 
 /** The suite's sign-in contract (photonid docs/SIGNIN-PLAN.md, through the shared `ph-auth` module):
  *  `signedOut`: go straight to PhotonID. `problem`: PhotonID signed the person in a moment ago and the API still refuses (401): shown, never
  *  redirected again (no loop). `pending`: signed in, but the directory has not told us about this person yet (a fresh invitation); we keep asking.
- *  `noAccess`: signed in with an account that has no access to PhotonVox. A 403 is always one of those pages, never a redirect. */
-type Status = 'loading' | 'signedOut' | 'problem' | 'ready' | 'pending' | 'noAccess' | 'error'
+ *  `noAccess`: signed in with an account that has no access to PhotonVox. A 403 is always one of those pages, never a redirect.
+ *  `signOutFailed`: Sign out could not reach PhotonID, so the PhotonID session may still be open: a page that offers to try again (never the
+ *  app, whose next request would sign the person straight back in). */
+type Status = 'loading' | 'signedOut' | 'problem' | 'ready' | 'pending' | 'noAccess' | 'error' | 'signOutFailed'
 
 interface AuthState {
   status: Status
@@ -47,7 +50,16 @@ export function AuthProvider({ source, baseUrl, children }: { source: TokenSourc
   )
 
   const load = useCallback(async () => {
-    if (!(await source.getAccessToken())) { setStatus('signedOut'); return }
+    let token: string | null
+    try {
+      token = await source.getAccessToken()
+    } catch (e) {
+      // PhotonID unreachable while renewing: the session is kept, so this is an error to retry, not "signed out"
+      setStatus('error')
+      setError(e instanceof RenewalError ? RENEWAL_FAILED : e instanceof Error ? e.message : String(e))
+      return
+    }
+    if (!token) { setStatus('signedOut'); return }
     try {
       setMe(await api.get<Me>('/me'))
       setError(null)
@@ -79,7 +91,16 @@ export function AuthProvider({ source, baseUrl, children }: { source: TokenSourc
   const value: AuthState = {
     status, me, error, api, source,
     signIn: (returnTo) => source.signIn(returnTo ?? location.pathname + location.search + location.hash),
-    signOut: async () => { await source.signOut(); setMe(null); setStatus('signedOut') },
+    signOut: async () => {
+      try {
+        await source.signOut()
+      } catch {
+        setStatus('signOutFailed') // PhotonID unreachable: say so and offer to try again (the shared sign-in released its latch)
+        return
+      }
+      setMe(null)
+      setStatus('signedOut')
+    },
     refreshMe: load,
     pasteToken: async (t) => { source.paste?.(t); setStatus('loading'); await load() },
   }

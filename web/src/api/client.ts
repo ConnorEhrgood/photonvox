@@ -1,3 +1,8 @@
+import { RenewalError } from '../ph-auth/signin'
+
+/** PhotonID could not be reached to renew the session (`RenewalError`): the session is kept, so this is a request to retry, never "signed out". */
+export const RENEWAL_FAILED = 'Can’t reach PhotonID to renew your session. Check your connection and try again.'
+
 export class ApiError extends Error {
   status: number
   detail: string
@@ -56,7 +61,13 @@ export function createApi(opts: ApiOptions): Api {
   const doFetch = opts.fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a))
 
   async function raw(method: string, path: string, body?: BodyInit | null, json = false): Promise<Response> {
-    const token = await opts.getToken()
+    let token: string | null
+    try {
+      token = await opts.getToken()
+    } catch (e) {
+      if (e instanceof RenewalError) throw new ApiError(0, RENEWAL_FAILED)
+      throw e
+    }
     const headers: Record<string, string> = {}
     if (token) headers.Authorization = `Bearer ${token}`
     if (json) headers['Content-Type'] = 'application/json'

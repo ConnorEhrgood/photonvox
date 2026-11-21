@@ -1,4 +1,4 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 /**
  * The few screens sign-in may need, the same in every product (`ph-auth` card), and the three route pieces that drive `PhotonSignIn`.
  * There is deliberately no sign-in page and no signed-out page: see signin.ts.
@@ -91,7 +91,8 @@ export function CallbackRoute({ auth, logo, onSignedIn }: Common & { auth: Photo
   }, [auth])
   if (err) {
     const detail = err instanceof SignInError ? err.code : err.message
-    return <SignInProblem logo={logo} detail={detail} onRetry={() => void auth.signIn('/')} onSignOut={() => void auth.signOut()} />
+    const signOut = () => auth.signOut().catch((e) => setErr(new Error(`Sign-out did not complete (${e instanceof Error ? e.message : String(e)}). Try again.`)))
+    return <SignInProblem logo={logo} detail={detail} onRetry={() => void auth.signIn('/')} onSignOut={() => void signOut()} />
   }
   return <SigningIn logo={logo} />
 }

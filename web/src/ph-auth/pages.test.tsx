@@ -1,4 +1,4 @@
-// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it.
+// GENERATED from @photon/ui by scripts/sync-vendored.mjs. Do not edit here: change photon-ui, then re-run it. photon-ui 031c370e5fa1
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { StrictMode } from 'react'
@@ -121,6 +121,16 @@ describe('CallbackRoute', () => {
     expect(auth.signIn).toHaveBeenCalledWith('/')
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(auth.signOut).toHaveBeenCalled()
+  })
+
+  it('a sign-out that cannot reach PhotonID says so instead of failing silently', async () => {
+    const auth = fakeAuth({
+      handleCallback: vi.fn(async () => { throw new SignInError('access_denied') }),
+      signOut: vi.fn(async () => { throw new Error('Failed to fetch') }),
+    })
+    render(<CallbackRoute auth={auth} onSignedIn={() => {}} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByText(/Sign-out did not complete \(Failed to fetch\)\. Try again\./)).toBeInTheDocument()
   })
 
   it('other failures show their message; a non-error too', async () => {
