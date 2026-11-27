@@ -1,7 +1,7 @@
 """The demo's call history back-filled (docs/DEMO.md §2): `days` days up to now as FusionPBX call records (`v_xml_cdr`) in the demo domain on the
 staging engine, in the columns FreeSWITCH writes (no XML or JSON), each marked accountcode 'photonvox-sim'. Prints SQL for psql as postgres:
 
-    python3 sim/backfill.py [--days 35] | ssh -i ~/.ssh/vox_staging root@10.10.0.60 'cd /tmp && sudo -u postgres psql -d fusionpbx -v ON_ERROR_STOP=1 -q'
+    scripts/demo-sim.sh reset        (python3 sim/backfill.py [--days 35] | psql as postgres on the staging engine)
 
 One transaction. The domain's earlier records end where the back-fill begins: all of the domain's records before now are replaced (the reset),
 the live simulator's calls after now are kept. Only the demo domain is touched: the SQL names it, and the script refuses any other.
@@ -39,8 +39,8 @@ def row(c: traffic.Call) -> tuple:
         values = ("local", "", c.caller, c.dialed, c.dialed, None)
     cause = "NORMAL_CLEARING" if c.status != "missed" else ("ORIGINATOR_CANCEL" if c.kind != "outbound" else "NO_ANSWER")
     return (str(uuid.uuid5(NS, f"{c.site}:{c.start}:{c.caller}:{c.dialed}")),) + values + (
-        int(c.start), answer, end, end - int(c.start), c.talk_s if c.status == "answered" else 0, c.status if c.kind != "outbound" or c.status == "answered" else "cancelled",
-        c.status == "missed", c.status == "voicemail", cause)
+        int(c.start), answer, end, end - int(c.start), c.talk_s if answer else 0, c.status if c.kind == "inbound" or c.status == "answered" else "cancelled",
+        c.status != "answered" and c.kind == "inbound", c.status == "voicemail", cause)        # as FusionPBX marks them: a voicemail is a missed call too
 
 
 def lit(v) -> str:

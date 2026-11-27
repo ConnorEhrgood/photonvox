@@ -33,6 +33,9 @@ class Site:
     caller_id: str                                  # what calls out show (ten digits)
     page: Optional[str] = None                      # the paging group's extension
     boxes: Dict[str, str] = field(default_factory=dict)   # group or number -> the voicemail box its unanswered calls reach
+    hours: Dict[int, Tuple[int, int]] = field(default_factory=dict)   # weekday (Monday 0) -> open from, until (hours of the day)
+    holidays: bool = False                          # closed on the US federal holidays
+    closed: Dict[str, str] = field(default_factory=dict)  # a number that goes to a voicemail box outside the hours -> the box
 
 
 def _hours(**at: float) -> Tuple[float, ...]:
@@ -48,23 +51,40 @@ SITES: Dict[str, Site] = {
                  "4125550104": (0.07, "ext:107")},
         groups={"sales": ("101", "102", "103"), "support": ("104", "105", "106")},
         phones=("100", "101", "102", "103", "104", "105", "106", "107", "108", "109", "111"), caller_id="4125550100",
-        boxes={"sales": "sales", "support": "support", "4125550100": "company"}),
+        boxes={"sales": "sales", "support": "support"},
+        hours={d: (8, 17) for d in range(5)}, holidays=True, closed={"4125550100": "company"}),
     "demo-warehouse": Site(
         "demo-warehouse",
         weekday=_hours(h6=2, h7=4, h8=5, h9=5, h10=4, h11=4, h12=2, h13=4, h14=5, h15=4, h16=3, h17=2, h18=2, h19=1.5, h20=1, h21=0.5),
         saturday=0.4, sunday=0.0, mix=(0.40, 0.30, 0.18, 0.12),
         numbers={"4125550140": (0.75, "group:shipping"), "4125550141": (0.25, "ext:201")},
         groups={"shipping": ("200", "201", "204")}, phones=("200", "201", "202", "203", "204"), caller_id="4125550140", page="290",
-        boxes={"shipping": "shipping"}),
+        boxes={"shipping": "shipping"},
+        hours={**{d: (6, 22) for d in range(5)}, 5: (7, 15)}, closed={"4125550140": "shipping"}),
     "demo-apartments": Site(
         "demo-apartments",
         weekday=_hours(h8=0.5, h9=2.5, h10=3, h11=3, h12=2, h13=2.5, h14=3, h15=3, h16=2.5, h17=2.5, h18=1.5, h19=1, h20=0.8, h21=0.5, h22=0.3, h23=0.2),
         saturday=0.7, sunday=0.35, mix=(0.66, 0.24, 0.10, 0.0),
         numbers={"4125550170": (0.8, "group:leasing"), "4125550171": (0.2, "ext:302")},
         groups={"leasing": ("300", "301", "303")}, phones=("300", "301", "302", "303"), caller_id="4125550170",
-        boxes={"leasing": "leasing", "4125550171": "302"}),
+        boxes={"leasing": "leasing"},
+        hours={**{d: (9, 18) for d in range(5)}, 5: (10, 16)}, holidays=True, closed={"4125550170": "leasing"}),
 }
-NAMES = {"menu": {"1": "group:sales", "2": "group:support", "3": "ext:107", "0": "ext:100"}}
+MENU = {"1": "group:sales", "2": "group:support", "3": "ext:107", "0": "ext:100"}     # the headquarters' menu: the key pressed -> what it rings
+
+
+def holiday(d: date) -> bool:
+    """A US federal holiday, as the engine's hours have them (api/app/engine/fusionpbx.py US_FEDERAL: the day itself, never an observed day)."""
+    monday, thursday = d.weekday() == 0, d.weekday() == 3
+    return ((d.month, d.day) in ((1, 1), (6, 19), (7, 4), (11, 11), (12, 25))
+            or (monday and ((d.month in (1, 2) and 15 <= d.day <= 21) or (d.month == 5 and d.day >= 25) or (d.month == 9 and d.day <= 7)
+                            or (d.month == 10 and 8 <= d.day <= 14)))
+            or (thursday and d.month == 11 and 22 <= d.day <= 28))
+
+
+def is_open(site: Site, at: datetime) -> bool:
+    span = site.hours.get(at.weekday())
+    return bool(span) and span[0] <= at.hour < span[1] and not (site.holidays and holiday(at.date()))
 
 
 @dataclass
@@ -78,6 +98,8 @@ class Call:
     status: str                 # answered | missed | voicemail
     ring_s: int
     talk_s: int
+    digit: str = ""             # the key the caller pressed in the menu
+    closed: bool = False        # the number was closed: the call went straight to its voicemail box
 
     @property
     def end(self) -> float:
@@ -91,28 +113,35 @@ def _talk(rng: random.Random, kind: str) -> int:
     return int(min(1800, max(15, rng.lognormvariate(math.log(median), 0.8))))
 
 
-def _outcome(rng: random.Random, site: Site, target: str) -> Tuple[str, str, int]:
-    """(reached, status, ring seconds) for an inbound call to `target` ("menu", "group:x", "ext:101")."""
+def _outcome(rng: random.Random, site: Site, target: str) -> Tuple[str, str, int, str]:
+    """(reached, status, ring seconds, the menu key pressed) for an inbound call to `target` ("menu", "group:x", "ext:101")."""
+    digit = ""
     if target == "menu":
-        target = rng.choices(list(NAMES["menu"].values()), weights=[0.38, 0.32, 0.12, 0.18])[0]
+        digit = rng.choices(list(MENU), weights=[0.38, 0.32, 0.12, 0.18])[0]
+        target = MENU[digit]
     kind, _, key = target.partition(":")
     r = rng.random()
     if r < 0.06:                                         # hung up while it rang
-        return "", "missed", rng.randint(4, 18)
+        return "", "missed", rng.randint(4, 18), digit
     if kind == "group":
         if r < 0.12:
-            return f"voicemail:{site.boxes.get(key, key)}", "voicemail", 20
-        return rng.choice(site.groups[key]), "answered", rng.randint(3, 14)
+            return f"voicemail:{site.boxes.get(key, key)}", "voicemail", GROUP_RING_S[key], digit
+        return rng.choice(site.groups[key]), "answered", rng.randint(3, 14), digit
     if r < 0.16:
-        return f"voicemail:{key}", "voicemail", 25
-    return key, "answered", rng.randint(3, 12)
+        return f"voicemail:{key}", "voicemail", PHONE_RING_S, digit
+    return key, "answered", rng.randint(3, 12), digit
+
+
+GREETING_S = 13                                          # a voicemail box's greeting, before the caller's message
+PHONE_RING_S = 30                                        # how long the engine rings a phone before its voicemail (the extension's call_timeout)
+GROUP_RING_S = {"sales": 20, "support": 20, "shipping": 25, "leasing": 45}     # ...and a group (the document's ring_seconds; leasing: three in turn)
 
 
 def day(site_key: str, d: date, seed: str = "photon-demo") -> List[Call]:
     """Every call at a site on one day (New York time), in order."""
     site = SITES[site_key]
     rng = random.Random(f"{seed}:{site_key}:{d.isoformat()}")
-    scale = 1.0 if d.weekday() < 5 else site.saturday if d.weekday() == 5 else site.sunday
+    scale = site.sunday if d.weekday() == 6 or (site.holidays and holiday(d)) else site.saturday if d.weekday() == 5 else 1.0
     scale *= rng.uniform(0.85, 1.15)                     # no two days alike
     calls: List[Call] = []
     for hour in range(24):
@@ -128,8 +157,14 @@ def day(site_key: str, d: date, seed: str = "photon-demo") -> List[Call]:
                 kind = "internal"
             if kind == "inbound":
                 number = rng.choices(list(site.numbers), weights=[w for w, _ in site.numbers.values()])[0]
-                reached, status, ring = _outcome(rng, site, site.numbers[number][1])
-                c = Call(start, site_key, kind, rng.choice(OUTSIDE), number, reached, status, ring, 0)
+                if number in site.closed and not is_open(site, datetime.fromtimestamp(start, NY)):
+                    left = rng.random() < 0.6            # a message, or hung up in the greeting
+                    c = Call(start, site_key, kind, rng.choice(OUTSIDE), number, f"voicemail:{site.closed[number]}", "voicemail", 0, 0,
+                             closed=True) if left else Call(start, site_key, kind, rng.choice(OUTSIDE), number, "", "missed", rng.randint(3, 9), 0,
+                                                            closed=True)
+                else:
+                    reached, status, ring, digit = _outcome(rng, site, site.numbers[number][1])
+                    c = Call(start, site_key, kind, rng.choice(OUTSIDE), number, reached, status, ring, 0, digit=digit)
             elif kind == "outbound":
                 answered = rng.random() > 0.12
                 c = Call(start, site_key, kind, rng.choice(site.phones), rng.choice(OUTSIDE), "outside" if answered else "",
@@ -141,7 +176,7 @@ def day(site_key: str, d: date, seed: str = "photon-demo") -> List[Call]:
             else:
                 c = Call(start, site_key, kind, rng.choice(site.phones), site.page, site.page, "answered", 1, 0)
             if c.status == "answered" or c.status == "voicemail":
-                c.talk_s = _talk(rng, kind) if c.status == "answered" else rng.randint(8, 40)
+                c.talk_s = _talk(rng, kind) if c.status == "answered" else GREETING_S + rng.randint(5, 12)
             check(c)
             calls.append(c)
     return calls

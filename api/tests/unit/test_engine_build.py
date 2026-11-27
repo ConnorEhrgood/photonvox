@@ -173,6 +173,18 @@ def test_ring_groups_carry_their_members_strategy_and_next_step():
     assert office["ring_group_timeout_data"] == "*999901 XML k3x9q2.sip.photoninfra.xyz"
 
 
+def test_one_after_another_each_phone_rings_for_the_time():
+    d = copy.deepcopy(SAMPLE)
+    d["groups"]["office"].update(strategy="sequence", ring_seconds=15)
+    b = built(d)
+    office = rows(b, "v_ring_groups", ring_group_name="office")[0]
+    members = rows(b, "v_ring_group_destinations", ring_group_uuid=office["ring_group_uuid"])
+    assert len(members) > 1 and {m["destination_timeout"] for m in members} == {15}
+    assert office["ring_group_call_timeout"] == 15 * len(members)          # at 15 the second phone would never ring
+    d["groups"]["office"]["strategy"] = "simultaneous"
+    assert rows(built(d), "v_ring_groups", ring_group_name="office")[0]["ring_group_call_timeout"] == 15
+
+
 def test_a_group_with_no_next_step_hangs_up():
     d = copy.deepcopy(SAMPLE)
     d["groups"]["office"].pop("then")

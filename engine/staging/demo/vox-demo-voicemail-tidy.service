@@ -1,0 +1,7 @@
+[Unit]
+Description=PhotonVox demo: keep the demo's voicemail boxes tidy
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vox-demo-voicemail-tidy tidy

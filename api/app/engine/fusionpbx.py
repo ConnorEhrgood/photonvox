@@ -438,7 +438,10 @@ class _Builder:
                 + _act("lua", "app.lua ring_groups") + "\t</condition>\n")
         dp = self.dialplan("ring_group:" + key, f"photonvox.group.{key}", ORDER["group"], RING_GROUP_APP, body, number=number)
         app, data = self.transfer(g["then"])
-        self.row("v_ring_groups", ring_group_uuid=rg, ring_group_name=key, ring_group_extension=number, ring_group_call_timeout=g["ring_seconds"],
+        # One after another, each phone rings for the time, and the group for as long as that takes (the group's own time limit covers them
+        # all: at one phone's time only the first would ever ring).
+        total = g["ring_seconds"] * (len(g["members"]) if g["strategy"] == "sequence" else 1)
+        self.row("v_ring_groups", ring_group_uuid=rg, ring_group_name=key, ring_group_extension=number, ring_group_call_timeout=total,
                  ring_group_forward_enabled=False, ring_group_strategy=g["strategy"], ring_group_timeout_app=app, ring_group_timeout_data=data,
                  ring_group_call_screen_enabled=False, ring_group_call_forward_enabled=False, ring_group_follow_me_enabled=False,
                  ring_group_context=self.domain, ring_group_enabled=True, ring_group_description="PhotonVox", dialplan_uuid=dp)

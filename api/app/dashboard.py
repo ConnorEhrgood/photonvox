@@ -256,7 +256,8 @@ def _day(rows: List[Dict[str, Any]], tz: ZoneInfo) -> Dict[str, Any]:
         hours[datetime.fromtimestamp(_int(r.get("start_epoch")), tz).hour][kind_of(r)] += 1
     mix = _mix(rows)
     return {"calls": len(rows), "minutes": round(sum(_int(r.get("billsec")) for r in rows) / 60),
-            "answered": sum(1 for r in rows if _int(r.get("billsec")) > 0 or r.get("status") == "answered"),
+            # Answered by someone: a voicemail box answers too (the record has talk time), and so does a menu before a caller gives up on a group.
+            "answered": sum(1 for r in rows if (_int(r.get("billsec")) > 0 or r.get("status") == "answered") and not is_missed(r) and not is_voicemail(r)),
             "missed": sum(1 for r in rows if is_missed(r)), "to_voicemail": sum(1 for r in rows if is_voicemail(r)),
             "by_hour": hours, **mix, "peak_lines": _peak([r for r in rows if kind_of(r) != "internal"])}
 

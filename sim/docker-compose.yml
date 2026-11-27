@@ -1,0 +1,43 @@
+# The demo's live simulator on LXC 800 (docs/DEMO.md §2; scripts/demo-sim.sh runs it). Two containers, one for each side of the staging engine:
+# `carrier` on the host's network (10.10.0.80 is the address the engine knows as its carrier, and where the phones' registrations point), and
+# `phones` on a network of its own that Docker routes instead of hiding behind the host's address, so the engine sees a phone, not its carrier,
+# and asks for the phone's password. The engine (CT 610) has a route back to that network (engine/staging/demo/). Half a CPU and 256 MB in all.
+name: vox-demo-sim
+
+x-sim: &sim
+  image: photonvox-demo-sim:1
+  build: .
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  working_dir: /run/sim
+  tmpfs: ["/run/sim:size=8m,mode=0700"]
+  volumes: ["./config:/config:ro"]
+  labels: {com.photonvox.owner: vox-demo-sim}
+  logging: {driver: json-file, options: {max-size: 1m, max-file: "2"}}
+  stop_grace_period: 5s
+
+services:
+  carrier:
+    <<: *sim
+    command: [carrier, /config/sim.json]
+    network_mode: host
+    cpus: 0.3
+    mem_limit: 160m
+  phones:
+    <<: *sim
+    command: [phones, /config/sim.json]
+    networks: [phones]
+    cpus: 0.2
+    mem_limit: 96m
+
+networks:
+  phones:
+    name: vox-demo-sim-phones
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: routed
+    ipam:
+      config: [{subnet: 172.31.61.0/29}]
+    labels: {com.photonvox.owner: vox-demo-sim}

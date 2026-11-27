@@ -1,0 +1,22 @@
+#!/bin/bash
+# On the staging engine (CT 610) only; installed by scripts/demo-sim.sh up, run every 15 minutes by its timer. The demo's voicemail boxes, kept
+# as a business keeps them (docs/DEMO.md §2): a message is listened to (marked saved) within the hour, one in five stays unheard for three days,
+# and messages older than 14 days are removed. `clear` removes them all (scripts/demo-sim.sh reset). Only ever the demo's domain: it is named
+# here and nowhere else.
+set -euo pipefail
+DOMAIN=demo.vox.test
+FILES="/var/lib/freeswitch/storage/voicemail/default/$DOMAIN"
+WHERE="domain_uuid = (select domain_uuid from v_domains where domain_name = '$DOMAIN')"
+NOW="extract(epoch from now())::bigint"
+sql() { cd /tmp && runuser -u postgres -- psql -d fusionpbx -qtAX -v ON_ERROR_STOP=1 -c "$1"; }
+case "${1:-tidy}" in
+  tidy)
+    sql "update v_voicemail_messages set message_status = 'saved', read_epoch = $NOW where $WHERE and coalesce(message_status, '') <> 'saved'
+           and created_epoch < $NOW - 3600 and (created_epoch < $NOW - 259200 or created_epoch::bigint % 5 <> 0);
+         delete from v_voicemail_messages where $WHERE and created_epoch < $NOW - 1209600;" > /dev/null
+    [ ! -d "$FILES" ] || find "$FILES" -type f -name 'msg_*' -mtime +14 -delete ;;
+  clear)
+    sql "delete from v_voicemail_messages where $WHERE;" > /dev/null
+    [ ! -d "$FILES" ] || find "$FILES" -type f -name 'msg_*' -delete ;;
+  *) echo "usage: vox-demo-voicemail-tidy [tidy|clear]" >&2; exit 2 ;;
+esac

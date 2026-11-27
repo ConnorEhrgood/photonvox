@@ -36,7 +36,7 @@ export function CallFlowsPage() {
         {groups.length === 0 ? <p className="ph-hint">None yet.</p> : (
           <ul className="pv-plain">{groups.map(([k, g]) => (
             <li key={k}><strong>{k}</strong>: {g.members.map((m) => draft.users?.[m]?.name ?? m).join(', ')} <span className="ph-hint">
-              ({g.strategy === 'sequence' ? 'one after another' : 'all at once'}, {g.ring_seconds ?? 25} s, then {g.then ? targetText(draft, g.then) : 'hang up'})</span> {edit('group', k)}</li>
+              ({g.strategy === 'sequence' ? `one after another, ${g.ring_seconds ?? 25} s each` : `all at once, ${g.ring_seconds ?? 25} s`}, then {g.then ? targetText(draft, g.then) : 'hang up'})</span> {edit('group', k)}</li>
           ))}</ul>
         )}
       </section>
@@ -246,7 +246,7 @@ function GroupForm({ draft, k, saving, error, onClose, save }: FormProps) {
           <select id="pv-group-strategy" className="ph-input" value={strategy} onChange={(e) => setStrategy(e.target.value as 'simultaneous' | 'sequence')}>
             <option value="simultaneous">All at once</option><option value="sequence">One after another</option>
           </select></div>
-        <div className="ph-field"><label htmlFor="pv-group-seconds">Ring for (seconds)</label>
+        <div className="ph-field"><label htmlFor="pv-group-seconds">{strategy === 'sequence' ? 'Ring each phone for (seconds)' : 'Ring for (seconds)'}</label>
           <input id="pv-group-seconds" className="ph-input" type="number" min={10} max={120} value={seconds} onChange={(e) => setSeconds(e.target.value)} /></div>
       </div>
       <TargetPicker id="pv-group-then" label="If nobody answers" draft={draft} value={then} onChange={setThen} allowNone="Hang up" />

@@ -30,8 +30,11 @@ Text-to-Speech, Chirp 3 HD "Kore", decision 30); that is the one voice source, a
   (peaks 10–11 and 14–15), 40 at the warehouse (two shifts, 06:00–22:00, a page every hour or so), 30 at the apartments (evenings too;
   the maintenance line at night). Calls last 20 seconds to 8 minutes. Quiet at night, as a real office is.
 - **Call history back-filled** for 35 days (the same shapes), so "busiest hours" and "a typical day" have something to say on day one.
-- **Voicemails:** callers who reach a box leave a 6-second **generated tone (no voice, no recording of anyone)**; a few stay unheard so
-  "voicemails waiting" is not zero. Messages older than 14 days are removed.
+- **Voicemails:** callers who reach a box leave a 5 to 12-second **generated tone (no voice, no recording of anyone)**; most are marked
+  listened to within the hour, one in five stays unheard for three days so "voicemails waiting" is not zero. Messages older than 14 days are
+  removed.
+- **Closed is closed:** outside a site's hours and on the federal holidays its main number goes to its voicemail box, as published; callers
+  leave a message or hang up in the greeting.
 - **No emergency call**, ever (never 911, 9911, 933, 988 or an N11 code, not even on staging). The dashboard's emergency card says
   "No emergency calls today". (Connor may want one shown: §6.)
 
@@ -44,10 +47,22 @@ Real protocols end to end, on the staging engine, so PhotonVox sees the demo exa
   LXC 800 (already staging's), so a demo call cannot leave by construction. PhotonVox publishes the demo there with its normal writer, so the
   dial plan, groups, menu and paging are the real FusionPBX/FreeSWITCH ones, checked by the normal post-publish test calls.
 - **The phones:** a simulator, its own compose project **`vox-demo-sim`** on LXC 800 (labeled `com.photonvox.owner=vox-demo-sim`, capped at
-  0.5 CPU and 256 MB, no global prune). A small Python scheduler drives SIPp (as the build test does): 22 SIPp user agents register as the
-  phones and answer like phones (ringing, then answering or not, holding for the call's length, hanging up); calls in come from the SIPp
-  upstream as if from the carrier; calls out go to it. RTP is a silent stream (no audio). The SIP passwords are generated and kept mode 600
-  on the runner and LXC 800, never in git.
+  0.5 CPU and 256 MB, no global prune). A small Python scheduler (`sim/scheduler.py`) drives SIPp (as the build test does) from a traffic
+  model (`sim/traffic.py`: the same day is the same every time, and a test holds it to the demo's document). As built (2026-11-27):
+  - **Two containers, one for each side of the engine.** `carrier` runs on LXC 800's own address, which the engine knows as its carrier:
+    one SIPp answers for every phone (port 5200, where the 22 registrations point; renewed every 5 minutes) and one for the carrier (5071,
+    the demo's gateway), and it places the calls in. `phones` places the calls a phone makes (out, internal, a page). The engine takes
+    anything from its carrier's address as the carrier without asking for a password, so the phones call from a network of their own
+    (`172.31.61.0/29`, a Docker network in routed mode: no address translation), and the engine has a route back to it
+    (`vox-demo-sim-route.service` on CT 610, `engine/staging/demo/`). Nothing else is on that network.
+  - **Who answers is the caller's to say**, so that a call goes as the model has it: every simulated call carries `X-Sim-Answer` (an
+    extension, `any` or `none`) and `X-Sim-Ring` (milliseconds), which FreeSWITCH passes to the phones it rings. The named phone answers after
+    that ring; the others ring until the engine gives up on them, exactly as unanswered phones do.
+  - No audio (calls end before FreeSWITCH's 300-second silence limit), except a voicemail caller's tone. Calls it could not place on time
+    (the container was stopped) are skipped, never sent in a burst; at most 10 at once from each side.
+  - The phones' SIP passwords go from the engine straight to a mode-600 file on LXC 800 (`config/phones.csv`), read by SIPp itself: never on a
+    command line, in a log, on the runner or in git. Nothing traces a SIP message.
+  - On CT 610, a timer (`vox-demo-voicemail-tidy`) keeps the voicemail boxes as §1 says.
 - **Call history:** what FreeSWITCH writes (`v_xml_cdr`) for the live calls; the 35-day back-fill is inserted on CT 610 by a script, in the
   same columns FreeSWITCH writes (no XML/JSON), each back-filled row carrying `accountcode = 'photonvox-sim'`.
 - **Marked as demo:** the instance in PhotonVox gets `simulated: true` (a new field). Staff see "Simulated" on the dashboard and in
@@ -56,10 +71,13 @@ Real protocols end to end, on the staging engine, so PhotonVox sees the demo exa
   read and kept on the tenant; the demo is left out of `/v1/summary`'s counts across organizations, of platform alerts and of any usage or
   billing counts.
 - **Reset and removal** (rule 6):
-  - `manage demo seed`: idempotent. It writes the tenant from the directory's ids, the document above, publishes, and back-fills. Run it again
-    and the demo is clean (its history re-made, its voicemails cleared).
+  - `manage demo seed <instance>`: idempotent. It writes the tenant from the directory's ids and the document above, and publishes. Run it
+    again and the phone system is as written again (a visitor's edits gone). It makes new SIP passwords only for a phone system it creates,
+    so the simulator keeps working across a re-seed; after `demo remove` and a new seed, run `demo-sim.sh up` again.
   - `manage demo remove`: removes the phone system from PhotonVox and the domain from CT 610.
-  - `scripts/demo-sim.sh up|down|reset` drives the simulator.
+  - `scripts/demo-sim.sh up|reset|status|logs|down|remove` drives the simulator from the runner. `reset` makes the history again (the
+    35-day back-fill replaces every call record of the demo's domain up to now) and empties the voicemail boxes. `remove` leaves nothing of
+    it on LXC 800 or CT 610 (the route and the timer included).
 
 ## 3. The customer dashboard
 
@@ -119,7 +137,8 @@ must read well then too (no empty charts: "A quiet day so far").
 2. vox-agent: the `live` operation, with tests. It is staged on CT 610 with `VOX_AGENT_OPERATIONS` including it.
 3. Web: the dashboard (site picker, the tiles, the charts), and the Phone system page (today's Overview, moved). Tests for every state:
    none, quiet, busy, an emergency today, the trunk down, phones offline, a viewer.
-4. The simulator (`sim/`): the scheduler, SIPp scenarios (phone, caller, a page), the back-fill, `scripts/demo-sim.sh`.
+4. The simulator (`sim/`): the scheduler, SIPp scenarios (phone, caller, a page), the back-fill, `scripts/demo-sim.sh`. (Built 2026-11-27,
+   with tests in `sim/tests`; running on LXC 800 against the dev PhotonVox's demo.)
 5. On dev:
    - publish the demo to CT 610 from `photonvox-dev` (seeded with id1's ids, or pulled from the dev directory once id1 connects vox there);
    - run the simulator for a day;
@@ -133,17 +152,17 @@ must read well then too (no empty charts: "A quiet day so far").
 | # | Step | Rollback |
 |---|---|---|
 | P1 | Deploy PhotonVox with the dashboard, paging, the demo guard and migration 0010 (expand only). Backup first. | Redeploy the previous commit (0010 stays; its columns are unused) |
-| P2 | CT 600 (Hickory's dashboard data): vox-agent with the `live` operation (read-only), `VOX_AGENT_OPERATIONS` += `live`; `grant select (voicemail_message_uuid, domain_uuid, voicemail_uuid, created_epoch, message_status) on v_voicemail_messages to photonvox_ro`. No FusionPBX row, no restart of FreeSWITCH. | The previous `vox_agent.py` and env (kept as `.bak`); `revoke` the grant |
+| P2 | CT 600 (Hickory's dashboard data): vox-agent with the `live` operation (read-only) and publish checks that leave no call record (2026-11-27: until then every publish adds a "missed call" or two to Hickory's dashboard), `VOX_AGENT_OPERATIONS` += `live`; `grant select (voicemail_message_uuid, domain_uuid, voicemail_uuid, created_epoch, message_status) on v_voicemail_messages to photonvox_ro`. No FusionPBX row, no restart of FreeSWITCH. | The previous `vox_agent.py` and env (kept as `.bak`); `revoke` the grant |
 | P3 | The path production → CT 610: CT 610 joins mgmtnet as a gateway (mgmtnet's own process, its auto-revert and confirm), grant `console` → it tcp/5432,8780; CT 610's iptables and `pg_hba` admit 10.2.1.5 (one line each, as on CT 600). | Remove the grant and the lines |
 | P4 | Register the instance `demo-sim` (CT 610, `simulated: true`, upstream the SIPp carrier only); `manage demo seed` (the tenant from the directory's ids; publish to CT 610; back-fill). | `manage demo remove`; remove the instance |
-| P5 | `scripts/demo-sim.sh up` on LXC 800. | `scripts/demo-sim.sh down` |
+| P5 | `scripts/demo-sim.sh up` on LXC 800, then `reset` once. (On dev since 2026-11-27: P5 changes nothing but which PhotonVox reads the demo.) | `scripts/demo-sim.sh remove` |
 
 P1 and P2 serve Hickory Church too and can go before the demo. Live doors (PhotonEntry) need `door-calls` in the same operations list
 later; it is not part of this.
 
 **Monthly cost: about $0.**
 - CT 610 and LXC 800 are on Connor's Proxmox. The load: about 150 MB of memory more for FreeSWITCH and 256 MB at most for the simulator,
-  well inside CT 610's 2 GB (1.6 GB free) and its 5.5 GB of free disk; voicemail tones total about 20 MB.
+  well inside CT 610's 2 GB (1.6 GB free) and its 5.5 GB of free disk; voicemail tones total about 50 MB.
 - On the Vultr host: a few kilobytes a second over WireGuard while someone looks at the dashboard.
 - No B2 and no carrier.
 - Text-to-speech for about ten greetings, once: inside Google's free tier.

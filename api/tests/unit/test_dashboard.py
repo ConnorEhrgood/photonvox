@@ -46,6 +46,9 @@ def test_calls_are_counted_by_site_and_kind_today():
     p = page(raw(calls))
     t = p["today"]
     assert (t["calls"], t["minutes"], t["missed"], t["to_voicemail"]) == (5, 8, 1, 1)
+    assert t["answered"] == 3                               # the voicemail box's 20 seconds are not an answer
+    hung_up = dict(cdr("inbound", at(0, 15), 6, status="missed", caller="4125550188", called="7245550100"))   # in a group, after the menu
+    assert page(raw(calls + [hung_up]))["today"]["answered"] == 3
     assert (t["inbound"], t["outbound"], t["internal"]) == (3, 1, 1)
     assert t["by_hour"][9] == {"inbound": 2, "outbound": 0, "internal": 0} and t["by_hour"][14]["internal"] == 1
     main = page(raw(calls), site=S1)["today"]

@@ -54,3 +54,65 @@ def test_the_backfill_rows_and_sql():
     assert out.count("domain_name = 'demo.vox.test'") == 2 and "x'); drop" not in out
     with pytest.raises(SystemExit):
         backfill.sql(calls, 0, "huepc.pbx-pa.example")
+
+
+def test_closed_is_closed():
+    hq, apartments = traffic.SITES["demo-hq"], traffic.SITES["demo-apartments"]
+    assert traffic.is_open(hq, datetime(2026, 11, 12, 16, 59, tzinfo=traffic.NY)) and not traffic.is_open(hq, datetime(2026, 11, 12, 17, 0, tzinfo=traffic.NY))
+    assert not traffic.is_open(hq, datetime(2026, 11, 14, 11, tzinfo=traffic.NY)) and traffic.is_open(apartments, datetime(2026, 11, 14, 11, tzinfo=traffic.NY))
+    # The federal holidays of 2026, the day itself, as the engine's hours have them.
+    year = [date(2026, 1, 1) + timedelta(days=n) for n in range(365)]
+    assert [d.strftime("%m-%d") for d in year if traffic.holiday(d)] == ["01-01", "01-19", "02-16", "05-25", "06-19", "07-04", "09-07", "10-12",
+                                                                         "11-11", "11-26", "12-25"]
+    thanksgiving = traffic.day("demo-hq", date(2026, 11, 26))
+    assert len(thanksgiving) < 15 and all(c.closed for c in thanksgiving if c.dialed == "4125550100")
+    # A main number outside its hours: its voicemail box, or a hang-up in the greeting; never a phone.
+    calls = traffic.between(datetime(2026, 11, 1, tzinfo=timezone.utc), datetime(2026, 11, 15, tzinfo=timezone.utc))
+    closed = [c for c in calls if c.closed]
+    assert closed and {c.dialed for c in closed} == {"4125550100", "4125550140", "4125550170"}
+    assert {(c.status, c.reached) for c in closed if c.dialed == "4125550100"} == {("voicemail", "voicemail:company"), ("missed", "")}
+    for c in closed:
+        assert not traffic.is_open(traffic.SITES[c.site], datetime.fromtimestamp(c.start, traffic.NY)) and not c.digit
+    # In the hours the main number is the menu: a key, and what that key rings.
+    menu = [c for c in calls if c.dialed == "4125550100" and not c.closed]
+    assert {c.digit for c in menu} == set(traffic.MENU)
+    for c in menu:
+        kind, _, key = traffic.MENU[c.digit].partition(":")
+        if c.status == "answered":
+            assert c.reached in (traffic.SITES["demo-hq"].groups[key] if kind == "group" else (key,))
+    assert all(c.talk_s > traffic.GREETING_S for c in calls if c.status == "voicemail")
+
+
+def test_the_model_is_the_demo_as_written():
+    """The traffic model rings what the demo's document has (api/app/demo.py, loaded by its path: the simulator's image has no API in it)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("demo", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                                                       "api", "app", "demo.py"))
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    doc = demo.document()
+    ext = {k: u["extension"] for k, u in doc["users"].items()}
+
+    def target(t):
+        if "menu" in t:
+            return "menu"
+        return f"group:{t['group']}" if "group" in t else f"ext:{ext[t['user']]}" if "user" in t else f"voicemail:{t['voicemail']}"
+    assert backfill.DOMAIN == demo.DOMAIN and {"+1" + x for x in traffic.OUTSIDE} == set(demo.OUTSIDE)
+    assert {k: target(o) for k, o in doc["menus"]["main"]["options"].items()} == traffic.MENU
+    days = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    for site_id, s in doc["sites"].items():
+        site = traffic.SITES[demo.SITES[site_id][0]]
+        numbers = {n[2:]: v for n, v in doc["numbers"].items() if v["site"] == site_id}
+        assert set(site.numbers) == set(numbers) and site.caller_id == s["caller_id"][2:]
+        assert {n: what for n, (_, what) in site.numbers.items()} == {n: target(v["open"]) for n, v in numbers.items()}
+        assert site.closed == {n: v["closed"]["voicemail"] for n, v in numbers.items() if "closed" in v}
+        hours = doc["hours"][s["hours"]]
+        assert site.hours == {days.index(d): (int(span[0][:2]), int(span[0][6:8])) for d, span in hours["week"].items()}
+        assert site.holidays == (hours.get("holidays") == "us-federal")
+        assert set(site.phones) <= {u["extension"] for u in doc["users"].values() if u["site"] == site_id}
+        for key, members in site.groups.items():
+            g = doc["groups"][key]
+            assert members == tuple(ext[m] for m in g["members"]) and site.boxes[key] == g["then"]["voicemail"]
+            assert traffic.GROUP_RING_S[key] == g["ring_seconds"] * (len(members) if g["strategy"] == "sequence" else 1)
+        pages = [p["extension"] for p in doc["pages"].values() if p["site"] == site_id]
+        assert pages == ([site.page] if site.page else [])

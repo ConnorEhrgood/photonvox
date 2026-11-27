@@ -1,14 +1,19 @@
 """The demo's live simulator (docs/DEMO.md §2): the demo's phones registered on the staging engine and answering like phones, and the traffic
-model's calls (sim/traffic.py) placed as they come due, in real time, through SIPp. Runs in its own container (compose project vox-demo-sim).
+model's calls (sim/traffic.py) placed as they come due, in real time, through SIPp (sim/scenarios.py). Two containers of one compose project
+(vox-demo-sim), one for each side of the engine, each running this with its role:
 
-    python3 scheduler.py /config/sim.json
+    python3 scheduler.py carrier /config/sim.json     on the host's network, at the address the engine knows as its carrier (and where the phones'
+                                                      registrations point): everything that answers, the registrations, and the calls in
+    python3 scheduler.py phones /config/sim.json      on the project's own routed network, an address the engine does not take for a carrier,
+                                                      so it asks for the phone's password as it would of a phone: calls out, internal calls, pages
 
-The configuration (mode 600; scripts/demo-sim.sh writes it): {"engine": "10.10.0.60", "domain": "demo.vox.test", "carrier_port": 5071,
-"phones": {"100": "<SIP password>", ...}, "offline": ["110"], "first_port": 5200}. Calls in come from the simulated carrier (SIPp to the engine's
-external profile, as the build test's upstream does); calls out reach the carrier through the demo's gateway; the carrier answers them.
+Both read the same model, which is the same every time for a given day, so neither needs to hear from the other. The configuration (no secret
+in it): {"engine": "10.10.0.60", "domain": "demo.vox.test", "address": "10.10.0.80", "answer_port": 5200, "carrier_port": 5071}. The phones'
+SIP passwords are in /config/phones.csv (mode 600; scripts/demo-sim.sh writes it from the engine), read by SIPp itself: never on a command
+line, never logged, and nothing here traces a message.
 
 Never an emergency number, a service code or a number outside (412) 555-0100 to 0199: every call is checked (traffic.check) before it is placed,
-and the engine's own guard drops anything bound for a real carrier. No audio: calls carry no RTP, except a voicemail caller's generated tone.
+and the engine's own guard drops anything bound for a real carrier. No audio, except a voicemail caller's generated tone.
 """
 from __future__ import annotations
 
@@ -21,122 +26,207 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scenarios  # noqa: E402
 import traffic  # noqa: E402
 
 log = logging.getLogger("vox-demo-sim")
-SCENARIOS = os.environ.get("SIM_SCENARIOS", "/scenarios")
-REGISTER_EVERY_S = 300           # phones register for 600 s and renew every 5 minutes
+ROLES = ("carrier", "phones")
+TONE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tone-ulaw.wav")
+REGISTER_EVERY_S = 300           # the phones register for 600 s and again every 5 minutes
 MAX_TALK_S = 270                 # FreeSWITCH ends a call with no media after 300 s; the simulated calls stay under it
-MAX_CONCURRENT = 12
+MAX_CONCURRENT = 10              # calls in progress from one role; one more is skipped
+LATE_S = 60                      # a call this late (the container was stopped) is skipped, not placed
+MEDIA_PORTS = (6100, 100)        # a voicemail caller's tone: a port of its own, from 6100, four apart
 
 
-@dataclass
+@dataclass(frozen=True)
 class Config:
     engine: str
     domain: str
-    phones: Dict[str, str]
-    carrier_port: int = 5071
-    first_port: int = 5200
-    offline: tuple = ()
+    address: str                          # where the answering side listens: the carrier's address, and the phones' registered Contact
+    answer_port: int = 5200               # the phones
+    carrier_port: int = 5071              # the carrier (the demo's gateway on the engine points here)
+    credentials: str = "/config/phones.csv"
+    work: str = "/run/sim"                # scenarios and one credentials file per phone, written at start (a tmpfs)
 
     @staticmethod
     def load(path: str) -> "Config":
         with open(path) as f:
             c = json.load(f)
-        return Config(c["engine"], c["domain"], {str(k): str(v) for k, v in c["phones"].items()}, int(c.get("carrier_port", 5071)),
-                      int(c.get("first_port", 5200)), tuple(c.get("offline") or ()))
-
-    def port(self, ext: str) -> int:
-        return self.first_port + sorted(self.phones).index(ext)
+        return Config(**{k: c[k] for k in ("engine", "domain", "address", "answer_port", "carrier_port", "credentials", "work") if k in c})
 
 
-def phone_command(cfg: Config, ext: str) -> List[str]:
-    """A phone answering on its own port: rings, then answers or (sometimes) not, holds until the caller hangs up (sim-phone.xml)."""
-    return ["sipp", "-nostdin", "-sf", f"{SCENARIOS}/sim-phone.xml", "-p", str(cfg.port(ext)), "-m", "1000000", "-l", "20", "-trace_err",
-            "-error_file", f"/tmp/phone-{ext}.err"]
+@dataclass(frozen=True)
+class Placement:
+    """How one call of the model is made to happen on the live engine."""
+    role: str
+    scenario: str
+    answer: str                  # X-Sim-Answer: the extension that answers, `any`, or `none`
+    ring_ms: int = 0             # X-Sim-Ring: how long it rings there first
+    hold_ms: int = 0             # from the answer (or the menu key) to the caller hanging up
+    give_up_ms: int = 0          # or: the caller gives up after this long with no answer
+    digit: str = ""
+    speak: bool = False
 
 
-def register_command(cfg: Config, ext: str) -> List[str]:
-    """A registration for the phone's extension, its Contact the phone's answering port (sent from another port, which is then closed)."""
-    return ["sipp", "-nostdin", "-sf", f"{SCENARIOS}/sim-register.xml", "-s", ext, "-au", ext, "-ap", cfg.phones[ext], "-set", "domain", cfg.domain,
-            "-set", "contact_port", str(cfg.port(ext)), "-p", "0", "-m", "1", "-timeout", "10s", f"{cfg.engine}:5060"]
-
-
-def call_command(cfg: Config, c: traffic.Call) -> Optional[List[str]]:
-    """The SIPp command that places one call of the traffic model, or None when the live engine cannot make it look so (a page is a call from a
-    phone to the paging extension; a missed call is one the caller gives up on while it rings)."""
+def placement(c: traffic.Call) -> Placement:
     traffic.check(c)
-    talk_ms = str(1000 * min(MAX_TALK_S, max(5, c.talk_s)))
-    ring_ms = str(1000 * max(3, c.ring_s))
+    ring, talk, key = 1000 * c.ring_s, 1000 * min(MAX_TALK_S, c.talk_s), bool(c.digit)
     if c.kind == "inbound":
-        base = ["-set", "from", c.caller, "-set", "domain", cfg.engine, "-s", c.dialed, f"{cfg.engine}:5080"]
-        if c.status == "missed":
-            return ["sipp", "-nostdin", "-sf", f"{SCENARIOS}/call-cancel.xml", "-d", ring_ms, "-m", "1", "-p", "0", "-timeout", "60s", *base]
-        if c.status == "voicemail":
-            return ["sipp", "-nostdin", "-sf", f"{SCENARIOS}/call-speak.xml", "-d", str(1000 * (12 + min(30, c.talk_s))), "-m", "1", "-p", "0",
-                    "-timeout", "120s", "-mi", "0.0.0.0", *base]
-        return ["sipp", "-nostdin", "-sf", f"{SCENARIOS}/call.xml", "-d", talk_ms, "-m", "1", "-p", "0", "-timeout", f"{MAX_TALK_S + 90}s", *base]
-    if c.caller not in cfg.phones or c.caller in cfg.offline:
-        return None
-    auth = ["-set", "from", c.caller, "-set", "domain", cfg.domain, "-au", c.caller, "-ap", cfg.phones[c.caller], "-s", c.dialed, f"{cfg.engine}:5060"]
-    if c.status == "missed":
-        return ["sipp", "-nostdin", "-sf", f"{SCENARIOS}/call-cancel.xml", "-d", ring_ms, "-m", "1", "-p", "0", "-timeout", "60s", *auth]
-    return ["sipp", "-nostdin", "-sf", f"{SCENARIOS}/call.xml", "-d", talk_ms, "-m", "1", "-p", "0", "-timeout", f"{MAX_TALK_S + 90}s", *auth]
+        if c.closed and c.status == "voicemail":        # straight to the box
+            return Placement("carrier", scenarios.name(False, speak=True), "none", hold_ms=talk, speak=True)
+        if c.closed:                                    # hung up in the box's greeting
+            return Placement("carrier", scenarios.name(False), "none", hold_ms=ring)
+        if c.status == "answered":                      # through the menu, the caller is "answered" from the menu on
+            return Placement("carrier", scenarios.name(False, digit=key), c.reached, ring, hold_ms=talk + (ring if key else 0), digit=c.digit)
+        if c.status == "voicemail":                     # nobody answers; the engine rings them out (ring_s) and the box takes it
+            return Placement("carrier", scenarios.name(False, digit=key, speak=True), "none",
+                             hold_ms=(ring if key else 0) + talk, digit=c.digit, speak=True)
+        if key:                                         # gave up while the group rang: past the menu there is nothing to cancel, so a hang-up
+            return Placement("carrier", scenarios.name(False, digit=True), "none", hold_ms=ring, digit=c.digit)
+        return Placement("carrier", scenarios.name(False, cancel=True), "none", give_up_ms=ring)
+    if c.status != "answered":
+        return Placement("phones", scenarios.name(True, cancel=True), "none", give_up_ms=ring)
+    if c.kind == "internal":
+        return Placement("phones", scenarios.name(True), c.dialed, ring, hold_ms=talk)
+    return Placement("phones", scenarios.name(True), "any", 0 if c.kind == "page" else ring, hold_ms=talk)      # the carrier, or every paged phone
+
+
+def call_command(cfg: Config, c: traffic.Call, n: int) -> List[str]:
+    """SIPp for one call (`n`: this role's count of calls, for a Call-ID and a media port of its own)."""
+    p = placement(c)
+    cmd = ["sipp", "-nostdin", "-sf", f"{cfg.work}/scn/{p.scenario}", "-m", "1", "-s", c.dialed, "-set", "answer", p.answer, "-set", "ring",
+           str(p.ring_ms), "-d", str(max(1000, p.hold_ms)), "-timeout", "420s", "-cid_str", f"%u-sim-{int(c.start)}-{n}@%s"]
+    if p.digit:
+        cmd += ["-set", "digit", p.digit]
+    if p.give_up_ms:
+        cmd += ["-recv_timeout", str(p.give_up_ms)]
+    if p.role == "carrier":                             # as the build test's upstream calls in: ten digits to the engine's external profile
+        cmd += ["-set", "from", c.caller, "-set", "domain", cfg.engine, "-i", cfg.address]
+        if p.speak:
+            cmd += ["-mi", cfg.address, "-mp", str(MEDIA_PORTS[0] + 4 * (n % MEDIA_PORTS[1]))]
+        return cmd + [f"{cfg.engine}:5080"]
+    return cmd + ["-inf", f"{cfg.work}/phone/{c.caller}.csv", "-set", "domain", cfg.domain, f"{cfg.engine}:5060"]
+
+
+def answer_command(cfg: Config, port: int) -> List[str]:
+    """What answers on one port, for every phone or for the carrier, for as long as it runs."""
+    return ["sipp", "-nostdin", "-sf", f"{cfg.work}/scn/sim-answer.xml", "-i", cfg.address, "-p", str(port)]
+
+
+def register_command(cfg: Config, phones: int) -> List[str]:
+    """Every phone's registration in one run; their Contact is where `answer` listens."""
+    return ["sipp", "-nostdin", "-sf", f"{cfg.work}/scn/sim-register.xml", "-inf", cfg.credentials, "-m", str(phones), "-r", "5", "-i", cfg.address,
+            "-set", "domain", cfg.domain, "-set", "contact_port", str(cfg.answer_port), "-timeout", "60s", f"{cfg.engine}:5060"]
+
+
+def credentials(path: str) -> Dict[str, str]:
+    """The phones' lines of the credentials file, by extension (SIPp reads the file itself: `SEQUENTIAL`, then a line a phone)."""
+    with open(path) as f:
+        lines = [x.strip() for x in f if ";" in x]
+    return {x.split(";", 1)[0]: x for x in lines}
 
 
 class Simulator:
-    def __init__(self, cfg: Config, now=lambda: datetime.now(timezone.utc), spawn=subprocess.Popen) -> None:
-        self.cfg, self.now, self.spawn = cfg, now, spawn
-        self.phones: Dict[str, subprocess.Popen] = {}
+    def __init__(self, role: str, cfg: Config, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 spawn: Callable[..., subprocess.Popen] = subprocess.Popen) -> None:
+        if role not in ROLES:
+            raise SystemExit(f"a role: {' or '.join(ROLES)}")
+        self.role, self.cfg, self.now, self.spawn = role, cfg, now, spawn
+        self.phones: Tuple[str, ...] = ()
+        self.answering: Dict[int, subprocess.Popen] = {}
+        self.registering: Optional[subprocess.Popen] = None
+        self.registered_at: Optional[datetime] = None
         self.calls: List[subprocess.Popen] = []
-        self.registered_at = 0.0
+        self.due: List[traffic.Call] = []
+        self.horizon: Optional[datetime] = None
+        self.placed = self.failed = self.skipped = 0
         self.stopping = False
 
-    def online(self) -> List[str]:
-        return [x for x in sorted(self.cfg.phones) if x not in self.cfg.offline]
+    def _run(self, cmd: List[str]) -> subprocess.Popen:
+        return self.spawn(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def keep_phones(self) -> None:
-        for ext in self.online():
-            p = self.phones.get(ext)
+    def prepare(self) -> None:
+        """The scenarios, and for the calling phones a credentials file each (SIPp takes who is calling from a file's first line)."""
+        scenarios.write(os.path.join(self.cfg.work, "scn"), TONE)
+        lines = credentials(self.cfg.credentials)
+        self.phones = tuple(sorted(lines))
+        if self.role == "phones":
+            folder = os.path.join(self.cfg.work, "phone")
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            for ext, line in lines.items():
+                with os.fdopen(os.open(os.path.join(folder, f"{ext}.csv"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+                    f.write("SEQUENTIAL\n" + line + "\n")
+        log.info("%s: %d phones", self.role, len(self.phones))
+
+    def keep(self, now: datetime) -> None:
+        """The carrier's side: something always answering on both ports, and the phones registered."""
+        for port in (self.cfg.answer_port, self.cfg.carrier_port):
+            p = self.answering.get(port)
             if p is None or p.poll() is not None:
-                self.phones[ext] = self.spawn(phone_command(self.cfg, ext), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if time.monotonic() - self.registered_at >= REGISTER_EVERY_S:
-            for ext in self.online():
-                self.spawn(register_command(self.cfg, ext), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self.registered_at = time.monotonic()
+                if p is not None:
+                    log.warning("what answers on %d stopped (%s): started again", port, p.returncode)
+                self.answering[port] = self._run(answer_command(self.cfg, port))
+        if self.registering is not None and self.registering.poll() is not None:
+            if self.registering.returncode:                    # the engine restarting, say: again in half a minute
+                log.warning("not every phone registered (SIPp ended %s)", self.registering.returncode)
+                self.registered_at = now - timedelta(seconds=REGISTER_EVERY_S - 30)
+            self.registering = None
+        if self.registering is None and (self.registered_at is None or (now - self.registered_at).total_seconds() >= REGISTER_EVERY_S):
+            self.registering, self.registered_at = self._run(register_command(self.cfg, len(self.phones))), now
 
-    def place(self, c: traffic.Call) -> bool:
-        self.calls = [p for p in self.calls if p.poll() is None]
-        if len(self.calls) >= MAX_CONCURRENT:
-            log.info("skipped a call: %d in progress", len(self.calls))
+    def load(self, now: datetime) -> None:
+        """This role's calls of the model, an hour at a time, from now on."""
+        if self.horizon is None:
+            self.horizon = now
+        while now >= self.horizon - timedelta(minutes=5):
+            ahead = traffic.between(self.horizon, self.horizon + timedelta(hours=1))
+            self.due += [c for c in ahead if c.start >= now.timestamp() and placement(c).role == self.role]
+            self.horizon += timedelta(hours=1)
+
+    def place(self, c: traffic.Call, now: datetime) -> bool:
+        if now.timestamp() - c.start > LATE_S or len(self.calls) >= MAX_CONCURRENT or (self.role == "phones" and c.caller not in self.phones):
+            self.skipped += 1
             return False
-        cmd = call_command(self.cfg, c)
-        if cmd is None:
-            return False
-        self.calls.append(self.spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-        log.info("%s %s call at %s (%s)", c.status, c.kind, c.site, "page" if c.kind == "page" else "")
+        self.placed += 1
+        self.calls.append(self._run(call_command(self.cfg, c, self.placed)))
+        log.info("%s: %s %s, %s to %s%s", c.site, c.status, "page" if c.kind == "page" else c.kind + " call", c.caller, c.dialed,
+                 f", key {c.digit}" if c.digit else "")
         return True
+
+    def step(self) -> None:
+        now = self.now()
+        if self.role == "carrier":
+            self.keep(now)
+        self.load(now)
+        for p in [p for p in self.calls if p.poll() is not None]:
+            self.calls.remove(p)
+            if p.returncode:
+                self.failed += 1
+                log.warning("a call did not go as meant (SIPp ended %s); %d of %d so far", p.returncode, self.failed, self.placed)
+        while self.due and self.due[0].start <= now.timestamp():
+            self.place(self.due.pop(0), now)
+
+    def stop(self) -> None:
+        for p in [*self.answering.values(), *self.calls, *([self.registering] if self.registering else [])]:
+            if p.poll() is None:
+                p.terminate()
 
     def run(self) -> None:
         signal.signal(signal.SIGTERM, lambda *_: setattr(self, "stopping", True))
-        horizon = self.now()
-        due: List[traffic.Call] = []
+        self.prepare()
         while not self.stopping:
-            now = self.now()
-            if now >= horizon - timedelta(minutes=5):
-                due += [c for c in traffic.between(horizon, horizon + timedelta(hours=1)) if c.start >= now.timestamp()]
-                horizon += timedelta(hours=1)
-            self.keep_phones()
-            while due and due[0].start <= now.timestamp():
-                self.place(due.pop(0))
+            self.step()
             time.sleep(1)
-        for p in list(self.phones.values()) + self.calls:
-            p.terminate()
+        self.stop()
+        log.info("%s: stopped after %d calls (%d did not go as meant, %d skipped)", self.role, self.placed, self.failed, self.skipped)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    Simulator(Config.load(sys.argv[1])).run()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
+    if len(sys.argv) != 3:
+        raise SystemExit(__doc__)
+    Simulator(sys.argv[1], Config.load(sys.argv[2])).run()

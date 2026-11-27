@@ -1,0 +1,15 @@
+# On the staging engine (CT 610) only; installed by scripts/demo-sim.sh up. The demo simulator's phones call from a network of their own on
+# LXC 800 (172.31.61.0/29, docs/DEMO.md §2); this is the engine's way back to it. Nothing else is in that network.
+[Unit]
+Description=PhotonVox demo simulator: the route to its phones' network on LXC 800
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/ip route replace 172.31.61.0/29 via 10.10.0.80
+ExecStop=-/sbin/ip route del 172.31.61.0/29 via 10.10.0.80
+
+[Install]
+WantedBy=multi-user.target
