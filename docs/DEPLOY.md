@@ -86,6 +86,12 @@ host's `.env`; then the steps below, in order.
   (`/v1/me/apps?organization=guardtest`, from vox.photonind.com) answered 200 with the account's six products; reloading again made no
   further trip (no loop). The QA account has no PhotonVox role, so it sees "No access to PhotonVox" and not the switcher itself.
 
+- 2026-11-27 about 20:21 UTC, 51b9510 (audit 2026-11-17 fixes, incl. VOX-A-1, and photon-ui 031c370; Connor's go): no migration, nothing
+  on CT 600. Checked first: `.env` has `OIDC_WEB_CLIENT_ID`; HUEPC ready, version 3, protections on, nothing queued or publishing; no
+  hours span past 24:00 in the draft or any published version. Backup `/opt/photon/backups-manual/pre-vox-audit-20261127T202014Z/vox-db.dump`
+  (mode 600, read back: 38 tables of data). About 20 s of 503 while the API became healthy; api, worker, web healthy, no error in the logs;
+  Board, the directory and Console 200. vox-agent on CT 600 is NOT reinstalled yet (VOX-B-3, -7: still open).
+
 **Open:**
 - **Connor's first real sign-in:** PhotonVox now has his account and flags (PhotonVox switched on for PhotonConsole's organization,
   2026-11-13), but nobody has signed in yet.
