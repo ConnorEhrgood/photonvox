@@ -359,7 +359,7 @@ def check(cfg: Config, body: Dict[str, Any], wait_s: float = 3.0) -> Dict[str, A
     context = "public" if kind == "inbound" else domain
     synthetic = "inbound" if kind == "inbound" else "route"
     variables = (f"photonvox_synthetic={synthetic},photonvox_token={token},domain_name={domain},domain_uuid={domain_uuid},"
-                 "origination_caller_id_number=2125550000,originate_timeout=10,ignore_early_media=true")
+                 "origination_caller_id_number=2125550000,originate_timeout=10,ignore_early_media=true,process_cdr=false")    # not a call: no record
     esl_api(cfg, f"originate {{{variables}}}loopback/{number}/{context} &park()")
     deadline = time.monotonic() + wait_s
     while True:

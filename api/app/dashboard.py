@@ -174,6 +174,24 @@ def _int(v: Any) -> int:
         return 0
 
 
+CHECK_CALLER = "2125550000"         # what vox-agent's synthetic check calls show (an agent older than 2026-11-27 left a record of each)
+
+
+def records(doc: Document, rows: Iterable[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+    """The engine's records that are calls: not the publisher's check calls, not a page's leg to each member's phone (a record from an
+    extension to itself, with no direction). And a page is the internal call it is: FusionPBX marks a call to anything but a user "outbound"."""
+    pages = {p.extension for p in doc.pages.values()}
+    out: List[Mapping[str, Any]] = []
+    for r in rows:
+        caller, dest = (r.get("caller_id_number") or "").strip(), (r.get("destination_number") or "").strip()
+        if caller == CHECK_CALLER and not _int(r.get("billsec")):
+            continue
+        if caller and caller == dest and not (r.get("direction") or ""):
+            continue
+        out.append(dict(r, direction="local") if dest in pages and kind_of(r) == "outbound" else r)
+    return out
+
+
 # ---- the page ----
 
 def compute(doc: Document, sites: Sequence[Mapping[str, Any]], site: Optional[str], raw: Raw, now: datetime,
@@ -198,7 +216,8 @@ def compute(doc: Document, sites: Sequence[Mapping[str, Any]], site: Optional[st
                            "unavailable": sorted(set(raw.problems))}
 
     # history
-    calls = [dict(r, _site=site_of(r, sh, raw.extensions)) for r in (raw.calls or [])]
+    rows = records(doc, raw.calls or [])
+    calls = [dict(r, _site=site_of(r, sh, raw.extensions)) for r in rows]
     calls = [r for r in calls if mine(r["_site"])]
     today = [r for r in calls if _int(r.get("start_epoch")) >= start_today]
     if raw.calls is None:
@@ -225,7 +244,7 @@ def compute(doc: Document, sites: Sequence[Mapping[str, Any]], site: Optional[st
         t["in_progress"] = out["now"]["count"]
         t["peak_lines"] = max(t["peak_lines"], out["now"]["lines"])
     out["phones"] = _phones(raw.live, sh, chosen) if raw.live is not None else None
-    out["trunk"] = _trunk(raw.live, [r for r in (raw.calls or [])], carrier_gateways, now)
+    out["trunk"] = _trunk(raw.live, rows, carrier_gateways, now)
     out["voicemail"] = _voicemail(raw.voicemail, sh, mine) if raw.voicemail is not None else None
     out["numbers"] = _numbers(doc, by_id, chosen, today)
     return out
@@ -360,7 +379,7 @@ def _phones(live: Mapping[str, Any], sh: Shape, chosen: Set[str]) -> Dict[str, A
             "devices": sum(len(registered.get(x, [])) for x, _s in expected)}
 
 
-def _trunk(live: Optional[Mapping[str, Any]], rows: List[Mapping[str, Any]], carrier: Set[str], now: datetime) -> Dict[str, Any]:
+def _trunk(live: Optional[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]], carrier: Set[str], now: datetime) -> Dict[str, Any]:
     """Outside calling in plain words: the carrier's gateways as FreeSWITCH sees them, and how the last outside calls went."""
     gws = [g for g in (live or {}).get("gateways") or [] if not carrier or g.get("gateway") in carrier]
     down = [g for g in gws if (g.get("status") or "").upper() == "DOWN" or (g.get("state") or "").upper() in ("FAIL_WAIT", "FAILED", "UNREGED")]

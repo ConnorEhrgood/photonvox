@@ -151,3 +151,19 @@ def test_peak_lines_counts_overlapping_outside_calls():
     calls = [cdr("inbound", at(0, 10), 600, caller="1", called="7245550100"), cdr("outbound", at(0, 10, 2), 60, ext="e-100", dest="4125550190"),
              cdr("internal", at(0, 10, 3), 60, ext="e-101", caller="100", dest="101"), cdr("inbound", at(0, 12), 60, caller="1", called="7245550100")]
     assert page(raw(calls))["today"]["peak_lines"] == 2
+
+
+def test_check_calls_and_a_pages_legs_are_not_calls_and_a_page_is_internal():
+    doc = PhoneSystem.model_validate({**SAMPLE, "pages": {"everyone": {"name": "Everyone", "site": S1, "extension": "190", "members": list(SAMPLE["users"])[:1]}}})
+    blank = lambda r: {**r, "direction": None}                                                              # noqa: E731
+    calls = [cdr("inbound", at(0, 9), 0, status="no_answer", caller=d.CHECK_CALLER, dest="100"),             # the publisher's checks
+             blank(cdr("internal", at(0, 9), 0, status="no_answer", caller=d.CHECK_CALLER, dest="7245550100")),
+             cdr("outbound", at(0, 9), 0, status="failed", caller=d.CHECK_CALLER, dest="19005550100", cause="CALL_REJECTED"),
+             cdr("outbound", at(0, 10), 12, ext="e-100", caller="100", dest="190"),                           # a page, as FusionPBX records it
+             blank(cdr("internal", at(0, 10), 12, ext="e-101", caller="101", dest="101")),                    # and its leg to a member's phone
+             cdr("inbound", at(0, 11), 60, ext="e-100", caller=d.CHECK_CALLER, called="7245550100")]         # a real call from that number
+    p = d.compute(doc, SITES, None, raw(calls), NOW, {}, {GW})
+    t = p["today"]
+    assert (t["calls"], t["inbound"], t["outbound"], t["internal"], t["missed"], t["peak_lines"]) == (2, 1, 0, 1, 0, 1)
+    assert p["trunk"]["last_out"] is None and p["week"] == {"inbound": 1, "outbound": 0, "internal": 1}
+

@@ -143,7 +143,7 @@ def test_a_synthetic_call_reports_what_it_found(agent):
     body = {"kind": "inbound", "number": "+17245550100", "domain_name": "x.sip.test", "domain_uuid": UUID1, "token": "0123456789abcdef"}
     assert call(agent, "POST", "/v1/check", body) == (200, {"found": "reached 301"})
     assert FakeESL.commands[-1].startswith("originate {photonvox_synthetic=inbound,photonvox_token=0123456789abcdef,")
-    assert FakeESL.commands[-1].endswith("}loopback/+17245550100/public &park()")
+    assert FakeESL.commands[-1].endswith(",process_cdr=false}loopback/+17245550100/public &park()")       # a check is not a call: no call record
     code, r = call(agent, "POST", "/v1/check", {**body, "kind": "route", "number": "+12125550123"})
     assert code == 200 and FakeESL.commands[-1].endswith("}loopback/+12125550123/x.sip.test &park()")
     for field, bad in (("kind", "shell"), ("number", "911;status"), ("domain_name", "X Y"), ("domain_uuid", "x"), ("token", "zz")):
