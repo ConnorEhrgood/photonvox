@@ -180,7 +180,7 @@ function CallList({ data }: { data: Dashboard }) {
           <li key={i}>
             <span className={`pv-dash-kind pv-dash-${c.kind}`}>{KIND[c.kind]}</span>
             <span className="pv-dash-who">
-              {c.who[0] ? `${c.who[0].name}` : c.kind === 'inbound' ? 'Ringing in' : 'A phone'}
+              {c.who[0] ? `${c.who[0].name}` : c.kind !== 'inbound' ? 'A phone' : c.state === 'ringing' ? 'Ringing in' : 'A caller'}
               <span className="ph-hint">
                 {c.kind === 'internal' ? (c.other ? ` with ${c.other}` : '') : c.other ? ` ${c.kind === 'inbound' ? 'from' : 'to'} ${c.other}` : ''}
                 {c.number ? ` on ${phone(c.number)}` : ''}

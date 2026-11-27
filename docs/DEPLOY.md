@@ -20,7 +20,9 @@ version live (BUILD-LOG 2026-11-14). What it can do there, and how to take it aw
   `~/.config/photonvox/` on 2026-11-17 (audit VOX-B-13): to delete or rotate.
 - **Updating the agent:** `agent/install.sh root@10.10.0.21 <key>` keeps `/etc/vox-agent.env` as it is (secret, bind, operations); give a
   bind or operations list only to change it. The update since 0.1.0 refuses emergency and service numbers in `check` and can be limited to
-  the managed domains (`VOX_AGENT_DOMAINS`, to add with HUEPC's domain name).
+  the managed domains (`VOX_AGENT_DOMAINS`, to add with HUEPC's domain name). Since 2026-11-27 it also has the `live` reading (the
+  dashboard's phones online and calls in progress; add `live` to `VOX_AGENT_OPERATIONS`) and its check calls leave no call record
+  (until it is installed, each publish leaves one or two records; the dashboard leaves them out from the next deploy).
 - **Undo (take PhotonVox's write access away):** `engine/live/gate-rw.sh undo` (drops `photonvox_rw` and its `pg_hba` line), stop and
   disable vox-agent (`systemctl disable --now vox-agent`) and remove its iptables line (backup `rules.v4.bak-vox-8781`); the read role:
   `engine/live/gate-1c.sh undo`. The domain's rows stay as PhotonVox last wrote them; the protections' own undo is `app.manage republish
@@ -90,7 +92,10 @@ host's `.env`; then the steps below, in order.
   on CT 600. Checked first: `.env` has `OIDC_WEB_CLIENT_ID`; HUEPC ready, version 3, protections on, nothing queued or publishing; no
   hours span past 24:00 in the draft or any published version. Backup `/opt/photon/backups-manual/pre-vox-audit-20261127T202014Z/vox-db.dump`
   (mode 600, read back: 38 tables of data). About 20 s of 503 while the API became healthy; api, worker, web healthy, no error in the logs;
-  Board, the directory and Console 200. vox-agent on CT 600 is NOT reinstalled yet (VOX-B-3, -7: still open).
+  Board, the directory and Console 200. vox-agent on CT 600 is NOT reinstalled yet (VOX-B-3, -7: still open). (Noted afterwards
+  from the repository, production not read: 51b9510 contains migration 0010 and the dashboard as the home page, both committed after
+  643f983, and the compose `migrate` service runs before the API starts, so "no migration" is probably wrong: to confirm with
+  `alembic current` at the next deploy.)
 
 **Open:**
 - **Connor's first real sign-in:** PhotonVox now has his account and flags (PhotonVox switched on for PhotonConsole's organization,

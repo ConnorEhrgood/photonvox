@@ -614,3 +614,40 @@ either managed by PhotonVox with no behavior change and test calls passing, or f
 - `sync-vendored.mjs web/src --css --base --auth`: only `ph-components.css` changed. The sidebar's full-height column (ccc0a84's rule, now
   shared) and the sidebar above positioned page content (z-index 50, below dialogs and the app switcher). Vox's own copy of the rule is gone
   from app.css. 238 web tests pass; the demo screenshots show the column the page's full height.
+
+
+## 2026-11-27 — The demo runs: `demo seed`, the simulator, and four things it found (not deployed)
+
+Asked to carry PhotonVox on. Everything open in production waits for Connor (below), so the next unblocked piece was the demo (DEMO.md §4):
+its phone system by command and its live simulator, against staging and the dev PhotonVox on LXC 800. Nothing in production was read or changed.
+
+- **The demo by command** (e4462d7): `manage add-instance … simulated`, `demo seed <instance>`, `demo remove`; tests in
+  `api/tests/api/test_demo_seed.py`. Staging got the dashboard's read grants and the repository's vox-agent (d629b46), reinstalled once
+  more for check calls without a record.
+- **The simulator** (`sim/`, `scripts/demo-sim.sh`, `engine/staging/demo/`; DEMO.md §2 has the design as built): a traffic model held to the
+  demo's document by a test, a scheduler in two containers on LXC 800 (the carrier's side on the host's address; the phones' own calls from
+  a routed network `172.31.61.0/29`, with a route on CT 610), one SIPp answering for all 22 phones, callers that say who answers
+  (`X-Sim-Answer`, `X-Sim-Ring`), a voicemail tidy timer on CT 610, a 35-day back-fill written as FusionPBX writes records. Running since
+  about 22:01 UTC: 22 of 23 phones registered (the conference room is left offline on purpose), about 21 MB of memory in all, calls placed
+  as modeled (first: 108 to 100, answered, 19 s). Rollback: `scripts/demo-sim.sh remove`.
+- **Found by running it, fixed, on `main`, not deployed:**
+  1. A ring group that rings **one after another** only ever rang its first member (ENGINE.md). No customer has one yet.
+  2. **Every publish left one or two "missed calls"** on the dashboard (the check calls' records). The agent no longer writes them; the
+     dashboard leaves the old ones out. Hickory's dashboard has these today.
+  3. A **page** counted as an outside call plus one inside call for each phone paged; it is one inside call.
+  4. **"% answered" counted voicemail and hang-ups after a menu as answered.**
+  Also: a caller in a menu or leaving a message showed as "Ringing in" on the live list (now "A caller").
+- **Proven on staging:** every kind of call the model has (in: answered, missed, voicemail, by a menu key, closed hours with and without a
+  message; phone to phone; out; a page), the leasing group in turn (second member after 15 s, third after 30 s), a publish with checks that
+  leaves no record, the dashboard computed by the dev PhotonVox with the agent's `live` (screenshots: `scripts/demo-dashboard.sh`, then
+  `web/scripts/dashboard-shots.mjs`).
+- **A slip:** while testing by hand, a SIPp message trace printed one demo phone's SIP password (extension 100, staging only) into this
+  session's output. The demo was removed and seeded again (every password new), and nothing in the simulator traces or prints one.
+- Suites: API 646 passed (critical modules 100%), web 264 (98.0 / 90.6 / 97.4 / 99.1), agent 64, simulator 11.
+- **A doubt about the deploy log:** today's deploy (51b9510) is logged "no migration", but it contains migration 0010 and the dashboard as
+  home, and the `migrate` service runs before the API. Production was not read to check (DEPLOY.md).
+- **Waiting for Connor:** a deploy of the fixes above; vox-agent on CT 600 brought to the repository's (`live`, `VOX_AGENT_DOMAINS`, no
+  check records); VOX-B-1 (`engine/live/gate-rw-scope.sql`); VOX-B-13 (the plaintext live credentials on the runner); the demo in production
+  (DEMO.md P2–P5); the GDMS API key and two Grandstream phones (Step 4); the Google text-to-speech key, Postmark's voicemail token, HTC's 911
+  contact (Step 2).
+- **Next, without anyone:** nothing large. With the GDMS key: Step 4.

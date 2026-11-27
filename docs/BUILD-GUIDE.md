@@ -8,17 +8,22 @@ ordered steps. Work through them in order. Stop at every **GATE** and wait for C
 **Connor decided the "Decisions" at the top of ARCHITECTURE.md on 2026-11-13: all as recommended, except decision 23 (the app's 911
 location is automatic; ARCHITECTURE §18a).** This guide follows them. Steps still stop at their gates for the resources only Connor can give.
 
-## Start here (status as of 2026-11-13)
+## Start here (status as of 2026-11-27)
+
+The log of what was done and found is `docs/BUILD-LOG.md`; production is `docs/DEPLOY.md`; the engines `docs/ENGINE.md`; the demo `docs/DEMO.md`.
 
 | Item | State |
 |---|---|
-| Design | `docs/ARCHITECTURE.md` revision 2 with §18a (the app); **decisions 1–28 decided 2026-11-13** (23 as Connor revised it) |
-| The live engine | FusionPBX in LXC 600 (`10.10.0.21`) on Proxmox `py`, in HTC's central office. **Production with real customers' phones and 911 on it.** Inventoried read-only 2026-11-13 (ARCHITECTURE §17a): one customer, 10 extensions, 7 phones, 5 numbers; **no backup off the node**; fixes being raised with Connor, not written here |
-| PhotonConsole | Polls the engine today (`photon_pbx`: read-only Postgres `photon_ro` + `photon-fpbx-shim`, over mgmtnet). Its code is the reference for every read query |
-| PhotonID directory | Built, not yet in production (photonid GATE B). `vox` is in its catalog as "coming". Steps 0–3 work against its contract and fake |
-| GDMS | API reference read (ARCHITECTURE §12); **no API account** (GATE 0c) |
-| Repo `~/projects/photonvox` | Git, branch `main`, **no remote**: commit locally. **Step 0.1–0.5 done 2026-11-13** (skeleton; inventory scripts, run once by the operator; API on the directory fake; web shell; compose and smoke). **Ahead of order, because it needs no resources: Step 3's document, its validation and the compiler to an engine plan** (no FusionPBX writes: those wait for the write-path spike) |
-| Staging instance, production host | Staging: CT 610 (GATE 0a), FusionPBX built and checked 2026-11-13 (docs/ENGINE.md); SIPp upstream on LXC 800 and the engine write-path spike done (docs/SPIKES.md §1); the adapter's write role on staging (GATE 3a, staging part) and the adapter itself built (Step 3). Production: the shared Photon host (decision 18), **deployed 2026-11-13** at vox.photonind.com and api.vox.photonind.com (docs/DEPLOY.md, GATE 1a done); nobody can sign in until an organization has `vox` switched on |
+| Design | `docs/ARCHITECTURE.md` revision 2 with §18a (the app); decisions 1–28 decided 2026-11-13 |
+| Steps 0, 1, 3 | Done. The builder, compiler, publish, undo and drift; templates and import; the 911 queue; voicemail to email; text to speech; paging; the customer dashboard. Production at vox.photonind.com since 2026-11-13; last deploy 2026-11-27 (51b9510, the 2026-11-17 audit's fixes) |
+| Step 7 (first customer) | Hickory Church (HUEPC) adopted on the live engine; protections live since 2026-11-14 (version 3) |
+| The live engine | FusionPBX in LXC 600 (`10.10.0.21`), instance `live-a`. **Production with real customers' phones and 911 on it.** Its vox-agent is 0.1.0: no `live`, no `VOX_AGENT_DOMAINS`, check calls leave records (DEPLOY.md) |
+| Staging | CT 610 `vox-staging` (ENGINE.md), never reaches a carrier. Also the demo's engine |
+| The demo | Organization `demo` on staging, driven by the simulator on LXC 800 and read by the dev PhotonVox there (`scripts/dev-stack.sh`, `scripts/demo-sim.sh`). Not in production: DEMO.md §5, P2–P5, on Connor's go |
+| Step 2 (production items), 4 (Grandstream GDMS), 5 (Console), 6 (pilot) | Open. Step 4 waits for a GDMS API key and test phones (GATE 0c); the rest for Connor (the asks are in the last BUILD-LOG entry) |
+| PhotonEntry door stations | Built and proven on staging (contract/vox/); not in production use |
+| Not deployed (on `main` since 51b9510) | The ring-group fix (one after another), check calls without a record, the dashboard's counts (a page, % answered), the demo's commands and simulator |
+| Repo | `main`, pushed to origin. Tests: `scripts/test-all.sh` (API on LXC 800, web, agent, sim) |
 
 **Dev ports** (they collide with no other agent): web **5183**, API **8113**.
 

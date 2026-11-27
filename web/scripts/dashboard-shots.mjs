@@ -2,6 +2,7 @@
 // The dashboard's screenshots from saved answers (real ones read from production, or the demo's): the page as it is built here, its API answered
 // from a file, at 1440x900 and 390x844. The file: {"org": {"name", "slug"}, "pages": {"": <the whole organization>, "<site slug>": <one site>}}.
 //   node scripts/dashboard-shots.mjs <answers.json> <output dir>
+// SHOT_SCALE=2 for a picture a person will look at; SHOT_THEME=light for the light theme (the page is dark unless asked).
 // Output stays out of git (real customers' names and numbers). Chromium comes from Playwright's cache, as in screenshots.mjs.
 import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, readdirSync } from 'node:fs'
@@ -13,6 +14,8 @@ const [file, out] = process.argv.slice(2)
 if (!file || !out) { console.error('usage: dashboard-shots.mjs <answers.json> <output dir>'); process.exit(2) }
 const { org, pages } = JSON.parse(readFileSync(file, 'utf8'))
 const PORT = 5184
+const SCALE = Number(process.env.SHOT_SCALE || 1)
+const LIGHT = process.env.SHOT_THEME === 'light'
 const API = 'http://api.test'
 const SIZES = { desktop: { width: 1440, height: 900 }, phone: { width: 390, height: 844 } }
 const cache = join(homedir(), '.cache/ms-playwright')
@@ -32,7 +35,7 @@ const browser = await chromium.launch({ executablePath })
 try {
   for (const slug of Object.keys(pages)) {
     for (const [size, viewport] of Object.entries(SIZES)) {
-      const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, timezoneId: pages[slug].timezone || 'America/New_York' })
+      const ctx = await browser.newContext({ viewport, deviceScaleFactor: SCALE, timezoneId: pages[slug].timezone || 'America/New_York' })
       await ctx.addInitScript(() => sessionStorage.setItem('pv-dev-token', 'screenshot'))
       await ctx.route(`${API}/**`, (r) => {
         if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: cors })
@@ -43,8 +46,9 @@ try {
       await ctx.route('http://dir.test/**', (r) => r.fulfill({ status: 404, headers: cors, body: '{}' }))
       const page = await ctx.newPage()
       await page.goto(`http://localhost:${PORT}/org/${org.slug}/${slug ? `?site=${slug}` : ''}`)
+      if (LIGHT) await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
       await page.waitForTimeout(1200)
-      const name = `dashboard-${slug || 'all'}-${size}.png`
+      const name = `dashboard-${slug || 'all'}-${size}${LIGHT ? '-light' : ''}.png`
       await page.screenshot({ path: join(out, name), fullPage: true })
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       console.log(`${name}${overflow > 0 ? `  HORIZONTAL SCROLL ${overflow}px` : ''}`)

@@ -42,7 +42,7 @@ case "${1:-}" in
   status)
     ssh $HOST "$C ps --format '{{.Name}} {{.Status}}'; docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}' \$(docker ps -q --filter label=com.photonvox.owner=vox-demo-sim)"
     S "echo \"route: \$(ip route show $NET)\"; echo \"tidy timer: \$(systemctl is-active vox-demo-voicemail-tidy.timer)\"
-       echo \"phones registered: \$(fs_cli -x 'show registrations' | grep -c '@$DOMAIN')\"; echo \"calls now: \$(fs_cli -x 'show calls count')\"
+       echo \"phones registered: \$(fs_cli -x 'show registrations' | grep -c ',$DOMAIN,')\"; echo \"calls now: \$(fs_cli -x 'show calls count')\"
        $PSQL -c \"select 'voicemails: ' || count(*) || ' (' || count(*) filter (where coalesce(m.message_status, '') <> 'saved') || ' unheard)' from v_voicemail_messages m join v_domains d using (domain_uuid) where d.domain_name = '$DOMAIN'\"
        $PSQL -c \"select 'call records: ' || count(*) || ', ' || count(*) filter (where accountcode is distinct from 'photonvox-sim') || ' of them live calls' from v_xml_cdr where domain_name = '$DOMAIN'\"" ;;
   logs) ssh $HOST "$C logs --tail ${3:-40} ${2:-}" ;;

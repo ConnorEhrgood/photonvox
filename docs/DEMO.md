@@ -75,6 +75,8 @@ Real protocols end to end, on the staging engine, so PhotonVox sees the demo exa
     again and the phone system is as written again (a visitor's edits gone). It makes new SIP passwords only for a phone system it creates,
     so the simulator keeps working across a re-seed; after `demo remove` and a new seed, run `demo-sim.sh up` again.
   - `manage demo remove`: removes the phone system from PhotonVox and the domain from CT 610.
+  - `scripts/demo-dashboard.sh > answers.json` writes the demo's dashboard as the dev PhotonVox computes it, for
+    `web/scripts/dashboard-shots.mjs` (screenshots; `SHOT_SCALE=2`, `SHOT_THEME=light`).
   - `scripts/demo-sim.sh up|reset|status|logs|down|remove` drives the simulator from the runner. `reset` makes the history again (the
     35-day back-fill replaces every call record of the demo's domain up to now) and empties the voicemail boxes. `remove` leaves nothing of
     it on LXC 800 or CT 610 (the route and the timer included).

@@ -49,6 +49,11 @@ def test_the_backfill_rows_and_sql():
     assert re.fullmatch(r"41255501\d\d", answered["caller_destination"]) and answered["billsec"] > 0 and answered["ext"]
     missed = next(r for r in inbound if r["status"] == "missed")
     assert missed["missed_call"] is True and missed["billsec"] == 0 and missed["answer_epoch"] is None and missed["ext"] is None
+    # A caller who hangs up in a closed number's greeting: the box answered, so the engine calls it voicemail, with no message.
+    greeted = [dict(zip(backfill.COLUMNS, backfill.row(c))) for c in calls if c.closed and c.status == "missed"]
+    assert greeted and all(r["status"] == "voicemail" and r["missed_call"] is True and r["voicemail_message"] is False and r["billsec"] > 0
+                           and r["answer_epoch"] == r["start_epoch"] and r["hangup_cause"] == "NORMAL_CLEARING" for r in greeted)
+    assert all(r[10] == r[11] for r in rows)                        # FusionPBX's duration is its billsec
     out = backfill.sql(calls, int(now.timestamp()))
     assert out.startswith("begin;") and out.rstrip().endswith("commit;") and "'photonvox-sim'" in out
     assert out.count("domain_name = 'demo.vox.test'") == 2 and "x'); drop" not in out

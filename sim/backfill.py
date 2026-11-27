@@ -25,8 +25,11 @@ COLUMNS = ("xml_cdr_uuid", "direction", "caller_id_name", "caller_id_number", "c
 
 def row(c: traffic.Call) -> tuple:
     site = traffic.SITES[c.site]
-    answer: Optional[int] = int(c.start + c.ring_s) if c.status in ("answered", "voicemail") else None
+    greeted = c.closed and c.status == "missed"     # hung up in a closed number's greeting: the box answered, no message was left
+    answer: Optional[int] = int(c.start) if greeted else int(c.start + c.ring_s) if c.status in ("answered", "voicemail") else None
     end = int(c.end)
+    billsec = c.ring_s if greeted else c.talk_s if answer else 0
+    status = "voicemail" if greeted else c.status if c.kind == "inbound" or c.status == "answered" else "cancelled"
     if c.kind == "inbound":
         ext = c.reached if c.status == "answered" else None
         dest = c.reached if c.status == "answered" else c.dialed
@@ -37,9 +40,9 @@ def row(c: traffic.Call) -> tuple:
         values = ("local", "", c.caller, c.dialed, c.dialed, c.dialed)
     else:
         values = ("local", "", c.caller, c.dialed, c.dialed, None)
-    cause = "NORMAL_CLEARING" if c.status != "missed" else ("ORIGINATOR_CANCEL" if c.kind != "outbound" else "NO_ANSWER")
-    return (str(uuid.uuid5(NS, f"{c.site}:{c.start}:{c.caller}:{c.dialed}")),) + values + (
-        int(c.start), answer, end, end - int(c.start), c.talk_s if answer else 0, c.status if c.kind == "inbound" or c.status == "answered" else "cancelled",
+    cause = "NORMAL_CLEARING" if answer else ("ORIGINATOR_CANCEL" if c.kind != "outbound" else "NO_ANSWER")
+    return (str(uuid.uuid5(NS, f"{c.site}:{c.start}:{c.caller}:{c.dialed}")),) + values + (         # FusionPBX's duration is its billsec
+        int(c.start), answer, end, billsec, billsec, status,
         c.status != "answered" and c.kind == "inbound", c.status == "voicemail", cause)        # as FusionPBX marks them: a voicemail is a missed call too
 
 

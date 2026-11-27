@@ -61,6 +61,14 @@ describe('the customer dashboard', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('says a caller no phone has yet (in a menu, leaving a message) is a caller, not ringing', async () => {
+    const call = { kind: 'inbound' as const, who: [], other: '…0188', number: null, site: null }
+    page({ ...BUSY, now: { ...BUSY.now!, calls: [{ ...call, state: 'talking', seconds: 9 }, { ...call, other: '…0190', state: 'ringing', seconds: 2 }] } })
+    const now = await screen.findByRole('region', { name: 'Right now' })
+    expect(within(now).getByText('A caller')).toBeInTheDocument()
+    expect(within(now).getByText('Ringing in')).toBeInTheDocument()
+  })
+
   it('puts an emergency call today at the top: who, where, and the address given to 911', async () => {
     page({ ...BUSY, emergency: [{ at: '2026-11-12T15:42:00Z', dialed: '911', extension: '101', who: 'Sam Ortiz', site: 'Headquarters',
       address: '1 Example Way, Pittsburgh, PA 15222', answered: true, seconds: 185 }] })
