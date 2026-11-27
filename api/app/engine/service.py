@@ -183,6 +183,16 @@ def _write(db: Session, ps: PhoneSystem, instance: PbxInstance, plan: Optional[M
     return res
 
 
+def remove(db: Session, ps: PhoneSystem, instance: PbxInstance, connect: Connect = connect) -> int:
+    """Everything this phone system wrote, removed from its engine; returns how many rows went. The domain's own row stays (the adapter may not
+    delete a domain), empty. For the demo's removal only (app.manage): a customer's phone system is never removed this way."""
+    eng, agent = connect(instance)
+    try:
+        return _write(db, ps, instance, None, eng, agent).removed
+    finally:
+        eng.dispose()
+
+
 def publish_version(db: Session, version_id: uuid.UUID, connect: Connect = connect) -> str:
     """Publish one queued version; returns its final state. Commits as it goes, so a crash leaves an honest record."""
     v = db.get(PhoneSystemVersion, version_id)

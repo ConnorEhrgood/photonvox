@@ -2,7 +2,9 @@
 Platform, as the system, each written to the audit log with the operator's name; for steps run by hand from a reviewed file (the takeover,
 decision 32), where no browser sign-in is involved. Secrets come on standard input, never on a command line, and are never printed.
 
-    add-instance <name> <hostname> <own gateway key>=<gateway id> < database-url    an engine with its own gateways and no vox-agent
+    add-instance <name> <hostname> <own gateway key>=<gateway id> [simulated] < database-url
+                                                                                    an engine with its own gateways and no vox-agent; "simulated":
+                                                                                    its phones and calls are simulated, for the demo only
     set-agent <instance name> <agent url> < agent-secret                            its vox-agent, proved by a signed status call first
     set-agent <instance name> off                                                   no vox-agent (publishes that need one are refused)
     adopt <instance name> <organization id> <site id> <domain>                      read, import, prove a no-op, keep (writes nothing to the engine)
@@ -18,6 +20,12 @@ decision 32), where no browser sign-in is involved. Secrets come on standard inp
     recover <organization id>                                                       a version left "publishing" by a stopped process: marked failed now
     set-911 <organization id> <site id> <key> <street> <city> <state> <zip> <note>    a site's 911 address, validated (the carrier has it on file:
                                                                                     the note says who confirmed it, and when)
+    demo seed <simulated instance name>                                             the demo organization's phone system (docs/DEMO.md): made if it
+                                                                                    is missing, its document put back as written, published. Run
+                                                                                    again, it is as written again (scripts/demo-sim.sh reset does the
+                                                                                    engine's side: the call history re-made, the voicemails cleared)
+    demo remove                                                                     the demo's phone system removed from PhotonVox, and everything
+                                                                                    it wrote from the simulated engine
 """
 from __future__ import annotations
 
@@ -26,13 +34,14 @@ import sys
 import uuid
 from typing import List
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from app import audit, crypto
+from app import audit, crypto, demo
 from app.db import SystemSession
 from app.engine import service, takeover
 from app.engine.agent import HttpAgent
-from app.models import EmergencyLocation, PbxInstance, PhoneSystem, PhoneSystemVersion, Site, utcnow
+from app.models import (CarrierRequest, EmergencyLocation, EmergencyNumber, EngineObject, EngineSecret, HeldNumber, PbxInstance, PhoneSystem,
+                        PhoneSystemVersion, Site, Tenant, utcnow)
 
 OPERATOR = "operator (app.manage)"
 
@@ -51,6 +60,71 @@ def _not_busy(s, ps: PhoneSystem) -> None:
         raise SystemExit(f"version {v.number} is still {v.state}; wait for it (or, if a stopped process left it, `recover <organization id>`)")
 
 
+def _demo_seed(s, name: str) -> PhoneSystem:
+    """The demo organization as docs/DEMO.md has it, ready to publish: its phone system on the simulated instance (made if missing), the sites'
+    911 locations (a city only, plainly not an address), its fictional numbers assigned, and the document as written. Where no directory has
+    brought the organization (dev), it and its sites are made with the directory's ids. Everything else refuses: an instance that is not
+    simulated, an organization the directory does not mark as a demo, a phone system that is somewhere else."""
+    i = s.execute(select(PbxInstance).where(PbxInstance.name == name)).scalar_one_or_none()
+    if i is None or not i.simulated or i.role != "active":
+        raise SystemExit("the demo goes only on an active simulated instance (docs/DEMO.md)")
+    org = uuid.UUID(demo.ORG)
+    tenant = s.get(Tenant, org)
+    if tenant is None:
+        s.add(Tenant(id=org, name="Photon Demo", slug="demo", status="active", products=["vox"], demo=True))
+    elif not tenant.demo:
+        raise SystemExit("the directory does not mark this organization as a demo")
+    for sid, (slug, site_name, city, state) in demo.SITES.items():
+        if s.get(Site, uuid.UUID(sid)) is None:
+            s.add(Site(id=uuid.UUID(sid), tenant_id=org, slug=slug, name=site_name, address=f"{city}, {state}", timezone="America/New_York"))
+    doc = demo.document()
+    for number in doc["numbers"]:
+        held = s.get(HeldNumber, number)
+        if held is None:
+            s.add(HeldNumber(number=number, tenant_id=org, carrier="simulated", note="demo: fictional, at no carrier"))
+        elif held.tenant_id != org:
+            raise SystemExit(f"{number} is held for someone else")
+    for sid, address in demo.emergency_locations().items():
+        loc = s.execute(select(EmergencyLocation).where(EmergencyLocation.site_id == uuid.UUID(sid), EmergencyLocation.key == "main")).scalar_one_or_none()
+        if loc is None:
+            loc = EmergencyLocation(tenant_id=org, site_id=uuid.UUID(sid), key="main")
+            s.add(loc)
+        loc.address, loc.status, loc.note = address, "validated", "demo: not a real address, never sent to a carrier"
+        loc.validated_by_label, loc.validated_at = OPERATOR, utcnow()
+    ps = s.execute(select(PhoneSystem).where(PhoneSystem.tenant_id == org)).scalar_one_or_none()
+    if ps is None:
+        # Fixed ids: every engine row's id derives from them, so the demo seeded again after a removal is the same rows on the engine.
+        ps = PhoneSystem(id=uuid.uuid5(org, "phone-system"), tenant_id=org, instance_id=i.id, domain_name=demo.DOMAIN,
+                         domain_uuid=uuid.uuid5(org, "domain:" + demo.DOMAIN), draft=doc)
+        s.add(ps)
+    elif ps.instance_id != i.id or ps.domain_name != demo.DOMAIN:
+        raise SystemExit(f"the demo already has a phone system elsewhere ({ps.domain_name}); `demo remove` first")
+    s.flush()
+    _not_busy(s, ps)
+    ps.draft = doc
+    return ps
+
+
+def _demo_remove(s, connect: service.Connect) -> dict:
+    """The demo's phone system gone from PhotonVox and everything it wrote gone from the simulated engine. Only ever the demo on a simulated
+    instance: a customer's phone system is not removed this way. The organization and its sites stay (they are the directory's)."""
+    ps = _ps(s, demo.ORG)
+    i, tenant = s.get(PbxInstance, ps.instance_id), s.get(Tenant, ps.tenant_id)
+    if not (tenant is not None and tenant.demo and i.simulated):
+        raise SystemExit("only the demo organization on a simulated instance is removed this way")
+    _not_busy(s, ps)
+    removed = service.remove(s, ps, i, connect) if ps.published_version or service.manifest(s, ps) else 0
+    for model in (PhoneSystemVersion, EngineObject, EngineSecret):
+        s.execute(delete(model).where(model.phone_system_id == ps.id))
+    for model in (EmergencyNumber, CarrierRequest, EmergencyLocation, HeldNumber):
+        s.execute(delete(model).where(model.tenant_id == ps.tenant_id))
+    out = {"removed": str(ps.id), "domain": ps.domain_name, "instance": i.name, "engine_rows_removed": removed}
+    audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="phone_system.removed", tenant_id=ps.tenant_id,
+                 target_type="phone_system", target_id=ps.id, domain=ps.domain_name, instance=str(i.id), engine_rows_removed=removed)
+    s.delete(ps)
+    return out
+
+
 def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Connect = service.connect, agent=None) -> int:
     if not argv:
         out.write(__doc__ or "")
@@ -58,19 +132,22 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
     cmd, args = argv[0], argv[1:]
     with SystemSession() as s:
         if cmd == "add-instance":
-            name, host, gw = args
+            name, host, gw = args[:3]
+            if args[3:] not in ([], ["simulated"]):
+                raise SystemExit("after the gateway: nothing, or `simulated`")
             key, _, gid = gw.partition("=")
             url = stdin.readline().strip()
             if not url.startswith("postgresql+psycopg://"):
                 raise SystemExit("the database URL (postgresql+psycopg://…) goes on standard input")
             i = PbxInstance(name=name, hostname=host, region="us-east", role="active", database_url_sealed=crypto.seal(url), agent={"kind": "none"},
-                            agent_secret_sealed="", upstreams=[], routing={"national": [key]}, emergency_upstream=key, own_gateways={key: str(uuid.UUID(gid))})
+                            agent_secret_sealed="", upstreams=[], routing={"national": [key]}, emergency_upstream=key, own_gateways={key: str(uuid.UUID(gid))},
+                            simulated=bool(args[3:]))
             s.add(i)
             s.flush()
             audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="instance.added", target_type="pbx_instance",
                          target_id=i.id, name=name)
             s.commit()
-            json.dump({"instance": str(i.id), "name": name, "own_gateways": i.own_gateways}, out)
+            json.dump({"instance": str(i.id), "name": name, "own_gateways": i.own_gateways, "simulated": i.simulated}, out)
         elif cmd == "set-agent" and args[1:] == ["off"]:
             i = s.execute(select(PbxInstance).where(PbxInstance.name == args[0])).scalar_one()
             i.agent, i.agent_secret_sealed = {"kind": "none"}, ""
@@ -187,6 +264,23 @@ def main(argv: List[str], stdin=sys.stdin, out=sys.stdout, connect: service.Conn
                          target_type="emergency_location", target_id=loc.id, site=str(sid), key=key, note=note.strip())
             s.commit()
             json.dump({"id": str(loc.id), "site_id": site, "key": key, "address": loc.address, "status": loc.status}, out)
+        elif cmd == "demo" and args[:1] == ["seed"] and len(args) == 2:
+            ps = _demo_seed(s, args[1])
+            note = "the demo, as written (docs/DEMO.md)"
+            v = service.queue(s, ps, ps.draft, None, OPERATOR, note)
+            s.flush()
+            audit.record(s, actor_id=None, actor_label=OPERATOR, actor_source="platform", action="phone_system.publish_requested",
+                         tenant_id=ps.tenant_id, target_type="phone_system", target_id=ps.id, version=v.number, note=note, demo=True)
+            s.commit()
+            state = service.publish_version(s, v.id, connect)
+            v = s.get(PhoneSystemVersion, v.id)
+            checks = (v.check or {}).get("results", [])
+            json.dump({"organization": demo.ORG, "instance": args[1], "domain": ps.domain_name, "version": v.number, "state": state, "error": v.error,
+                       "checks": len(checks), "checks_failed": [f"{c['kind']} {c['number']}" for c in checks if not c["ok"]]}, out)
+        elif cmd == "demo" and args == ["remove"]:
+            res = _demo_remove(s, connect)
+            s.commit()
+            json.dump(res, out)
         elif cmd == "busy":
             out.write(str(len(s.execute(select(PhoneSystemVersion.id).where(PhoneSystemVersion.state.in_(service.BUSY))).all())))
         elif cmd == "recover":
